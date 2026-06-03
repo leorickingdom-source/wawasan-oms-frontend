@@ -28,8 +28,8 @@ when it can't reach the API).
 
 ## Deploy to Vercel
 
-1. Import the `wawasan-oms-frontend` folder as a Vercel project
-   (Root Directory = `wawasan-oms-frontend`; framework auto-detects as Vite).
+1. Import the **wawasan-oms-frontend** GitHub repo as a Vercel project
+   (Root Directory: repo root; framework auto-detects as Vite).
 2. Add an Environment Variable `VITE_API_URL` = your deployed backend URL (+ `/api`).
 3. Deploy. `vercel.json` builds with Vite and serves the SPA from `dist/`.
 4. Add the resulting frontend URL to the backend's `FRONTEND_URL` (CORS allow-list).
