@@ -250,9 +250,14 @@ function KanbanCard({ order, canMove, onOpen, onAdvance }) {
         {cd.text && <span style={{ color: cd.tone, fontWeight: 600 }}>· {cd.text}</span>}
       </div>
       <div style={{ fontSize: 13, color: C.text, fontWeight: 500, marginBottom: 3 }}>{order.customer_name}</div>
-      <div style={{ fontSize: 12, color: C.text3, marginBottom: 10 }}>
+      <div style={{ fontSize: 12, color: C.text3, marginBottom: 5 }}>
         {order.total_units != null ? `${order.total_units} units · ` : ""}{order.item_count} {order.item_count === 1 ? "line" : "lines"}
       </div>
+      {(order.stage === "production" || order.stage === "packing") && order.item_count > 0 && (
+        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: (order.made_count || 0) >= order.item_count ? C.ready : C.accent }}>
+          {(order.made_count || 0) >= order.item_count ? "All SKUs made ✓" : `${order.made_count || 0}/${order.item_count} SKUs made — in progress`}
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderTop: `1px solid ${C.border}`, paddingTop: 9 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
           {order.pic_name
@@ -455,14 +460,14 @@ function FloorDisplay({ onExit }) {
                 {detail && detail.id === spot.id
                   ? (detail.items || []).map((it) => (
                     <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "13px 0", borderBottom: `1px solid ${C.border}` }}>
-                      <span style={{ width: 10, height: 10, borderRadius: "50%", background: C.accent, boxShadow: `0 0 8px ${C.accent}`, flexShrink: 0 }} />
+                      <span style={{ width: 10, height: 10, borderRadius: "50%", background: it.made ? C.green : C.accent, boxShadow: `0 0 8px ${it.made ? C.green : C.accent}`, flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontFamily: MONO, fontSize: 12.5, color: C.text3, letterSpacing: 0.5 }}>{it.sku}</div>
                         <div style={{ fontSize: 19, fontWeight: 600, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
                       </div>
                       <div style={{ textAlign: "right", flexShrink: 0 }}>
-                        <span style={{ fontSize: 42, fontWeight: 800, color: C.accent2, lineHeight: 1 }}>{Math.round(it.quantity)}</span>
-                        <span style={{ fontSize: 14, color: C.text3, marginLeft: 5 }}>{it.unit || "pcs"}</span>
+                        <span style={{ fontSize: 42, fontWeight: 800, color: it.made ? C.green : C.accent2, lineHeight: 1 }}>{Math.round(it.quantity)}</span>
+                        <span style={{ fontSize: 14, color: C.text3, marginLeft: 5 }}>{it.unit || "pcs"}{it.made ? " ✓" : ""}</span>
                       </div>
                     </div>
                   ))
@@ -491,6 +496,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const canMove = ["super_admin", "operations_controller"].includes(user.role);
+  const canMark = ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff"].includes(user.role);
 
   async function load() { try { setOrder(await api("GET", `/orders/${orderId}`)); } catch (e) { setOrder({ _error: e.message }); } }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
@@ -500,6 +506,10 @@ function OrderDetail({ orderId, user, onUpdated }) {
     setBusy(true);
     try { await api("POST", `/orders/${orderId}/move`, { to_stage: to, reason: why || undefined }); setMoveStage(""); setReason(""); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); } finally { setBusy(false); }
+  }
+  async function toggleMade(it) {
+    try { await api("PATCH", `/orders/${orderId}/items/${it.id}`, { made: !it.made }); await load(); onUpdated && onUpdated(); }
+    catch (e) { alert(e.message); }
   }
 
   if (!order) return <Loading />;
@@ -551,7 +561,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
       )}
       {tab === "items" && (
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead><tr>{["SKU", "Product", "Qty", "Unit"].map((h) => <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
+          <thead><tr>{["SKU", "Product", "Qty", "Unit", "Made"].map((h) => <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
           <tbody>
             {(order.items || []).map((it) => (
               <tr key={it.id} style={{ borderBottom: `1px solid ${C.border}` }}>
@@ -559,6 +569,11 @@ function OrderDetail({ orderId, user, onUpdated }) {
                 <td style={{ padding: "8px 10px", color: C.text }}>{it.name}</td>
                 <td style={{ padding: "8px 10px", fontWeight: 700, color: C.text }}>{Math.round(it.quantity)}</td>
                 <td style={{ padding: "8px 10px", color: C.text3 }}>{it.unit}</td>
+                <td style={{ padding: "8px 10px" }}>
+                  {canMark
+                    ? <button onClick={() => toggleMade(it)} style={{ cursor: "pointer", border: `1px solid ${it.made ? C.green + "66" : C.border2}`, background: it.made ? C.green + "1f" : C.surface2, color: it.made ? C.green : C.text3, borderRadius: 7, padding: "4px 10px", fontSize: 12, fontWeight: 700 }}>{it.made ? "✓ Made" : "Mark"}</button>
+                    : (it.made ? <span style={{ color: C.green }}>✓</span> : <span style={{ color: C.text3 }}>—</span>)}
+                </td>
               </tr>
             ))}
           </tbody>
