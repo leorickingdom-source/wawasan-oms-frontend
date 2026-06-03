@@ -1,17 +1,12 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 
-// ─── API base URL ──────────────────────────────────────────────────────────
-// Set VITE_API_URL in your environment (e.g. the Vercel project settings) to
-// point at the deployed backend, e.g. https://your-backend.vercel.app/api
-// Falls back to the local dev server when the variable is not set.
+// ─── API client ──────────────────────────────────────────────────────────────
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
 let _token = localStorage.getItem("oms_token") || "";
 
 async function api(method, path, body, isFormData = false) {
-  const opts = {
-    method,
-    headers: { Authorization: `Bearer ${_token}` },
-  };
+  const opts = { method, headers: {} };
+  if (_token) opts.headers.Authorization = `Bearer ${_token}`;
   if (body && !isFormData) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
@@ -21,331 +16,307 @@ async function api(method, path, body, isFormData = false) {
   const res = await fetch(`${BASE_URL}${path}`, opts);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(err.error || "Unknown error");
+    throw new Error(err.error || `Error ${res.status}`);
   }
-  return res.json();
+  return res.status === 204 ? null : res.json();
 }
 
-// ─── Color helpers ──────────────────────────────────────────────────────────
-const STAGE_CONFIG = {
-  order:              { label: "Order",             color: "#3B82F6", bg: "#EFF6FF" },
-  production:         { label: "Production",        color: "#F59E0B", bg: "#FFFBEB" },
-  packing:            { label: "Packing",           color: "#8B5CF6", bg: "#F5F3FF" },
-  ready_for_delivery: { label: "Ready for Delivery",color: "#10B981", bg: "#ECFDF5" },
-  delivered:          { label: "Delivered",         color: "#6B7280", bg: "#F9FAFB" },
-  on_hold:            { label: "On Hold",           color: "#EF4444", bg: "#FEF2F2" },
-  cancelled:          { label: "Cancelled",         color: "#9CA3AF", bg: "#F3F4F6" },
+// ─── Theme ───────────────────────────────────────────────────────────────────
+const C = {
+  bg: "#100e0c", bg2: "#16130f", surface: "#1c1813", surface2: "#241f18",
+  border: "#2c2620", border2: "#3a3329",
+  text: "#f5efe6", text2: "#b4aa9c", text3: "#7e7568",
+  accent: "#f97316", accent2: "#fb923c",
+  order: "#60a5fa", production: "#f97316", packing: "#f5b13a", ready: "#34d399",
+  danger: "#ef4444", hold: "#eab308", green: "#34d399",
 };
+const MONO = "ui-monospace, 'SF Mono', 'JetBrains Mono', 'Roboto Mono', Consolas, Menlo, monospace";
 
+const STAGES = {
+  order: { label: "Order", color: C.order },
+  production: { label: "Production", color: C.production },
+  packing: { label: "Packing", color: C.packing },
+  ready_for_delivery: { label: "Ready for Delivery", color: C.ready },
+};
+const BOARD_STAGES = ["order", "production", "packing", "ready_for_delivery"];
+const STAGE_LABELS = {
+  ...STAGES, on_hold: { label: "On Hold", color: C.hold },
+  delivered: { label: "Delivered", color: C.text3 }, cancelled: { label: "Cancelled", color: "#6b7280" },
+};
 const ROLE_LABELS = {
-  super_admin: "Super Admin",
-  operations_controller: "Ops Controller",
-  production_lead: "Production Lead",
-  production_staff: "Production Staff",
-  packing_staff: "Packing Staff",
-  delivery_team: "Delivery Team",
+  super_admin: "Super Admin", operations_controller: "Ops Controller",
+  production_lead: "Production Lead", production_staff: "Production Staff",
+  packing_staff: "Packing Staff", delivery_team: "Delivery Team",
 };
 
-const STAGE_ORDER = ["order","production","packing","ready_for_delivery"];
+const NAV = [
+  { id: "board", label: "Order Board", icon: "board", roles: null },
+  { id: "floor", label: "Floor Display", icon: "display", roles: null },
+  { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "operations_controller"] },
+  { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "operations_controller", "delivery_team"] },
+  { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "operations_controller"] },
+  { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead"] },
+  { id: "audit", label: "Audit Trail", icon: "audit", roles: ["super_admin"] },
+  { id: "users", label: "User Management", icon: "users", roles: ["super_admin"] },
+  { id: "settings", label: "System Settings", icon: "settings", roles: ["super_admin"] },
+];
+const PAGE_META = {
+  board: ["Order Board", "Live Kanban — Order → Production → Packing → Ready for Delivery"],
+  dashboard: ["Dashboard", "Operations overview"],
+  delivery: ["Delivery", "Schedule and dispatch"],
+  reports: ["Reports", "Department performance"],
+  remarks: ["Production Remarks", "Weekly notes from the production lead"],
+  audit: ["Audit Trail", "Every action, logged"],
+  users: ["User Management", "Accounts, roles and access"],
+  settings: ["System Settings", "Configuration"],
+};
 
-function Avatar({ name = "?", color = "#3B82F6", size = 32 }) {
-  const initials = name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+// ─── Date helpers ──────────────────────────────────────────────────────────────
+function parseDate(s) {
+  if (!s) return null;
+  const d = new Date(typeof s === "string" && s.length <= 10 ? s + "T00:00:00" : s);
+  return isNaN(d) ? null : d;
+}
+function daysUntil(s) {
+  const d = parseDate(s); if (!d) return null;
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  const dd = new Date(d); dd.setHours(0, 0, 0, 0);
+  return Math.round((dd - t) / 86400000);
+}
+function fmtDay(s) {
+  const d = parseDate(s); if (!d) return "—";
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+}
+function countdown(s) {
+  const n = daysUntil(s);
+  if (n === null) return { text: "", tone: C.text3, n: null };
+  if (n < 0) return { text: `${Math.abs(n)}d late`, tone: C.danger, n };
+  if (n === 0) return { text: "today", tone: C.danger, n };
+  if (n <= 2) return { text: `${n}d`, tone: C.danger, n };
+  if (n <= 6) return { text: `${n}d`, tone: C.packing, n };
+  return { text: `${n}d`, tone: C.ready, n };
+}
+function initials(name = "") {
+  return name.trim().split(/\s+/).map((w) => w[0]).join("").toUpperCase().slice(0, 2) || "?";
+}
+
+// ─── Icons ───────────────────────────────────────────────────────────────────
+const ICONS = {
+  board: '<rect x="3.5" y="4" width="4.2" height="16" rx="1.2"/><rect x="9.9" y="4" width="4.2" height="10" rx="1.2"/><rect x="16.3" y="4" width="4.2" height="13" rx="1.2"/>',
+  display: '<rect x="2.5" y="3.5" width="19" height="13" rx="2"/><path d="M8 21h8M12 16.5V21"/>',
+  dashboard: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.3"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.3"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.3"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.3"/>',
+  truck: '<path d="M3 5.5h11v10H3z"/><path d="M14 8.5h4l3 3v4h-7z"/><circle cx="7" cy="18" r="1.7"/><circle cx="17.5" cy="18" r="1.7"/>',
+  chart: '<path d="M3.5 20.5h17"/><rect x="5.5" y="11" width="3" height="7.5" rx="1"/><rect x="11" y="5.5" width="3" height="13" rx="1"/><rect x="16.5" y="13.5" width="3" height="5" rx="1"/>',
+  message: '<path d="M20.5 11.5a8 8 0 0 1-11.7 7.1L3.5 20.5l1.9-5.3A8 8 0 1 1 20.5 11.5z"/>',
+  audit: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 4.5v3.5h3.5"/><path d="M12 7.5V12l3 1.8"/>',
+  users: '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 5.2a3 3 0 0 1 0 5.6"/><path d="M17.5 14.2a5.5 5.5 0 0 1 3 5.8"/>',
+  settings: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5 5l2.1 2.1M16.9 16.9 19 19M19 5l-2.1 2.1M7.1 16.9 5 19"/>',
+  bell: '<path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 8 2.5 8h-17S6 15 6 9z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M20.5 20.5 16.5 16.5"/>',
+  plus: '<path d="M12 5.5v13M5.5 12h13"/>',
+  arrowRight: '<path d="M5 12h13.5M13 6l6 6-6 6"/>',
+  dots: '<circle cx="12" cy="5.2" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18.8" r="1.5"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5.2l3.2 1.9"/>',
+  flame: '<path d="M12 2.5c.5 3-1.8 4.7-3 6.2C7.7 10.4 7 11.9 7 13.6A5 5 0 0 0 17 14c0-2-1-3.7-2.5-5 .3 1.4-.3 2.4-1 2.9.6-2.4-.8-4.6-1.5-5.4-.2 1.5-1 2.2-1.7 2.8.5-2.3.7-4.7 1.7-6.8z"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="16" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>',
+  logout: '<path d="M9.5 21H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.5"/><path d="M16 16.5 20.5 12 16 7.5M20.5 12H9.5"/>',
+  x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  check: '<path d="M20 6.5 9.5 17 4.5 12"/>',
+  alert: '<path d="M10.3 3.9 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4.5M12 17h.01"/>',
+  chevron: '<path d="M6 9.5 12 15l6-5.5"/>',
+};
+function Icon({ name, size = 18, color = "currentColor", strokeWidth = 1.9, style }) {
+  const filled = name === "dots";
   return (
-    <div style={{
-      width: size, height: size, borderRadius: "50%",
-      background: color + "22", color: color,
-      display: "flex", alignItems: "center", justifyContent: "center",
-      fontSize: size * 0.36, fontWeight: 500, flexShrink: 0
-    }}>{initials}</div>
+    <svg width={size} height={size} viewBox="0 0 24 24"
+      fill={filled ? color : "none"} stroke={filled ? "none" : color}
+      strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"
+      style={{ flexShrink: 0, ...style }} dangerouslySetInnerHTML={{ __html: ICONS[name] || "" }} />
   );
 }
 
-function Badge({ children, color = "#6B7280" }) {
+// ─── Primitives ──────────────────────────────────────────────────────────────
+function Logo({ size = 38 }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: size * 0.28, display: "grid", placeItems: "center",
+      background: `linear-gradient(145deg, ${C.accent2}, ${C.accent})`,
+      boxShadow: `0 0 18px ${C.accent}55, 0 4px 10px rgba(0,0,0,.45)`, flexShrink: 0,
+    }}>
+      <Icon name="flame" size={size * 0.56} color="#231304" strokeWidth={1.6} />
+    </div>
+  );
+}
+function Avatar({ name = "?", color = C.accent, size = 30 }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: "50%", background: color + "26", color,
+      display: "grid", placeItems: "center", fontSize: size * 0.4, fontWeight: 700, flexShrink: 0,
+    }}>{initials(name)}</div>
+  );
+}
+function Pill({ children, color = C.text2, bg, border, style }) {
   return (
     <span style={{
-      background: color + "18", color, border: `1px solid ${color}33`,
-      borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 500,
-      whiteSpace: "nowrap"
+      display: "inline-flex", alignItems: "center", gap: 5, background: bg ?? color + "1f", color,
+      border: `1px solid ${border ?? color + "44"}`, borderRadius: 6, padding: "2px 7px",
+      fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4, whiteSpace: "nowrap", textTransform: "uppercase", ...style,
     }}>{children}</span>
   );
 }
-
-function DeliveryDot({ date }) {
-  const days = Math.ceil((new Date(date) - new Date()) / 86400000);
-  if (days < 0) return <span style={{ color: "#EF4444", fontSize: 11, fontWeight: 600 }}>⚠ OVERDUE</span>;
-  if (days <= 2) return <span style={{ color: "#EF4444", fontSize: 11 }}>🔴 {days}d</span>;
-  if (days <= 6) return <span style={{ color: "#F59E0B", fontSize: 11 }}>🟡 {days}d</span>;
-  return <span style={{ color: "#10B981", fontSize: 11 }}>🟢 {days}d</span>;
+function Btn({ children, onClick, variant = "primary", size = "md", disabled, style, type = "button" }) {
+  const sizes = { sm: { padding: "7px 12px", fontSize: 13 }, md: { padding: "9px 16px", fontSize: 14 }, lg: { padding: "12px 22px", fontSize: 15 } };
+  const variants = {
+    primary: { background: C.accent, color: "#231304", fontWeight: 700 },
+    soft: { background: C.surface2, color: C.text, border: `1px solid ${C.border2}` },
+    ghost: { background: "transparent", color: C.text2, border: `1px solid ${C.border}` },
+    danger: { background: "#3a1a1a", color: "#fca5a5", border: "1px solid #5b2626" },
+    success: { background: "#13301f", color: C.ready, border: "1px solid #1f5036" },
+  };
+  return (
+    <button type={type} onClick={disabled ? undefined : onClick} disabled={disabled}
+      style={{ border: "none", borderRadius: 9, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.55 : 1, display: "inline-flex", alignItems: "center", gap: 7, transition: "filter .15s", ...sizes[size], ...variants[variant], ...style }}>
+      {children}
+    </button>
+  );
 }
-
+function IconBtn({ icon, onClick, title, color = C.text2, bg = C.surface2, border = C.border2, size = 34 }) {
+  return (
+    <button title={title} onClick={onClick} style={{ width: size, height: size, display: "grid", placeItems: "center", borderRadius: 8, border: `1px solid ${border}`, background: bg, color, cursor: "pointer" }}>
+      <Icon name={icon} size={16} color={color} />
+    </button>
+  );
+}
 function Modal({ open, onClose, title, children, width = 560 }) {
   if (!open) return null;
   return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
-      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000
-    }} onClick={onClose}>
-      <div style={{
-        background: "white", borderRadius: 12, padding: "24px 28px",
-        width, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto",
-        boxShadow: "0 20px 60px rgba(0,0,0,0.15)"
-      }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>{title}</h2>
-          <button onClick={onClose} style={{
-            background: "none", border: "none", cursor: "pointer",
-            fontSize: 20, color: "#9CA3AF", padding: "2px 6px"
-          }}>×</button>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1000, padding: "6vh 16px", overflowY: "auto" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.bg2, border: `1px solid ${C.border2}`, borderRadius: 16, padding: "22px 24px", width, maxWidth: "96vw", boxShadow: "0 30px 80px rgba(0,0,0,.55)", animation: "wws-fade .15s ease" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+          <h2 style={{ fontSize: 17, fontWeight: 700, color: C.text }}>{title}</h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.text3, display: "grid", placeItems: "center" }}><Icon name="x" size={20} color={C.text3} /></button>
         </div>
         {children}
       </div>
     </div>
   );
 }
-
-function Btn({ children, onClick, variant = "primary", size = "md", disabled, style = {} }) {
-  const base = {
-    border: "none", cursor: disabled ? "not-allowed" : "pointer",
-    borderRadius: 8, fontWeight: 500, transition: "all 0.15s",
-    opacity: disabled ? 0.5 : 1, ...style
-  };
-  const sizes = { sm: { padding: "6px 12px", fontSize: 13 }, md: { padding: "8px 16px", fontSize: 14 }, lg: { padding: "11px 22px", fontSize: 15 } };
-  const variants = {
-    primary: { background: "#1E40AF", color: "white" },
-    secondary: { background: "#F3F4F6", color: "#374151" },
-    danger: { background: "#FEF2F2", color: "#DC2626" },
-    success: { background: "#ECFDF5", color: "#059669" },
-    ghost: { background: "transparent", color: "#6B7280", padding: 0 },
-  };
+function Field({ label, value, onChange, type = "text", options, placeholder, required, min }) {
+  const st = { width: "100%", padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text, outline: "none" };
   return (
-    <button onClick={disabled ? undefined : onClick} style={{ ...base, ...sizes[size], ...variants[variant] }}>
-      {children}
-    </button>
+    <label style={{ display: "block", marginBottom: 13 }}>
+      {label && <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: C.text2, marginBottom: 5 }}>{label}{required && <span style={{ color: C.danger }}> *</span>}</span>}
+      {options
+        ? <select value={value} onChange={(e) => onChange(e.target.value)} style={st}>{options.map((o) => <option key={o.value ?? o} value={o.value ?? o} style={{ background: C.bg2 }}>{o.label ?? o}</option>)}</select>
+        : <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} min={min} style={st} />}
+    </label>
   );
 }
-
-function Input({ label, value, onChange, type = "text", required, options, placeholder, readOnly }) {
-  const id = label?.toLowerCase().replace(/\s/g, "_");
-  const style = {
-    width: "100%", padding: "8px 12px", border: "1px solid #E5E7EB",
-    borderRadius: 8, fontSize: 14, boxSizing: "border-box",
-    background: readOnly ? "#F9FAFB" : "white"
-  };
-  return (
-    <div style={{ marginBottom: 14 }}>
-      {label && <label htmlFor={id} style={{ display: "block", fontSize: 13, fontWeight: 500, marginBottom: 4, color: "#374151" }}>
-        {label}{required && <span style={{ color: "#EF4444" }}> *</span>}
-      </label>}
-      {options ? (
-        <select id={id} value={value} onChange={e => onChange(e.target.value)} style={style} disabled={readOnly}>
-          {options.map(o => <option key={o.value ?? o} value={o.value ?? o}>{o.label ?? o}</option>)}
-        </select>
-      ) : (
-        <input id={id} type={type} value={value} onChange={e => onChange(e.target.value)}
-          placeholder={placeholder} required={required} readOnly={readOnly} style={style} />
-      )}
-    </div>
-  );
+function Card({ children, style }) {
+  return <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: "18px 20px", ...style }}>{children}</div>;
+}
+function Loading({ label = "Loading…" }) {
+  return <div style={{ padding: 48, textAlign: "center", color: C.text3, fontSize: 14 }}>{label}</div>;
+}
+function Empty({ label }) {
+  return <div style={{ padding: "28px 12px", textAlign: "center", color: C.text3, fontSize: 13 }}>{label}</div>;
 }
 
-// ─── MOCK DATA (used when API is unavailable) ─────────────────────────────
-const MOCK_BOARD = {
-  order: [
-    { id: "1", invoice_number: "INV-001", customer_name: "Kedai Bunga Jaya", required_delivery_date: new Date(Date.now() + 86400000*7).toISOString().slice(0,10), priority: "normal", pic_name: "Reenee", pic_color: "#0891B2", item_count: 3 },
-    { id: "2", invoice_number: "INV-002", customer_name: "Harumni Sdn Bhd", required_delivery_date: new Date(Date.now() + 86400000*2).toISOString().slice(0,10), priority: "urgent", pic_name: "Reenee", pic_color: "#0891B2", item_count: 5 },
-  ],
-  production: [
-    { id: "3", invoice_number: "INV-003", customer_name: "Candle World KL", required_delivery_date: new Date(Date.now() + 86400000*1).toISOString().slice(0,10), priority: "urgent", pic_name: "Misha", pic_color: "#059669", item_count: 2 },
-    { id: "4", invoice_number: "INV-004", customer_name: "Gift House Subang", required_delivery_date: new Date(Date.now() + 86400000*5).toISOString().slice(0,10), priority: "normal", pic_name: "Ali", pic_color: "#D97706", item_count: 8 },
-  ],
-  packing: [
-    { id: "5", invoice_number: "INV-005", customer_name: "Aromatherapy Plus", required_delivery_date: new Date(Date.now() + 86400000*3).toISOString().slice(0,10), priority: "normal", pic_name: "Siti", pic_color: "#DB2777", item_count: 4 },
-  ],
-  ready_for_delivery: [
-    { id: "6", invoice_number: "INV-006", customer_name: "Wellness Hub PJ", required_delivery_date: new Date(Date.now() - 86400000*1).toISOString().slice(0,10), priority: "urgent", pic_name: "Raju", pic_color: "#DC2626", item_count: 6 },
-  ],
-  on_hold: []
-};
-
-const MOCK_DASHBOARD = {
-  stage_counts: [
-    { stage: "order", count: 2 }, { stage: "production", count: 2 },
-    { stage: "packing", count: 1 }, { stage: "ready_for_delivery", count: 1 }
-  ],
-  this_week_orders: 8, this_month_orders: 31, active_staff: 6,
-  upcoming_deliveries: [MOCK_BOARD.ready_for_delivery[0]],
-  overdue_orders: [MOCK_BOARD.ready_for_delivery[0]]
-};
-
-// ─── LOGIN ─────────────────────────────────────────────────────────────────
-function LoginPage({ onLogin }) {
-  const [email, setEmail] = useState("admin@wawasancandle.com");
-  const [password, setPassword] = useState("Admin@123");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  async function handleSubmit(e) {
-  e.preventDefault();
-  setLoading(true); setError("");
-  try {
-    const data = await api("POST", "/auth/login", { email, password });
-    _token = data.token;
-    localStorage.setItem("oms_token", data.token);
-    onLogin(data.user);
-  } catch (err) {
-    setLoading(false);
-    // Only use demo mode if it looks like a connection error (backend not running)
-    if (err.message === "Failed to fetch" || err.message.includes("NetworkError")) {
-      setError("⚠️ Cannot reach backend. Starting in demo mode (read-only).");
-      setTimeout(() => {
-        onLogin({ id: "demo", name: "Boss Admin", email, role: "super_admin", avatar_color: "#7C3AED" });
-      }, 1500);
-    } else {
-      // Real errors like wrong password — show them
-      setError(err.message);
-    }
-  } finally {
-    setLoading(false);
-  }
-}
-
+// ─── Kanban card (board) ───────────────────────────────────────────────────────
+function KanbanCard({ order, canMove, onOpen, onAdvance }) {
+  const stage = STAGES[order.stage] || { color: C.text3 };
+  const cd = countdown(order.required_delivery_date);
+  const late = (daysUntil(order.required_delivery_date) ?? 0) < 0;
+  const urgent = order.priority === "urgent";
+  const onHold = order.stage === "on_hold";
+  const invColor = late ? C.danger : urgent ? C.accent2 : C.text;
+  const next = BOARD_STAGES[BOARD_STAGES.indexOf(order.stage) + 1] || "delivered";
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F8FAFC" }}>
-      <div style={{ width: 400, background: "white", borderRadius: 16, padding: "40px 36px", boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
-        <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>🕯️</div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#1E293B", margin: 0 }}>Wawasan Candle</h1>
-          <p style={{ color: "#64748B", fontSize: 14, margin: "4px 0 0" }}>Order Management System</p>
-        </div>
-        <form onSubmit={handleSubmit}>
-          <Input label="Email" type="email" value={email} onChange={setEmail} required />
-          <Input label="Password" type="password" value={password} onChange={setPassword} required />
-          {error && <p style={{ color: "#EF4444", fontSize: 13, margin: "-8px 0 12px" }}>{error}</p>}
-          <Btn onClick={() => {}} disabled={loading} style={{ width: "100%" }}>
-            {loading ? "Signing in…" : "Sign In"}
-          </Btn>
-        </form>
-        <p style={{ textAlign: "center", fontSize: 12, color: "#94A3B8", marginTop: 20 }}>
-          Demo: admin@wawasancandle.com / Admin@123
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── KANBAN BOARD ─────────────────────────────────────────────────────────
-function KanbanCard({ order, onClick, canMove, onMove }) {
-  const [showMenu, setShowMenu] = useState(false);
-  const cfg = STAGE_CONFIG[order.stage] || STAGE_CONFIG.order;
-  const stageIdx = STAGE_ORDER.indexOf(order.stage);
-  const nextStage = STAGE_ORDER[stageIdx + 1];
-
-  return (
-    <div onClick={() => onClick(order)} style={{
-      background: "white", border: order.priority === "urgent" ? "1.5px solid #EF4444" : "1px solid #E5E7EB",
-      borderRadius: 10, padding: "12px 14px", cursor: "pointer",
-      transition: "box-shadow 0.15s",
-      boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
-    }}
-      onMouseEnter={e => e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.1)"}
-      onMouseLeave={e => e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.05)"}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: "#1E293B" }}>{order.invoice_number}</span>
-        <div style={{ display: "flex", gap: 4 }}>
-          {order.priority === "urgent" && <Badge color="#EF4444">URGENT</Badge>}
-          {canMove && nextStage && (
-            <span onClick={e => { e.stopPropagation(); onMove(order, nextStage); }}
-              style={{ fontSize: 11, color: "#3B82F6", cursor: "pointer", padding: "2px 6px", borderRadius: 4, border: "1px solid #BFDBFE" }}>
-              → {STAGE_CONFIG[nextStage]?.label.split(" ")[0]}
-            </span>
-          )}
+    <div onClick={() => onOpen(order)}
+      style={{ background: C.surface, border: `1px solid ${urgent || late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "12px 13px", cursor: "pointer", transition: "background .12s" }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = C.surface2)}
+      onMouseLeave={(e) => (e.currentTarget.style.background = C.surface)}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+        <span style={{ fontFamily: MONO, fontSize: 15, fontWeight: 700, color: invColor, letterSpacing: 0.3 }}>{order.invoice_number}</span>
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {onHold && <Pill color={C.hold}>On hold</Pill>}
+          {urgent && <Pill color={C.danger}>Urgent</Pill>}
+          {order.skip_production && <Pill color={C.accent} bg="transparent">skip-prod</Pill>}
         </div>
       </div>
-      <p style={{ margin: "0 0 8px", fontSize: 13, color: "#374151", fontWeight: 500 }}>{order.customer_name}</p>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <DeliveryDot date={order.required_delivery_date} />
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontSize: 11, color: "#9CA3AF" }}>{order.item_count} items</span>
-          {order.pic_name && <Avatar name={order.pic_name} color={order.pic_color} size={22} />}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "7px 0 4px", fontSize: 12.5 }}>
+        <Icon name="clock" size={13} color={cd.tone} />
+        <span style={{ color: C.text2 }}>{fmtDay(order.required_delivery_date)}</span>
+        {cd.text && <span style={{ color: cd.tone, fontWeight: 600 }}>· {cd.text}</span>}
+      </div>
+      <div style={{ fontSize: 13, color: C.text, fontWeight: 500, marginBottom: 3 }}>{order.customer_name}</div>
+      <div style={{ fontSize: 12, color: C.text3, marginBottom: 10 }}>
+        {order.total_units != null ? `${order.total_units} units · ` : ""}{order.item_count} {order.item_count === 1 ? "line" : "lines"}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderTop: `1px solid ${C.border}`, paddingTop: 9 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+          {order.pic_name
+            ? <><Avatar name={order.pic_name} color={order.pic_color} size={23} /><span style={{ fontSize: 12.5, color: C.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{order.pic_name}</span></>
+            : <span style={{ fontSize: 12, color: C.text3 }}>Unassigned</span>}
+        </div>
+        <div style={{ display: "flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
+          {canMove && order.stage !== "on_hold" && <IconBtn icon="arrowRight" onClick={() => onAdvance(order, next)} title={`Advance to ${(STAGE_LABELS[next] || {}).label || next}`} color={C.ready} bg="#13301f" border="#1f5036" />}
+          <IconBtn icon="dots" onClick={() => onOpen(order)} title="Details & actions" />
         </div>
       </div>
     </div>
   );
 }
 
-function KanbanBoard({ user, onSelectOrder }) {
+// ─── Order Board ───────────────────────────────────────────────────────────────
+function OrderBoard({ user, search, weekOnly, onOpenOrder, refreshKey, onCount }) {
   const [board, setBoard] = useState(null);
-  const [weekOnly, setWeekOnly] = useState(false);
-  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
-
+  const [err, setErr] = useState("");
   const canMove = ["super_admin", "operations_controller"].includes(user.role);
 
   async function load() {
-    setLoading(true);
+    setLoading(true); setErr("");
     try {
-      const data = await api("GET", `/orders/kanban${weekOnly ? "?week=current" : ""}`);
-      setBoard(data);
-    } catch {
-      setBoard(MOCK_BOARD);
-    } finally { setLoading(false); }
+      const d = await api("GET", `/orders/kanban${weekOnly ? "?week=current" : ""}`);
+      setBoard(d);
+      onCount && onCount(BOARD_STAGES.reduce((a, s) => a + (d[s] ? d[s].length : 0), 0));
+    } catch (e) { setErr(e.message); setBoard({ order: [], production: [], packing: [], ready_for_delivery: [], on_hold: [] }); }
+    finally { setLoading(false); }
   }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [weekOnly, refreshKey]);
 
-  useEffect(() => { load(); }, [weekOnly]);
-
-  async function handleMove(order, toStage) {
-    try {
-      await api("POST", `/orders/${order.id}/move`, { to_stage: toStage });
-      load();
-    } catch (err) {
-      alert(err.message);
-    }
+  async function advance(order, to) {
+    try { await api("POST", `/orders/${order.id}/move`, { to_stage: to }); load(); }
+    catch (e) { alert(e.message); }
   }
-
-  const filterOrders = (orders) => {
-    if (!search) return orders;
-    const q = search.toLowerCase();
-    return orders.filter(o =>
-      o.invoice_number.toLowerCase().includes(q) ||
-      o.customer_name.toLowerCase().includes(q)
-    );
+  const filt = (arr) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return arr;
+    return arr.filter((o) => o.invoice_number.toLowerCase().includes(q) || (o.customer_name || "").toLowerCase().includes(q));
   };
 
-  if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#94A3B8" }}>Loading board…</div>;
+  if (loading && !board) return <Loading label="Loading board…" />;
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 12, marginBottom: 20, alignItems: "center", flexWrap: "wrap" }}>
-        <input placeholder="🔍  Search invoice / customer…" value={search} onChange={e => setSearch(e.target.value)}
-          style={{ flex: 1, minWidth: 200, padding: "8px 14px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 14 }} />
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer" }}>
-          <input type="checkbox" checked={weekOnly} onChange={e => setWeekOnly(e.target.checked)} />
-          This week only
-        </label>
-        <Btn onClick={load} variant="secondary" size="sm">↺ Refresh</Btn>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, minWidth: 800 }}>
-        {STAGE_ORDER.map(stage => {
-          const cfg = STAGE_CONFIG[stage];
-          const orders = filterOrders(board[stage] || []);
+      {err && <div style={{ marginBottom: 14, color: "#fca5a5", fontSize: 13 }}>⚠ {err}</div>}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(230px, 1fr))", gap: 16, alignItems: "start" }}>
+        {BOARD_STAGES.map((s) => {
+          const cfg = STAGES[s];
+          const orders = filt((board && board[s]) || []);
           return (
-            <div key={stage} style={{ background: cfg.bg, borderRadius: 12, padding: "14px 12px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: cfg.color }}>{cfg.label}</span>
-                <span style={{
-                  background: cfg.color, color: "white",
-                  borderRadius: 20, padding: "1px 8px", fontSize: 12, fontWeight: 600
-                }}>{orders.length}</span>
+            <div key={s} style={{ background: C.bg2, border: `1px solid ${C.border}`, borderTop: `3px solid ${cfg.color}`, borderRadius: 13, padding: 12, minHeight: 200 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, padding: "2px 2px 0" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: "50%", background: cfg.color }} />
+                  <span style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{cfg.label}</span>
+                </div>
+                <span style={{ background: C.surface2, color: C.text2, borderRadius: 7, padding: "1px 9px", fontSize: 13, fontWeight: 700 }}>{orders.length}</span>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {orders.map(o => (
-                  <KanbanCard key={o.id} order={o} onClick={onSelectOrder} canMove={canMove} onMove={handleMove} />
-                ))}
-                {orders.length === 0 && (
-                  <div style={{ textAlign: "center", color: "#CBD5E1", fontSize: 12, padding: "20px 0" }}>No orders</div>
-                )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+                {orders.map((o) => <KanbanCard key={o.id} order={o} canMove={canMove} onOpen={onOpenOrder} onAdvance={advance} />)}
+                {orders.length === 0 && <Empty label="No orders" />}
               </div>
             </div>
           );
@@ -355,544 +326,609 @@ function KanbanBoard({ user, onSelectOrder }) {
   );
 }
 
-// ─── ORDER DETAIL ──────────────────────────────────────────────────────────
-function OrderDetail({ orderId, user, onClose, onUpdated }) {
-  const [order, setOrder] = useState(null);
-  const [tab, setTab] = useState("details");
-  const [moveStage, setMoveStage] = useState("");
-  const [moveReason, setMoveReason] = useState("");
-  const [showMoveForm, setShowMoveForm] = useState(false);
-  const canMove = ["super_admin", "operations_controller"].includes(user.role);
+// ─── Floor Display (70" wall view) ──────────────────────────────────────────────
+function StatCard({ label, value, color }) {
+  return (
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: "9px 20px", minWidth: 132 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: C.text3, textTransform: "uppercase" }}>{label}</div>
+      <div style={{ fontSize: 36, fontWeight: 800, color, lineHeight: 1.05, marginTop: 2 }}>{value}</div>
+    </div>
+  );
+}
+function FloorDisplay({ onExit }) {
+  const [board, setBoard] = useState(null);
+  const [stats, setStats] = useState({ active: 0, completed_today: 0 });
+  const [filter, setFilter] = useState("all");
+  const [now, setNow] = useState(new Date());
+  const [spotIdx, setSpotIdx] = useState(0);
+  const [detail, setDetail] = useState(null);
+  const cache = useRef({});
 
   async function load() {
     try {
-      const data = await api("GET", `/orders/${orderId}`);
-      setOrder(data);
-    } catch {
-      // mock order detail
-      const allOrders = Object.values(MOCK_BOARD).flat();
-      const o = allOrders.find(x => x.id === orderId);
-      if (o) setOrder({
-        ...o, stage: o.stage || "order", notes: "Sample order notes.",
-        order_date: new Date().toISOString().slice(0,10),
-        expiry_date: new Date(Date.now() + 86400000*90).toISOString().slice(0,10),
-        items: [
-          { id: "i1", sku: "CND-001", name: "Lavender Candle 200g", quantity: 100, unit: "pcs" },
-          { id: "i2", sku: "CND-002", name: "Vanilla Candle 150g", quantity: 50, unit: "pcs" },
-        ],
-        activity: [
-          { id: "a1", action: "order_created", user_name: "Reenee", details: "Order created", created_at: new Date().toISOString() },
-        ],
-        transitions: [], attachments: []
-      });
-    }
+      const [b, s] = await Promise.all([api("GET", "/orders/kanban"), api("GET", "/orders/stats")]);
+      setBoard(b); setStats(s);
+    } catch (e) { /* keep last */ }
   }
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, []);
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
 
-  useEffect(() => { load(); }, [orderId]);
-
-  async function handleMove() {
-    if (!moveStage) return;
-    try {
-      await api("POST", `/orders/${orderId}/move`, { to_stage: moveStage, reason: moveReason });
-      setShowMoveForm(false); setMoveStage(""); setMoveReason("");
-      load(); onUpdated?.();
-    } catch (err) { alert(err.message); }
-  }
-
-  if (!order) return <div style={{ padding: 40, textAlign: "center" }}>Loading…</div>;
-
-  const stageCfg = STAGE_CONFIG[order.stage] || STAGE_CONFIG.order;
-  const tabs = ["details", "timeline", "items", "attachments"];
-
-  return (
-    <div>
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
-        <Badge color={stageCfg.color}>{stageCfg.label}</Badge>
-        {order.priority === "urgent" && <Badge color="#EF4444">URGENT</Badge>}
-        <span style={{ fontSize: 13, color: "#64748B" }}>{order.created_by_name} · {order.order_date}</span>
-      </div>
-
-      <div style={{ display: "flex", borderBottom: "1px solid #E5E7EB", marginBottom: 20, gap: 4 }}>
-        {tabs.map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            background: "none", border: "none", padding: "8px 14px", cursor: "pointer",
-            fontSize: 13, fontWeight: tab === t ? 600 : 400,
-            color: tab === t ? "#1E40AF" : "#6B7280",
-            borderBottom: tab === t ? "2px solid #1E40AF" : "2px solid transparent",
-            textTransform: "capitalize"
-          }}>{t}</button>
-        ))}
-      </div>
-
-      {tab === "details" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <LabelValue label="Customer" value={order.customer_name} />
-          <LabelValue label="Contact" value={order.customer_contact || "—"} />
-          <LabelValue label="Delivery Date" value={<><DeliveryDot date={order.required_delivery_date} /> {order.required_delivery_date}</>} />
-          <LabelValue label="Expiry Date" value={order.expiry_date || "—"} />
-          <LabelValue label="PIC" value={order.pic_name ? <div style={{ display: "flex", alignItems: "center", gap: 6 }}><Avatar name={order.pic_name} color={order.pic_color} size={24} />{order.pic_name}</div> : "Not assigned"} />
-          <LabelValue label="Source" value={order.source === "sql_account" ? "SQL Account" : "Manual"} />
-          {order.notes && <div style={{ gridColumn: "span 2" }}><LabelValue label="Notes" value={order.notes} /></div>}
-        </div>
-      )}
-
-      {tab === "timeline" && (
-        <div>
-          {(order.activity || []).map(a => (
-            <div key={a.id} style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "flex-start" }}>
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#3B82F6", marginTop: 5, flexShrink: 0 }} />
-              <div>
-                <span style={{ fontSize: 13, fontWeight: 500, color: "#1E293B" }}>{a.user_name}</span>
-                <span style={{ fontSize: 13, color: "#64748B" }}> — {a.details || a.action}</span>
-                <div style={{ fontSize: 11, color: "#94A3B8" }}>{new Date(a.created_at).toLocaleString()}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {tab === "items" && (
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead>
-            <tr style={{ background: "#F8FAFC" }}>
-              {["SKU", "Product", "Qty", "Unit"].map(h => (
-                <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#374151", borderBottom: "1px solid #E5E7EB" }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {(order.items || []).map(item => (
-              <tr key={item.id} style={{ borderBottom: "1px solid #F1F5F9" }}>
-                <td style={{ padding: "8px 12px", color: "#64748B", fontFamily: "monospace" }}>{item.sku}</td>
-                <td style={{ padding: "8px 12px" }}>{item.name}</td>
-                <td style={{ padding: "8px 12px", fontWeight: 600 }}>{item.quantity}</td>
-                <td style={{ padding: "8px 12px", color: "#64748B" }}>{item.unit}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      {tab === "attachments" && (
-        <div>
-          {(order.attachments || []).length === 0 && <p style={{ color: "#94A3B8", fontSize: 14 }}>No attachments yet.</p>}
-          {(order.attachments || []).map(a => (
-            <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: "1px solid #F1F5F9" }}>
-              <span>📎</span>
-              <span style={{ fontSize: 13 }}>{a.original_name}</span>
-              <span style={{ fontSize: 11, color: "#94A3B8" }}>{a.uploaded_by_name}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {canMove && (
-        <div style={{ marginTop: 24, borderTop: "1px solid #E5E7EB", paddingTop: 16 }}>
-          {!showMoveForm ? (
-            <Btn onClick={() => setShowMoveForm(true)} variant="primary" size="sm">Move Stage…</Btn>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <select value={moveStage} onChange={e => setMoveStage(e.target.value)}
-                  style={{ flex: 1, minWidth: 180, padding: "8px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 14 }}>
-                  <option value="">Select stage…</option>
-                  {Object.entries(STAGE_CONFIG).map(([k, v]) =>
-                    k !== order.stage && <option key={k} value={k}>{v.label}</option>
-                  )}
-                </select>
-                <input placeholder="Reason (optional)" value={moveReason} onChange={e => setMoveReason(e.target.value)}
-                  style={{ flex: 2, padding: "8px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 14 }} />
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <Btn onClick={handleMove} disabled={!moveStage} size="sm">Confirm Move</Btn>
-                <Btn onClick={() => setShowMoveForm(false)} variant="secondary" size="sm">Cancel</Btn>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function LabelValue({ label, value }) {
-  return (
-    <div>
-      <div style={{ fontSize: 11, color: "#94A3B8", fontWeight: 500, marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 14, color: "#1E293B" }}>{value}</div>
-    </div>
-  );
-}
-
-// ─── CREATE ORDER FORM ────────────────────────────────────────────────────
-function CreateOrderForm({ onCreated, onClose }) {
-  const [form, setForm] = useState({
-    invoice_number: "", customer_name: "", customer_contact: "",
-    required_delivery_date: "", priority: "normal", skip_production: false, notes: ""
-  });
-  const [items, setItems] = useState([{ sku: "", name: "", quantity: 1, unit: "pcs" }]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  function set(k, v) { setForm(f => ({ ...f, [k]: v })); }
-
-  async function handleSubmit() {
-    if (!form.invoice_number || !form.customer_name || !form.required_delivery_date) {
-      setError("Invoice number, customer name, and delivery date are required."); return;
-    }
-    setLoading(true); setError("");
-    try {
-      await api("POST", "/orders", { ...form, items: items.filter(i => i.name) });
-      onCreated?.();
-    } catch (err) {
-      setError(err.message);
-    } finally { setLoading(false); }
-  }
-
-  return (
-    <div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <Input label="Invoice Number" value={form.invoice_number} onChange={v => set("invoice_number", v)} required placeholder="INV-2024-001" />
-        <Input label="Priority" value={form.priority} onChange={v => set("priority", v)} options={[{ value: "normal", label: "Normal" }, { value: "urgent", label: "🔴 Urgent" }]} />
-        <Input label="Customer Name" value={form.customer_name} onChange={v => set("customer_name", v)} required placeholder="Customer Sdn Bhd" />
-        <Input label="Contact" value={form.customer_contact} onChange={v => set("customer_contact", v)} placeholder="01X-XXXXXXX" />
-        <Input label="Required Delivery Date" type="date" value={form.required_delivery_date} onChange={v => set("required_delivery_date", v)} required />
-        <div style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 8, paddingTop: 20 }}>
-          <input type="checkbox" id="skip_prod" checked={form.skip_production} onChange={e => set("skip_production", e.target.checked)} />
-          <label htmlFor="skip_prod" style={{ fontSize: 13, color: "#374151" }}>Skip production (go direct to packing)</label>
-        </div>
-      </div>
-      <Input label="Notes" value={form.notes} onChange={v => set("notes", v)} placeholder="Optional notes…" />
-
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Order Items</div>
-        {items.map((item, i) => (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: "120px 1fr 80px 80px 32px", gap: 6, marginBottom: 6, alignItems: "center" }}>
-            <input placeholder="SKU" value={item.sku} onChange={e => setItems(it => it.map((x, j) => j === i ? { ...x, sku: e.target.value } : x))}
-              style={{ padding: "7px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 13 }} />
-            <input placeholder="Product name" value={item.name} onChange={e => setItems(it => it.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
-              style={{ padding: "7px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 13 }} />
-            <input type="number" min="1" placeholder="Qty" value={item.quantity} onChange={e => setItems(it => it.map((x, j) => j === i ? { ...x, quantity: +e.target.value } : x))}
-              style={{ padding: "7px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 13 }} />
-            <input placeholder="Unit" value={item.unit} onChange={e => setItems(it => it.map((x, j) => j === i ? { ...x, unit: e.target.value } : x))}
-              style={{ padding: "7px 10px", border: "1px solid #E5E7EB", borderRadius: 6, fontSize: 13 }} />
-            <button onClick={() => setItems(it => it.filter((_, j) => j !== i))} style={{ background: "#FEF2F2", border: "none", borderRadius: 6, cursor: "pointer", color: "#EF4444", fontSize: 16, height: 32 }}>×</button>
-          </div>
-        ))}
-        <Btn onClick={() => setItems(it => [...it, { sku: "", name: "", quantity: 1, unit: "pcs" }])} variant="secondary" size="sm">+ Add Item</Btn>
-      </div>
-
-      {error && <p style={{ color: "#EF4444", fontSize: 13, marginBottom: 12 }}>{error}</p>}
-      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-        <Btn onClick={onClose} variant="secondary">Cancel</Btn>
-        <Btn onClick={handleSubmit} disabled={loading}>{loading ? "Creating…" : "Create Order"}</Btn>
-      </div>
-    </div>
-  );
-}
-
-// ─── DASHBOARD ────────────────────────────────────────────────────────────
-function Dashboard() {
-  const [data, setData] = useState(null);
-  const [period, setPeriod] = useState("week");
-
+  const pool = useMemo(() => {
+    if (!board) return [];
+    const stages = filter === "all" ? BOARD_STAGES : [filter];
+    return stages.flatMap((s) => board[s] || []);
+  }, [board, filter]);
+  useEffect(() => { setSpotIdx(0); }, [filter]);
   useEffect(() => {
-    api("GET", "/reports/dashboard").then(setData).catch(() => setData(MOCK_DASHBOARD));
-  }, []);
+    if (pool.length === 0) return;
+    const t = setInterval(() => setSpotIdx((i) => (i + 1) % pool.length), 10000);
+    return () => clearInterval(t);
+  }, [pool.length]);
 
-  if (!data) return <div style={{ padding: 40, textAlign: "center", color: "#94A3B8" }}>Loading…</div>;
+  const spot = pool.length ? pool[spotIdx % pool.length] : null;
+  useEffect(() => {
+    let cancel = false;
+    async function go() {
+      if (!spot) { setDetail(null); return; }
+      if (cache.current[spot.id]) { setDetail(cache.current[spot.id]); return; }
+      try { const d = await api("GET", `/orders/${spot.id}`); if (!cancel) { cache.current[spot.id] = d; setDetail(d); } }
+      catch (e) { if (!cancel) setDetail(null); }
+    }
+    go(); return () => { cancel = true; };
+  }, [spot && spot.id]);
 
-  const stageCounts = Object.fromEntries((data.stage_counts || []).map(s => [s.stage, s.count]));
+  const clock = now.toLocaleTimeString("en-GB", { hour12: false });
+  const cols = filter === "all" ? BOARD_STAGES : [filter];
+  const spotStage = spot ? (STAGE_LABELS[spot.stage] || { label: spot.stage, color: C.accent }) : null;
+  const spotCd = spot ? countdown(spot.required_delivery_date) : null;
 
   return (
-    <div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 28 }}>
-        {[
-          { label: "This Week", value: data.this_week_orders, icon: "📋", color: "#3B82F6" },
-          { label: "This Month", value: data.this_month_orders, icon: "📅", color: "#8B5CF6" },
-          { label: "Active Staff", value: data.active_staff, icon: "👥", color: "#10B981" },
-          { label: "Overdue", value: (data.overdue_orders || []).length, icon: "⚠️", color: "#EF4444" },
-        ].map(({ label, value, icon, color }) => (
-          <div key={label} style={{ background: "white", borderRadius: 12, padding: "16px 18px", border: "1px solid #E5E7EB" }}>
-            <div style={{ fontSize: 22, marginBottom: 6 }}>{icon}</div>
-            <div style={{ fontSize: 26, fontWeight: 700, color }}>{value}</div>
-            <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 2 }}>{label}</div>
+    <div style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 2000, display: "flex", flexDirection: "column", padding: 22 }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", marginBottom: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <Logo size={46} />
+          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.5 }}>
+            <span style={{ color: C.text }}>WAWASAN </span><span style={{ color: C.accent }}>PRODUCTION FLOOR</span>
           </div>
-        ))}
+        </div>
+        <StatCard label="Completed today" value={stats.completed_today} color={C.green} />
+        <StatCard label="Active orders" value={stats.active} color={C.accent} />
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginLeft: 6 }}>
+          {["all", ...BOARD_STAGES].map((s) => {
+            const active = filter === s;
+            const color = s === "all" ? C.accent : STAGES[s].color;
+            const label = s === "all" ? "All stages" : STAGES[s].label;
+            return (
+              <button key={s} onClick={() => setFilter(s)} style={{ padding: "9px 16px", borderRadius: 9, border: `1px solid ${active ? color + "66" : C.border}`, background: active ? color + "22" : "transparent", color: active ? color : C.text2, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>{label}</button>
+            );
+          })}
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
+          <span style={{ fontFamily: MONO, fontSize: 38, fontWeight: 700, color: C.text, letterSpacing: 2 }}>{clock}</span>
+          <Btn variant="soft" onClick={onExit}><Icon name="x" size={15} /> Exit</Btn>
+        </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-        <div style={{ background: "white", borderRadius: 12, padding: "18px 20px", border: "1px solid #E5E7EB" }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 14px", color: "#374151" }}>Orders by Stage</h3>
-          {STAGE_ORDER.map(stage => {
-            const cfg = STAGE_CONFIG[stage];
-            const count = stageCounts[stage] || 0;
-            const max = Math.max(...STAGE_ORDER.map(s => stageCounts[s] || 0), 1);
+      {/* Body */}
+      <div style={{ flex: 1, display: "flex", gap: 16, minHeight: 0 }}>
+        <div style={{ flex: 1, display: "grid", gridTemplateColumns: `repeat(${cols.length}, 1fr)`, gap: 14, minHeight: 0 }}>
+          {cols.map((s) => {
+            const cfg = STAGES[s];
+            const orders = (board && board[s]) || [];
             return (
-              <div key={stage} style={{ marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
-                  <span style={{ color: cfg.color, fontWeight: 500 }}>{cfg.label}</span>
-                  <span style={{ fontWeight: 600 }}>{count}</span>
-                </div>
-                <div style={{ height: 6, background: "#F1F5F9", borderRadius: 3 }}>
-                  <div style={{ height: 6, width: `${(count / max) * 100}%`, background: cfg.color, borderRadius: 3, transition: "width 0.5s" }} />
+              <div key={s} style={{ background: C.bg2, border: `1px solid ${C.border}`, borderTop: `4px solid ${cfg.color}`, borderRadius: 14, padding: "16px 14px", display: "flex", flexDirection: "column", minHeight: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: 1, color: C.text3, textTransform: "uppercase" }}>{cfg.label}</div>
+                <div style={{ fontSize: 58, fontWeight: 800, color: cfg.color, lineHeight: 1, margin: "2px 0 14px" }}>{orders.length}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 9, overflowY: "auto" }}>
+                  {orders.map((o) => {
+                    const cd = countdown(o.required_delivery_date);
+                    const late = (cd.n ?? 0) < 0, urgent = o.priority === "urgent";
+                    return (
+                      <div key={o.id} style={{ background: C.surface, border: `1px solid ${urgent || late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${cfg.color}`, borderRadius: 9, padding: "9px 11px" }}>
+                        <div style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
+                        <div style={{ fontSize: 12.5, color: cd.tone, marginTop: 3 }}>
+                          <span style={{ color: C.text2 }}>{fmtDay(o.required_delivery_date)}</span> · {cd.text}{urgent ? " · URGENT" : ""}
+                        </div>
+                        <div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{o.total_units != null ? `${o.total_units} units` : `${o.item_count} lines`}</div>
+                      </div>
+                    );
+                  })}
+                  {orders.length === 0 && <Empty label="—" />}
                 </div>
               </div>
             );
           })}
         </div>
 
-        <div style={{ background: "white", borderRadius: 12, padding: "18px 20px", border: "1px solid #E5E7EB" }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, margin: "0 0 14px", color: "#374151" }}>Upcoming Deliveries (7 days)</h3>
-          {(data.upcoming_deliveries || []).length === 0 && <p style={{ color: "#94A3B8", fontSize: 13 }}>No upcoming deliveries.</p>}
-          {(data.upcoming_deliveries || []).map(o => (
-            <div key={o.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #F1F5F9", fontSize: 13 }}>
-              <div>
-                <span style={{ fontWeight: 600 }}>{o.invoice_number}</span>
-                <span style={{ color: "#64748B", marginLeft: 8 }}>{o.customer_name}</span>
+        {/* Spotlight */}
+        <div style={{ width: 420, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 16, padding: "20px 22px", display: "flex", flexDirection: "column", minHeight: 0 }}>
+          {!spot ? <div style={{ margin: "auto", color: C.text3 }}>No active orders</div> : (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <Pill color={spotStage.color} style={{ fontSize: 12, padding: "4px 10px" }}>● {spotStage.label}</Pill>
+                <span style={{ fontSize: 14, color: C.text3 }}>{(spotIdx % pool.length) + 1} / {pool.length}</span>
               </div>
-              <DeliveryDot date={o.required_delivery_date} />
-            </div>
-          ))}
+              <div style={{ fontFamily: MONO, fontSize: 52, fontWeight: 800, color: C.accent2, margin: "10px 0 6px", lineHeight: 1 }}>{spot.invoice_number}</div>
+              <div style={{ fontSize: 15, color: C.text2, marginBottom: 8 }}>{spot.customer_name}</div>
+              <div style={{ flex: 1, overflowY: "auto" }}>
+                {detail && detail.id === spot.id
+                  ? (detail.items || []).map((it) => (
+                    <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "13px 0", borderBottom: `1px solid ${C.border}` }}>
+                      <span style={{ width: 10, height: 10, borderRadius: "50%", background: C.accent, boxShadow: `0 0 8px ${C.accent}`, flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontFamily: MONO, fontSize: 12.5, color: C.text3, letterSpacing: 0.5 }}>{it.sku}</div>
+                        <div style={{ fontSize: 19, fontWeight: 600, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
+                      </div>
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <span style={{ fontSize: 42, fontWeight: 800, color: C.accent2, lineHeight: 1 }}>{Math.round(it.quantity)}</span>
+                        <span style={{ fontSize: 14, color: C.text3, marginLeft: 5 }}>{it.unit || "pcs"}</span>
+                      </div>
+                    </div>
+                  ))
+                  : <div style={{ color: C.text3, padding: "12px 0" }}>Loading line items…</div>}
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <Pill color={spotCd.tone} style={{ fontSize: 13, padding: "5px 11px" }}><Icon name="clock" size={13} color={spotCd.tone} /> {fmtDay(spot.required_delivery_date)} · {spotCd.text} left</Pill>
+                <div style={{ height: 5, background: C.surface2, borderRadius: 4, overflow: "hidden", marginTop: 12 }}>
+                  <div style={{ height: "100%", width: `${((spotIdx % pool.length) + 1) / pool.length * 100}%`, background: C.accent, transition: "width .4s" }} />
+                </div>
+                <div style={{ fontSize: 12, color: C.text3, marginTop: 7 }}>auto-advances every 10s</div>
+              </div>
+            </>
+          )}
         </div>
       </div>
-
-      {(data.overdue_orders || []).length > 0 && (
-        <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 12, padding: "16px 20px", marginTop: 20 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: "#DC2626", margin: "0 0 10px" }}>⚠ Overdue Orders</h3>
-          {data.overdue_orders.map(o => (
-            <div key={o.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" }}>
-              <span style={{ fontWeight: 600 }}>{o.invoice_number}</span>
-              <span style={{ color: "#64748B" }}>{o.customer_name}</span>
-              <span style={{ color: "#DC2626" }}>{o.required_delivery_date}</span>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
 
-// ─── REPORTS ──────────────────────────────────────────────────────────────
-function Reports() {
-  const [tab, setTab] = useState("production");
-  const [period, setPeriod] = useState("weekly");
-  const [data, setData] = useState({});
+// ─── Order detail modal ──────────────────────────────────────────────────────
+function OrderDetail({ orderId, user, onUpdated }) {
+  const [order, setOrder] = useState(null);
+  const [tab, setTab] = useState("details");
+  const [moveStage, setMoveStage] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const canMove = ["super_admin", "operations_controller"].includes(user.role);
 
-  useEffect(() => {
-    api("GET", `/reports/${tab}?period=${period}`)
-      .then(d => setData(d))
-      .catch(() => setData({
-        completed: 42, rework_count: 3, rework_rate: "7.1",
-        avg_production_hours: "14.2", on_time_rate: "88.1",
-        packed: 38, avg_pack_minutes: "47",
-        total_deliveries: 29, on_time_count: 26, on_time_rate: "89.7",
-        daily_trend: [
-          { date: "Mon", count: 8 }, { date: "Tue", count: 12 },
-          { date: "Wed", count: 7 }, { date: "Thu", count: 11 }, { date: "Fri", count: 4 }
-        ]
-      }));
-  }, [tab, period]);
+  async function load() { try { setOrder(await api("GET", `/orders/${orderId}`)); } catch (e) { setOrder({ _error: e.message }); } }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
 
-  const tabs = [
-    { id: "production", label: "Production" },
-    { id: "packing", label: "Packing" },
-    { id: "delivery", label: "Delivery" },
-  ];
+  async function doMove(to, why) {
+    if (!to) return;
+    setBusy(true);
+    try { await api("POST", `/orders/${orderId}/move`, { to_stage: to, reason: why || undefined }); setMoveStage(""); setReason(""); await load(); onUpdated && onUpdated(); }
+    catch (e) { alert(e.message); } finally { setBusy(false); }
+  }
 
-  const metrics = {
-    production: [
-      { label: "Orders Completed", value: data.completed, color: "#3B82F6" },
-      { label: "On-Time Rate", value: data.on_time_rate ? `${data.on_time_rate}%` : "—", color: "#10B981" },
-      { label: "Avg Production Time", value: data.avg_production_hours ? `${data.avg_production_hours}h` : "—", color: "#8B5CF6" },
-      { label: "Rework Rate", value: data.rework_rate ? `${data.rework_rate}%` : "—", color: "#EF4444" },
-    ],
-    packing: [
-      { label: "Orders Packed", value: data.packed, color: "#3B82F6" },
-      { label: "Avg Pack Time", value: data.avg_pack_minutes ? `${data.avg_pack_minutes}min` : "—", color: "#8B5CF6" },
-      { label: "Rework Rate", value: data.rework_rate ? `${data.rework_rate}%` : "—", color: "#EF4444" },
-    ],
-    delivery: [
-      { label: "Total Deliveries", value: data.total_deliveries, color: "#3B82F6" },
-      { label: "On-Time Rate", value: data.on_time_rate ? `${data.on_time_rate}%` : "—", color: "#10B981" },
-      { label: "On-Time Count", value: data.on_time_count, color: "#8B5CF6" },
-    ],
-  };
-
-  const trend = data.daily_trend || [];
-  const maxTrend = Math.max(...trend.map(t => t.count), 1);
+  if (!order) return <Loading />;
+  if (order._error) return <div style={{ color: "#fca5a5" }}>⚠ {order._error}</div>;
+  const cfg = STAGE_LABELS[order.stage] || { label: order.stage, color: C.text3 };
+  const tabs = ["details", "timeline", "items", "attachments"];
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
-        <div style={{ display: "flex", gap: 4, background: "#F1F5F9", borderRadius: 10, padding: 4 }}>
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} style={{
-              background: tab === t.id ? "white" : "transparent",
-              border: "none", borderRadius: 8, padding: "6px 16px", cursor: "pointer",
-              fontSize: 13, fontWeight: tab === t.id ? 600 : 400, color: tab === t.id ? "#1E293B" : "#64748B"
-            }}>{t.label}</button>
-          ))}
-        </div>
-        <select value={period} onChange={e => setPeriod(e.target.value)}
-          style={{ padding: "7px 12px", border: "1px solid #E5E7EB", borderRadius: 8, fontSize: 13 }}>
-          <option value="daily">Today</option>
-          <option value="weekly">This Week</option>
-          <option value="monthly">This Month</option>
-        </select>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+        <span style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, color: C.text }}>{order.invoice_number}</span>
+        <Pill color={cfg.color}>{cfg.label}</Pill>
+        {order.priority === "urgent" && <Pill color={C.danger}>Urgent</Pill>}
+        {order.skip_production && <Pill color={C.accent} bg="transparent">skip-prod</Pill>}
       </div>
+      <div style={{ fontSize: 13, color: C.text3, marginBottom: 16 }}>{order.created_by_name ? `Created by ${order.created_by_name}` : ""} {order.order_date ? `· ${fmtDay(order.order_date)}` : ""}</div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 24 }}>
-        {(metrics[tab] || []).map(({ label, value, color }) => (
-          <div key={label} style={{ background: "white", border: "1px solid #E5E7EB", borderRadius: 12, padding: "16px 18px" }}>
-            <div style={{ fontSize: 26, fontWeight: 700, color }}>{value ?? "—"}</div>
-            <div style={{ fontSize: 12, color: "#94A3B8", marginTop: 2 }}>{label}</div>
-          </div>
+      <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${C.border}`, marginBottom: 16 }}>
+        {tabs.map((t) => (
+          <button key={t} onClick={() => setTab(t)} style={{ background: "none", border: "none", padding: "8px 13px", cursor: "pointer", fontSize: 13, fontWeight: tab === t ? 700 : 500, color: tab === t ? C.accent : C.text2, borderBottom: `2px solid ${tab === t ? C.accent : "transparent"}`, textTransform: "capitalize" }}>{t}</button>
         ))}
       </div>
 
-      {trend.length > 0 && (
-        <div style={{ background: "white", border: "1px solid #E5E7EB", borderRadius: 12, padding: "18px 20px" }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: "#374151", margin: "0 0 16px" }}>Daily Trend</h3>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 100 }}>
-            {trend.map((t, i) => (
-              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: "#64748B" }}>{t.count}</span>
-                <div style={{
-                  width: "100%", background: "#3B82F6", borderRadius: "4px 4px 0 0",
-                  height: `${(t.count / maxTrend) * 70}px`, minHeight: 4, transition: "height 0.4s"
-                }} />
-                <span style={{ fontSize: 10, color: "#9CA3AF" }}>{String(t.date).slice(-3)}</span>
-              </div>
-            ))}
-          </div>
+      {tab === "details" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <LV label="Customer" v={order.customer_name} />
+          <LV label="Contact" v={order.customer_contact || "—"} />
+          <LV label="Delivery" v={<span style={{ color: countdown(order.required_delivery_date).tone }}>{fmtDay(order.required_delivery_date)} · {countdown(order.required_delivery_date).text}</span>} />
+          <LV label="Expiry" v={order.expiry_date ? fmtDay(order.expiry_date) : "—"} />
+          <LV label="PIC" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />
+          <LV label="Source" v={order.source === "sql_account" ? "SQL Account" : "Manual"} />
+          {order.notes && <div style={{ gridColumn: "span 2" }}><LV label="Notes" v={order.notes} /></div>}
         </div>
       )}
-    </div>
-  );
-}
-
-// ─── USERS MANAGEMENT ────────────────────────────────────────────────────
-function UsersPage({ user }) {
-  const [users, setUsers] = useState([]);
-  const [showCreate, setShowCreate] = useState(false);
-  const [form, setForm] = useState({ name: "", email: "", role: "production_staff", password: "" });
-
-  useEffect(() => {
-    api("GET", "/users").then(setUsers).catch(() => setUsers([
-      { id: "1", name: "Boss Admin", email: "admin@wawasancandle.com", role: "super_admin", is_active: 1, avatar_color: "#7C3AED" },
-      { id: "2", name: "Reenee", email: "reenee@wawasancandle.com", role: "operations_controller", is_active: 1, avatar_color: "#0891B2" },
-      { id: "3", name: "Misha", email: "misha@wawasancandle.com", role: "production_lead", is_active: 1, avatar_color: "#059669" },
-      { id: "4", name: "Staff Ali", email: "ali@wawasancandle.com", role: "production_staff", is_active: 1, avatar_color: "#D97706" },
-      { id: "5", name: "Staff Siti", email: "siti@wawasancandle.com", role: "packing_staff", is_active: 1, avatar_color: "#DB2777" },
-      { id: "6", name: "Driver Raju", email: "raju@wawasancandle.com", role: "delivery_team", is_active: 1, avatar_color: "#DC2626" },
-    ]));
-  }, []);
-
-  async function handleCreate() {
-    try {
-      await api("POST", "/users", form);
-      setShowCreate(false);
-      api("GET", "/users").then(setUsers);
-    } catch (err) { alert(err.message); }
-  }
-
-  const isAdmin = user.role === "super_admin";
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
-        {isAdmin && <Btn onClick={() => setShowCreate(true)} size="sm">+ Add User</Btn>}
-      </div>
-      <div style={{ background: "white", borderRadius: 12, border: "1px solid #E5E7EB", overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
-          <thead>
-            <tr style={{ background: "#F8FAFC" }}>
-              {["User", "Email", "Role", "Status"].map(h => (
-                <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontWeight: 600, color: "#374151", borderBottom: "1px solid #E5E7EB" }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
+      {tab === "timeline" && (
+        <div>
+          {(order.activity || []).length === 0 && <Empty label="No activity yet." />}
+          {(order.activity || []).map((a) => (
+            <div key={a.id} style={{ display: "flex", gap: 11, marginBottom: 13 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, marginTop: 6, flexShrink: 0 }} />
+              <div>
+                <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{a.user_name}</span>
+                <span style={{ fontSize: 13, color: C.text2 }}> — {a.details || a.action}</span>
+                <div style={{ fontSize: 11.5, color: C.text3 }}>{new Date(a.created_at).toLocaleString()}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {tab === "items" && (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead><tr>{["SKU", "Product", "Qty", "Unit"].map((h) => <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
           <tbody>
-            {users.map(u => (
-              <tr key={u.id} style={{ borderBottom: "1px solid #F1F5F9" }}>
-                <td style={{ padding: "12px 16px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <Avatar name={u.name} color={u.avatar_color} size={32} />
-                    <span style={{ fontWeight: 500 }}>{u.name}</span>
-                  </div>
-                </td>
-                <td style={{ padding: "12px 16px", color: "#64748B" }}>{u.email}</td>
-                <td style={{ padding: "12px 16px" }}><Badge color="#6B7280">{ROLE_LABELS[u.role] || u.role}</Badge></td>
-                <td style={{ padding: "12px 16px" }}>
-                  <Badge color={u.is_active ? "#10B981" : "#EF4444"}>{u.is_active ? "Active" : "Disabled"}</Badge>
-                </td>
+            {(order.items || []).map((it) => (
+              <tr key={it.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                <td style={{ padding: "8px 10px", fontFamily: MONO, color: C.text2 }}>{it.sku}</td>
+                <td style={{ padding: "8px 10px", color: C.text }}>{it.name}</td>
+                <td style={{ padding: "8px 10px", fontWeight: 700, color: C.text }}>{Math.round(it.quantity)}</td>
+                <td style={{ padding: "8px 10px", color: C.text3 }}>{it.unit}</td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
-
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create New User">
-        <Input label="Full Name" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} required />
-        <Input label="Email" type="email" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} required />
-        <Input label="Role" value={form.role} onChange={v => setForm(f => ({ ...f, role: v }))} options={Object.entries(ROLE_LABELS).map(([v, l]) => ({ value: v, label: l }))} />
-        <Input label="Password" type="password" value={form.password} onChange={v => setForm(f => ({ ...f, password: v }))} required />
-        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
-          <Btn onClick={() => setShowCreate(false)} variant="secondary">Cancel</Btn>
-          <Btn onClick={handleCreate}>Create User</Btn>
+      )}
+      {tab === "attachments" && (
+        <div>
+          {(order.attachments || []).length === 0 && <Empty label="No attachments." />}
+          {(order.attachments || []).map((a) => (
+            <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${C.border}` }}>
+              <Icon name="message" size={15} color={C.text3} />
+              <span style={{ fontSize: 13, color: C.text }}>{a.original_name}</span>
+              <span style={{ fontSize: 11.5, color: C.text3 }}>{a.uploaded_by_name}</span>
+            </div>
+          ))}
         </div>
+      )}
+
+      {canMove && (
+        <div style={{ marginTop: 22, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, marginBottom: 8 }}>Stage actions</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+            <select value={moveStage} onChange={(e) => setMoveStage(e.target.value)} style={{ flex: 1, minWidth: 170, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }}>
+              <option value="" style={{ background: C.bg2 }}>Move to…</option>
+              {Object.keys(STAGE_LABELS).filter((k) => k !== order.stage).map((k) => <option key={k} value={k} style={{ background: C.bg2 }}>{STAGE_LABELS[k].label}</option>)}
+            </select>
+            <input placeholder="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} style={{ flex: 2, minWidth: 160, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }} />
+            <Btn onClick={() => doMove(moveStage, reason)} disabled={!moveStage || busy}>Confirm</Btn>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {order.stage !== "on_hold" && <Btn variant="soft" size="sm" onClick={() => doMove("on_hold", reason || "On hold")} disabled={busy}>Put on hold</Btn>}
+            <Btn variant="danger" size="sm" onClick={() => { if (confirm("Cancel this order?")) doMove("cancelled", reason || "Cancelled"); }} disabled={busy}>Cancel order</Btn>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+function LV({ label, v }) {
+  return <div><div style={{ fontSize: 11, color: C.text3, fontWeight: 600, marginBottom: 2 }}>{label}</div><div style={{ fontSize: 14, color: C.text }}>{v}</div></div>;
+}
+
+// ─── Create order ──────────────────────────────────────────────────────────────
+function CreateOrderForm({ onCreated, onClose }) {
+  const [f, setF] = useState({ invoice_number: "", customer_name: "", customer_contact: "", required_delivery_date: "", priority: "normal", skip_production: false, notes: "" });
+  const [items, setItems] = useState([{ sku: "", name: "", quantity: 1, unit: "pcs" }]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+  async function submit() {
+    if (!f.invoice_number || !f.customer_name || !f.required_delivery_date) { setErr("Invoice, customer and delivery date are required."); return; }
+    setBusy(true); setErr("");
+    try { await api("POST", "/orders", { ...f, items: items.filter((i) => i.name) }); onCreated && onCreated(); }
+    catch (e) { setErr(e.message); } finally { setBusy(false); }
+  }
+  const inp = { padding: "8px 10px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13, color: C.text };
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <Field label="Invoice Number" value={f.invoice_number} onChange={(v) => set("invoice_number", v)} required placeholder="INV-26-0001" />
+        <Field label="Priority" value={f.priority} onChange={(v) => set("priority", v)} options={[{ value: "normal", label: "Normal" }, { value: "urgent", label: "Urgent" }]} />
+        <Field label="Customer Name" value={f.customer_name} onChange={(v) => set("customer_name", v)} required />
+        <Field label="Contact" value={f.customer_contact} onChange={(v) => set("customer_contact", v)} placeholder="01X-XXXXXXX" />
+        <Field label="Required Delivery Date" type="date" value={f.required_delivery_date} onChange={(v) => set("required_delivery_date", v)} required />
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.text2, marginTop: 26 }}>
+          <input type="checkbox" checked={f.skip_production} onChange={(e) => set("skip_production", e.target.checked)} /> Skip production (→ packing)
+        </label>
+      </div>
+      <Field label="Notes" value={f.notes} onChange={(v) => set("notes", v)} placeholder="Optional…" />
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, margin: "6px 0 8px" }}>Order Items</div>
+      {items.map((it, i) => (
+        <div key={i} style={{ display: "grid", gridTemplateColumns: "110px 1fr 70px 64px 32px", gap: 6, marginBottom: 6 }}>
+          <input placeholder="SKU" value={it.sku} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, sku: e.target.value } : x))} style={inp} />
+          <input placeholder="Product" value={it.name} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} style={inp} />
+          <input type="number" min="1" value={it.quantity} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, quantity: +e.target.value } : x))} style={inp} />
+          <input placeholder="unit" value={it.unit} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, unit: e.target.value } : x))} style={inp} />
+          <button onClick={() => setItems((a) => a.filter((_, j) => j !== i))} style={{ background: "#3a1a1a", border: "none", borderRadius: 8, color: "#fca5a5", cursor: "pointer" }}>×</button>
+        </div>
+      ))}
+      <Btn variant="soft" size="sm" onClick={() => setItems((a) => [...a, { sku: "", name: "", quantity: 1, unit: "pcs" }])}>+ Add item</Btn>
+      {err && <p style={{ color: "#fca5a5", fontSize: 13, margin: "12px 0 0" }}>{err}</p>}
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 16 }}>
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn onClick={submit} disabled={busy}>{busy ? "Creating…" : "Create order"}</Btn>
+      </div>
+    </div>
+  );
+}
+
+// ─── Dashboard ─────────────────────────────────────────────────────────────────
+function Dashboard() {
+  const [d, setD] = useState(null);
+  useEffect(() => { api("GET", "/reports/dashboard").then(setD).catch(() => setD({ _error: true })); }, []);
+  if (!d) return <Loading />;
+  if (d._error) return <Empty label="Could not load dashboard." />;
+  const counts = Object.fromEntries((d.stage_counts || []).map((s) => [s.stage, s.count]));
+  const max = Math.max(...BOARD_STAGES.map((s) => counts[s] || 0), 1);
+  const metrics = [
+    { label: "This Week", value: d.this_week_orders, color: C.order },
+    { label: "This Month", value: d.this_month_orders, color: C.accent },
+    { label: "Active Staff", value: d.active_staff, color: C.ready },
+    { label: "Overdue", value: (d.overdue_orders || []).length, color: C.danger },
+  ];
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px,1fr))", gap: 14 }}>
+        {metrics.map((m) => <Card key={m.label}><div style={{ fontSize: 30, fontWeight: 800, color: m.color }}>{m.value ?? 0}</div><div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{m.label}</div></Card>)}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+        <Card>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 14 }}>Orders by stage</h3>
+          {BOARD_STAGES.map((s) => {
+            const cfg = STAGES[s]; const c = counts[s] || 0;
+            return (
+              <div key={s} style={{ marginBottom: 11 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 5 }}><span style={{ color: cfg.color, fontWeight: 600 }}>{cfg.label}</span><span style={{ color: C.text, fontWeight: 700 }}>{c}</span></div>
+                <div style={{ height: 7, background: C.surface2, borderRadius: 4 }}><div style={{ height: 7, width: `${(c / max) * 100}%`, background: cfg.color, borderRadius: 4, transition: "width .5s" }} /></div>
+              </div>
+            );
+          })}
+        </Card>
+        <Card>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 14 }}>Upcoming deliveries (7 days)</h3>
+          {(d.upcoming_deliveries || []).length === 0 && <Empty label="None scheduled." />}
+          {(d.upcoming_deliveries || []).map((o) => (
+            <div key={o.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${C.border}`, fontSize: 13 }}>
+              <span><span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{o.invoice_number}</span> <span style={{ color: C.text3 }}>{o.customer_name}</span></span>
+              <span style={{ color: countdown(o.required_delivery_date).tone }}>{fmtDay(o.required_delivery_date)} · {countdown(o.required_delivery_date).text}</span>
+            </div>
+          ))}
+        </Card>
+      </div>
+      {(d.overdue_orders || []).length > 0 && (
+        <Card style={{ borderColor: C.danger + "55", background: "#1f1310" }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.danger, marginBottom: 10 }}>⚠ Overdue orders</h3>
+          {d.overdue_orders.map((o) => (
+            <div key={o.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" }}>
+              <span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{o.invoice_number}</span>
+              <span style={{ color: C.text3 }}>{o.customer_name}</span>
+              <span style={{ color: C.danger }}>{fmtDay(o.required_delivery_date)}</span>
+            </div>
+          ))}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── Reports ─────────────────────────────────────────────────────────────────
+function Reports() {
+  const [tab, setTab] = useState("production");
+  const [period, setPeriod] = useState("weekly");
+  const [d, setD] = useState({});
+  useEffect(() => { api("GET", `/reports/${tab}?period=${period}`).then(setD).catch(() => setD({})); }, [tab, period]);
+  const metrics = {
+    production: [["Orders Completed", d.completed], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["Avg Production", d.avg_production_hours ? d.avg_production_hours + "h" : "—"], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"]],
+    packing: [["Orders Packed", d.packed], ["Avg Pack Time", d.avg_pack_minutes ? d.avg_pack_minutes + "min" : "—"], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"]],
+    delivery: [["Total Deliveries", d.total_deliveries], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["On-Time Count", d.on_time_count]],
+  };
+  const trend = d.daily_trend || [];
+  const maxT = Math.max(...trend.map((t) => t.count), 1);
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 18 }}>
+        <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4 }}>
+          {["production", "packing", "delivery"].map((t) => <button key={t} onClick={() => setTab(t)} style={{ background: tab === t ? C.surface2 : "transparent", border: "none", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 13, fontWeight: tab === t ? 700 : 500, color: tab === t ? C.text : C.text2, textTransform: "capitalize" }}>{t}</button>)}
+        </div>
+        <select value={period} onChange={(e) => setPeriod(e.target.value)} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13 }}>
+          <option value="daily" style={{ background: C.bg2 }}>Today</option>
+          <option value="weekly" style={{ background: C.bg2 }}>This Week</option>
+          <option value="monthly" style={{ background: C.bg2 }}>This Month</option>
+        </select>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 20 }}>
+        {(metrics[tab] || []).map(([label, value]) => <Card key={label}><div style={{ fontSize: 28, fontWeight: 800, color: C.accent }}>{value ?? "—"}</div><div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{label}</div></Card>)}
+      </div>
+      {trend.length > 0 && (
+        <Card>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 16 }}>Daily trend</h3>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 130 }}>
+            {trend.map((t, i) => (
+              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: C.text2 }}>{t.count}</span>
+                <div style={{ width: "100%", maxWidth: 46, background: C.accent, borderRadius: "5px 5px 0 0", height: `${(t.count / maxT) * 90}px`, minHeight: 4, transition: "height .4s" }} />
+                <span style={{ fontSize: 10.5, color: C.text3 }}>{String(t.date).slice(5)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── Delivery ──────────────────────────────────────────────────────────────────
+function Delivery({ user }) {
+  const [list, setList] = useState(null);
+  const canManage = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
+  function load() { api("GET", "/delivery").then(setList).catch(() => setList([])); }
+  useEffect(() => { load(); }, []);
+  async function markDelivered(id) { try { await api("POST", `/delivery/${id}/deliver`, {}); load(); } catch (e) { alert(e.message); } }
+  if (!list) return <Loading />;
+  const tone = { pending: C.packing, in_transit: C.order, delivered: C.ready, failed: C.danger };
+  return (
+    <Card style={{ padding: 0, overflow: "hidden" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+        <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Driver", "Scheduled", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+        <tbody>
+          {list.length === 0 && <tr><td colSpan={6}><Empty label="No deliveries scheduled yet. Assign one from a Ready-for-Delivery order." /></td></tr>}
+          {list.map((dv) => (
+            <tr key={dv.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+              <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{dv.invoice_number}</td>
+              <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.customer_name}</td>
+              <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.delivery_man_name || "—"}</td>
+              <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"}</td>
+              <td style={{ padding: "11px 16px" }}><Pill color={tone[dv.status] || C.text3}>{dv.status}</Pill></td>
+              <td style={{ padding: "11px 16px" }}>{canManage && dv.status !== "delivered" && <Btn size="sm" variant="success" onClick={() => markDelivered(dv.id)}>Mark delivered</Btn>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
+// ─── Production remarks ──────────────────────────────────────────────────────
+function Remarks({ user }) {
+  const [list, setList] = useState(null);
+  const [content, setContent] = useState("");
+  const [busy, setBusy] = useState(false);
+  function load() { api("GET", "/remarks").then(setList).catch(() => setList([])); }
+  useEffect(() => { load(); }, []);
+  async function post() { if (!content.trim()) return; setBusy(true); try { await api("POST", "/remarks", { content }); setContent(""); load(); } catch (e) { alert(e.message); } finally { setBusy(false); } }
+  const canPost = ["super_admin", "production_lead"].includes(user.role);
+  if (!list) return <Loading />;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 760 }}>
+      {canPost && (
+        <Card>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 10 }}>This week's remark</h3>
+          <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={4} placeholder="Production notes for this week…" style={{ width: "100%", padding: "10px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 14, resize: "vertical" }} />
+          <div style={{ marginTop: 10, textAlign: "right" }}><Btn onClick={post} disabled={busy}>{busy ? "Posting…" : "Post remark"}</Btn></div>
+        </Card>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {list.length === 0 && <Empty label="No remarks yet." />}
+        {list.map((r) => (
+          <Card key={r.id}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontWeight: 700, color: C.text, fontSize: 13.5 }}>{r.author_name}</span>
+              <span style={{ color: C.text3, fontSize: 12.5 }}>w/c {fmtDay(r.week_start)}</span>
+            </div>
+            <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{r.content}</div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Audit ─────────────────────────────────────────────────────────────────────
+function Audit() {
+  const [d, setD] = useState(null);
+  useEffect(() => { api("GET", "/reports/audit?limit=100").then(setD).catch(() => setD({ logs: [] })); }, []);
+  if (!d) return <Loading />;
+  return (
+    <Card style={{ padding: 0, overflow: "hidden" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead><tr style={{ background: C.bg2 }}>{["When", "User", "Action", "Details", "Invoice"].map((h) => <th key={h} style={{ textAlign: "left", padding: "11px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+        <tbody>
+          {(d.logs || []).length === 0 && <tr><td colSpan={5}><Empty label="No audit entries." /></td></tr>}
+          {(d.logs || []).map((l) => (
+            <tr key={l.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+              <td style={{ padding: "9px 16px", color: C.text3, whiteSpace: "nowrap" }}>{new Date(l.created_at).toLocaleString()}</td>
+              <td style={{ padding: "9px 16px", color: C.text }}>{l.user_name}</td>
+              <td style={{ padding: "9px 16px" }}><Pill color={C.text2}>{l.action}</Pill></td>
+              <td style={{ padding: "9px 16px", color: C.text2 }}>{l.details}</td>
+              <td style={{ padding: "9px 16px", fontFamily: MONO, color: C.text2 }}>{l.invoice_number || "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Card>
+  );
+}
+
+// ─── Users ───────────────────────────────────────────────────────────────────
+function Users({ user }) {
+  const [list, setList] = useState(null);
+  const [show, setShow] = useState(false);
+  const [f, setF] = useState({ name: "", email: "", role: "production_staff", password: "" });
+  function load() { api("GET", "/users").then(setList).catch(() => setList([])); }
+  useEffect(() => { load(); }, []);
+  async function create() { try { await api("POST", "/users", f); setShow(false); setF({ name: "", email: "", role: "production_staff", password: "" }); load(); } catch (e) { alert(e.message); } }
+  async function toggle(u) { try { await api("PATCH", `/users/${u.id}`, { is_active: !u.is_active }); load(); } catch (e) { alert(e.message); } }
+  if (!list) return <Loading />;
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}><Btn onClick={() => setShow(true)}><Icon name="plus" size={15} /> Add user</Btn></div>
+      <Card style={{ padding: 0, overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+          <thead><tr style={{ background: C.bg2 }}>{["User", "Email", "Role", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {list.map((u) => (
+              <tr key={u.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                <td style={{ padding: "11px 16px" }}><div style={{ display: "flex", alignItems: "center", gap: 10 }}><Avatar name={u.name} color={u.avatar_color} size={30} /><span style={{ color: C.text, fontWeight: 500 }}>{u.name}</span></div></td>
+                <td style={{ padding: "11px 16px", color: C.text2 }}>{u.email}</td>
+                <td style={{ padding: "11px 16px" }}><Pill color={C.text2}>{ROLE_LABELS[u.role] || u.role}</Pill></td>
+                <td style={{ padding: "11px 16px" }}><Pill color={u.is_active ? C.ready : C.danger}>{u.is_active ? "Active" : "Disabled"}</Pill></td>
+                <td style={{ padding: "11px 16px" }}>{u.id !== user.id && <Btn size="sm" variant="ghost" onClick={() => toggle(u)}>{u.is_active ? "Disable" : "Enable"}</Btn>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+      <Modal open={show} onClose={() => setShow(false)} title="Create user">
+        <Field label="Full name" value={f.name} onChange={(v) => setF((p) => ({ ...p, name: v }))} required />
+        <Field label="Email" type="email" value={f.email} onChange={(v) => setF((p) => ({ ...p, email: v }))} required />
+        <Field label="Role" value={f.role} onChange={(v) => setF((p) => ({ ...p, role: v }))} options={Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label }))} />
+        <Field label="Password" type="password" value={f.password} onChange={(v) => setF((p) => ({ ...p, password: v }))} required />
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}><Btn variant="ghost" onClick={() => setShow(false)}>Cancel</Btn><Btn onClick={create}>Create</Btn></div>
       </Modal>
     </div>
   );
 }
 
-// ─── NOTIFICATIONS ────────────────────────────────────────────────────────
-function NotificationsPanel({ onClose }) {
-  const [items, setItems] = useState([]);
-
-  useEffect(() => {
-    api("GET", "/notifications").then(d => setItems(d.notifications || [])).catch(() => setItems([
-      { id: "n1", type: "pic_assigned", title: "You are assigned to INV-003", message: "By Reenee", is_read: 0, created_at: new Date().toISOString() },
-      { id: "n2", type: "order_overdue", title: "INV-006 is overdue", message: "Delivery was due yesterday", is_read: 0, created_at: new Date(Date.now() - 3600000).toISOString() },
-      { id: "n3", type: "urgent_flag", title: "INV-002 flagged URGENT", message: "", is_read: 1, created_at: new Date(Date.now() - 7200000).toISOString() },
-    ]));
-  }, []);
-
-  async function markAllRead() {
-    await api("PATCH", "/notifications/read-all").catch(() => {});
-    setItems(items.map(i => ({ ...i, is_read: 1 })));
-  }
-
-  const icons = { pic_assigned: "👤", order_stage_entered: "📦", urgent_flag: "🔴", order_overdue: "⚠️", weekly_remark: "📝", rework_returned: "↩️" };
-
+// ─── Settings ──────────────────────────────────────────────────────────────────
+function Settings() {
   return (
-    <div style={{
-      position: "fixed", top: 56, right: 16, width: 340, background: "white",
-      borderRadius: 12, border: "1px solid #E5E7EB", boxShadow: "0 8px 30px rgba(0,0,0,0.12)", zIndex: 500
-    }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 16px", borderBottom: "1px solid #E5E7EB" }}>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>Notifications</span>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={markAllRead} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#3B82F6" }}>Mark all read</button>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "#9CA3AF" }}>×</button>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 760 }}>
+      <Card>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>Workflow stages</h3>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>{BOARD_STAGES.map((s) => <Pill key={s} color={STAGES[s].color} style={{ fontSize: 12, padding: "5px 11px" }}>{STAGES[s].label}</Pill>)}</div>
+      </Card>
+      <Card>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>Roles</h3>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{Object.values(ROLE_LABELS).map((r) => <Pill key={r} color={C.text2} style={{ fontSize: 12, padding: "5px 11px" }}>{r}</Pill>)}</div>
+      </Card>
+      <Card>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 8 }}>Session</h3>
+        <div style={{ fontSize: 13.5, color: C.text2 }}>Login session timeout: 8 hours · Auth: JWT</div>
+      </Card>
+      <div style={{ fontSize: 12.5, color: C.text3 }}>Editable stage names, holiday calendar, priorities and SMTP configuration are planned for the next phase.</div>
+    </div>
+  );
+}
+
+// ─── Notifications ─────────────────────────────────────────────────────────────
+function NotificationsPanel({ onClose, onChanged }) {
+  const [items, setItems] = useState([]);
+  useEffect(() => { api("GET", "/notifications").then((d) => setItems(d.notifications || [])).catch(() => setItems([])); }, []);
+  async function markAll() { await api("PATCH", "/notifications/read-all").catch(() => {}); setItems((a) => a.map((i) => ({ ...i, is_read: true }))); onChanged && onChanged(); }
+  return (
+    <div style={{ position: "fixed", top: 64, right: 20, width: 360, background: C.bg2, border: `1px solid ${C.border2}`, borderRadius: 13, boxShadow: "0 18px 50px rgba(0,0,0,.5)", zIndex: 600, overflow: "hidden" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px", borderBottom: `1px solid ${C.border}` }}>
+        <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>Notifications</span>
+        <div style={{ display: "flex", gap: 12 }}>
+          <button onClick={markAll} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12.5, color: C.accent }}>Mark all read</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.text3 }}><Icon name="x" size={16} color={C.text3} /></button>
         </div>
       </div>
-      <div style={{ maxHeight: 360, overflowY: "auto" }}>
-        {items.length === 0 && <div style={{ padding: "24px 16px", textAlign: "center", color: "#94A3B8", fontSize: 14 }}>All caught up!</div>}
-        {items.map(n => (
-          <div key={n.id} style={{
-            padding: "12px 16px", borderBottom: "1px solid #F1F5F9",
-            background: n.is_read ? "transparent" : "#EFF6FF"
-          }}>
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-              <span style={{ fontSize: 16 }}>{icons[n.type] || "🔔"}</span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: n.is_read ? 400 : 600, color: "#1E293B" }}>{n.title}</div>
-                {n.message && <div style={{ fontSize: 12, color: "#64748B", marginTop: 2 }}>{n.message}</div>}
-                <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 3 }}>{new Date(n.created_at).toLocaleString()}</div>
-              </div>
-            </div>
+      <div style={{ maxHeight: 380, overflowY: "auto" }}>
+        {items.length === 0 && <Empty label="All caught up." />}
+        {items.map((n) => (
+          <div key={n.id} style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}`, background: n.is_read ? "transparent" : C.accent + "12" }}>
+            <div style={{ fontSize: 13, fontWeight: n.is_read ? 500 : 700, color: C.text }}>{n.title}</div>
+            {n.message && <div style={{ fontSize: 12, color: C.text2, marginTop: 2 }}>{n.message}</div>}
+            <div style={{ fontSize: 11, color: C.text3, marginTop: 3 }}>{new Date(n.created_at).toLocaleString()}</div>
           </div>
         ))}
       </div>
@@ -900,140 +936,153 @@ function NotificationsPanel({ onClose }) {
   );
 }
 
-// ─── MAIN APP ─────────────────────────────────────────────────────────────
+// ─── Login ─────────────────────────────────────────────────────────────────────
+function LoginPage({ onLogin }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function submit(e) {
+    e.preventDefault(); setBusy(true); setErr("");
+    try {
+      const d = await api("POST", "/auth/login", { email, password });
+      _token = d.token; localStorage.setItem("oms_token", d.token); onLogin(d.user);
+    } catch (e2) { setErr(e2.message === "Failed to fetch" ? "Cannot reach the server." : e2.message); setBusy(false); }
+  }
+  return (
+    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: `radial-gradient(900px 500px at 50% -10%, ${C.accent}18, transparent), ${C.bg}` }}>
+      <form onSubmit={submit} style={{ width: 380, background: C.bg2, border: `1px solid ${C.border2}`, borderRadius: 18, padding: "36px 34px", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 26 }}>
+          <Logo size={52} />
+          <div style={{ fontSize: 21, fontWeight: 800, color: C.text, marginTop: 14 }}>Wawasan Candle</div>
+          <div style={{ fontSize: 13, color: C.text3, marginTop: 2 }}>Order Management System</div>
+        </div>
+        <Field label="Email" type="email" value={email} onChange={setEmail} required placeholder="you@wawasancandle.com" />
+        <Field label="Password" type="password" value={password} onChange={setPassword} required />
+        {err && <p style={{ color: "#fca5a5", fontSize: 13, margin: "-4px 0 12px" }}>{err}</p>}
+        <Btn type="submit" onClick={() => {}} disabled={busy} style={{ width: "100%", justifyContent: "center" }}>{busy ? "Signing in…" : "Sign in"}</Btn>
+      </form>
+    </div>
+  );
+}
+
+// ─── App shell ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [user, setUser] = useState(null);
+  const [booting, setBooting] = useState(true);
   const [page, setPage] = useState("board");
-  const [selectedOrderId, setSelectedOrderId] = useState(null);
-  const [showCreateOrder, setShowCreateOrder] = useState(false);
+  const [search, setSearch] = useState("");
+  const [weekOnly, setWeekOnly] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [unread, setUnread] = useState(0);
   const [boardKey, setBoardKey] = useState(0);
+  const [boardCount, setBoardCount] = useState(null);
 
   useEffect(() => {
-    const savedToken = localStorage.getItem("oms_token");
-    if (savedToken) {
-      _token = savedToken;
-      api("GET", "/auth/me").then(d => setUser(d.user)).catch(() => {});
-    }
+    const t = localStorage.getItem("oms_token");
+    if (!t) { setBooting(false); return; }
+    _token = t;
+    api("GET", "/auth/me").then((d) => setUser(d.user)).catch(() => { _token = ""; localStorage.removeItem("oms_token"); }).finally(() => setBooting(false));
   }, []);
-
   useEffect(() => {
     if (!user) return;
-    api("GET", "/notifications?unread_only=1").then(d => setUnreadCount(d.unread_count || 0)).catch(() => setUnreadCount(2));
-    const t = setInterval(() => {
-      api("GET", "/notifications?unread_only=1").then(d => setUnreadCount(d.unread_count || 0)).catch(() => {});
-    }, 30000);
-    return () => clearInterval(t);
+    const poll = () => api("GET", "/notifications?unread_only=1").then((d) => setUnread(d.unread_count || 0)).catch(() => {});
+    poll(); const t = setInterval(poll, 30000); return () => clearInterval(t);
   }, [user]);
 
-  function handleLogout() {
-    api("POST", "/auth/logout").catch(() => {});
-    _token = "";
-    localStorage.removeItem("oms_token");
-    setUser(null);
-  }
+  function logout() { api("POST", "/auth/logout").catch(() => {}); _token = ""; localStorage.removeItem("oms_token"); setUser(null); }
+  function bumpBoard() { setBoardKey((k) => k + 1); }
 
+  if (booting) return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", color: C.text3 }}>Loading…</div>;
   if (!user) return <LoginPage onLogin={setUser} />;
 
-  const canCreateOrder = ["super_admin", "operations_controller"].includes(user.role);
+  if (page === "floor") return <FloorDisplay onExit={() => setPage("board")} />;
 
-  const navItems = [
-    { id: "board", label: "Kanban Board", icon: "🗂️", roles: null },
-    { id: "dashboard", label: "Dashboard", icon: "📊", roles: ["super_admin", "operations_controller"] },
-    { id: "reports", label: "Reports", icon: "📈", roles: ["super_admin", "operations_controller"] },
-    { id: "users", label: "Users", icon: "👥", roles: ["super_admin"] },
-  ].filter(n => !n.roles || n.roles.includes(user.role));
-
-  const pageTitles = { board: "Kanban Board", dashboard: "Dashboard", reports: "Performance Reports", users: "User Management" };
+  const nav = NAV.filter((n) => !n.roles || n.roles.includes(user.role));
+  const canCreate = ["super_admin", "operations_controller"].includes(user.role);
+  const [title, subtitle] = PAGE_META[page] || ["", ""];
 
   return (
-    <div style={{ minHeight: "100vh", background: "#F8FAFC", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
-      {/* Header */}
-      <div style={{
-        background: "white", borderBottom: "1px solid #E5E7EB",
-        padding: "0 20px", height: 52, display: "flex", alignItems: "center",
-        justifyContent: "space-between", position: "sticky", top: 0, zIndex: 100
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <span style={{ fontSize: 20 }}>🕯️</span>
-          <span style={{ fontWeight: 700, fontSize: 15, color: "#1E293B" }}>Wawasan OMS</span>
-          <div style={{ display: "flex", gap: 2 }}>
-            {navItems.map(n => (
-              <button key={n.id} onClick={() => setPage(n.id)} style={{
-                background: page === n.id ? "#EFF6FF" : "transparent",
-                border: "none", borderRadius: 8, padding: "6px 12px", cursor: "pointer",
-                fontSize: 13, color: page === n.id ? "#1E40AF" : "#64748B", fontWeight: page === n.id ? 600 : 400
-              }}>
-                {n.icon} {n.label}
+    <div style={{ display: "flex", minHeight: "100vh", background: C.bg }}>
+      {/* Sidebar */}
+      <aside style={{ width: 248, background: C.bg2, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "20px 20px 18px" }}>
+          <Logo size={38} />
+          <div><div style={{ fontSize: 15, fontWeight: 800, color: C.text, letterSpacing: 0.4 }}>WAWASAN</div><div style={{ fontSize: 10.5, fontWeight: 600, color: C.text3, letterSpacing: 1.5 }}>CANDLE OMS</div></div>
+        </div>
+        <div style={{ fontSize: 10.5, fontWeight: 700, color: C.text3, letterSpacing: 1.5, padding: "6px 22px" }}>WORKSPACE</div>
+        <nav style={{ display: "flex", flexDirection: "column", gap: 2, padding: "4px 12px", overflowY: "auto", flex: 1 }}>
+          {nav.map((n) => {
+            const active = page === n.id;
+            return (
+              <button key={n.id} onClick={() => setPage(n.id)} style={{ display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 9, border: "none", cursor: "pointer", background: active ? C.accent + "1c" : "transparent", color: active ? C.accent : C.text2, fontSize: 13.5, fontWeight: active ? 700 : 500, textAlign: "left", borderLeft: active ? `2px solid ${C.accent}` : "2px solid transparent" }}>
+                <Icon name={n.icon} size={18} color={active ? C.accent : C.text3} />
+                <span style={{ flex: 1 }}>{n.label}</span>
+                {n.id === "board" && boardCount != null && <span style={{ background: active ? C.accent + "33" : C.surface2, color: active ? C.accent : C.text3, borderRadius: 6, padding: "0 7px", fontSize: 12, fontWeight: 700 }}>{boardCount}</span>}
               </button>
-            ))}
-          </div>
-        </div>
+            );
+          })}
+        </nav>
+        <button onClick={logout} style={{ display: "flex", alignItems: "center", gap: 10, margin: "10px 16px 18px", padding: "10px 12px", background: "transparent", border: "none", color: C.text3, cursor: "pointer", fontSize: 13.5 }}><Icon name="logout" size={17} color={C.text3} /> Log out</button>
+      </aside>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {canCreateOrder && (
-            <Btn onClick={() => setShowCreateOrder(true)} size="sm">+ New Order</Btn>
-          )}
-          <div style={{ position: "relative" }}>
-            <button onClick={() => setShowNotifs(!showNotifs)} style={{
-              background: "none", border: "1px solid #E5E7EB", borderRadius: 8,
-              padding: "6px 10px", cursor: "pointer", fontSize: 16, position: "relative"
-            }}>🔔
-              {unreadCount > 0 && (
-                <span style={{
-                  position: "absolute", top: -4, right: -4,
-                  background: "#EF4444", color: "white", borderRadius: "50%",
-                  width: 16, height: 16, fontSize: 10, display: "flex", alignItems: "center", justifyContent: "center"
-                }}>{unreadCount}</span>
-              )}
+      {/* Main */}
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+        <header style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 26px", borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, background: C.bg + "ee", backdropFilter: "blur(6px)", zIndex: 100 }}>
+          <div style={{ minWidth: 0 }}>
+            <h1 style={{ fontSize: 19, fontWeight: 800, color: C.text }}>{title}</h1>
+            <div style={{ fontSize: 12.5, color: C.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{subtitle}</div>
+          </div>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
+            {page === "board" && (
+              <div style={{ position: "relative", width: 260, maxWidth: "30vw" }}>
+                <span style={{ position: "absolute", left: 11, top: 9 }}><Icon name="search" size={15} color={C.text3} /></span>
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Invoice, customer…" style={{ width: "100%", padding: "8px 12px 8px 34px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5, outline: "none" }} />
+              </div>
+            )}
+            {canCreate && <Btn onClick={() => setShowCreate(true)}><Icon name="plus" size={15} /> New Order</Btn>}
+            <button onClick={() => { setShowNotifs((s) => !s); }} style={{ position: "relative", width: 38, height: 38, display: "grid", placeItems: "center", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, cursor: "pointer", color: C.text2 }}>
+              <Icon name="bell" size={17} color={C.text2} />
+              {unread > 0 && <span style={{ position: "absolute", top: -5, right: -5, minWidth: 17, height: 17, padding: "0 4px", background: C.danger, color: "#fff", borderRadius: 9, fontSize: 10.5, fontWeight: 700, display: "grid", placeItems: "center" }}>{unread}</span>}
             </button>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, borderLeft: "1px solid #E5E7EB", paddingLeft: 10 }}>
-            <Avatar name={user.name} color={user.avatar_color} size={28} />
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 500, color: "#1E293B" }}>{user.name}</div>
-              <div style={{ fontSize: 11, color: "#94A3B8" }}>{ROLE_LABELS[user.role]}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, paddingLeft: 12, borderLeft: `1px solid ${C.border}` }}>
+              <Avatar name={user.name} color={user.avatar_color} size={32} />
+              <div><div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>{user.name}</div><div style={{ fontSize: 11, color: C.text3 }}>{ROLE_LABELS[user.role]}</div></div>
             </div>
-            <button onClick={handleLogout} style={{ background: "none", border: "none", cursor: "pointer", color: "#94A3B8", fontSize: 12 }}>Sign out</button>
           </div>
-        </div>
-      </div>
-
-      {/* Notifications panel */}
-      {showNotifs && <NotificationsPanel onClose={() => setShowNotifs(false)} />}
-
-      {/* Main content */}
-      <div style={{ padding: "24px 24px", maxWidth: 1400, margin: "0 auto" }}>
-        <h1 style={{ fontSize: 18, fontWeight: 700, color: "#1E293B", margin: "0 0 20px" }}>{pageTitles[page]}</h1>
+        </header>
 
         {page === "board" && (
-          <div style={{ overflowX: "auto" }}>
-            <KanbanBoard key={boardKey} user={user} onSelectOrder={o => setSelectedOrderId(o.id)} />
+          <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 26px 0" }}>
+            <button onClick={() => setWeekOnly((w) => !w)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: weekOnly ? C.accent + "1c" : C.surface, border: `1px solid ${weekOnly ? C.accent + "55" : C.border2}`, borderRadius: 9, color: weekOnly ? C.accent : C.text2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+              <Icon name="calendar" size={15} color={weekOnly ? C.accent : C.text3} /> This week only
+            </button>
+            <span style={{ marginLeft: "auto", fontSize: 12.5, color: C.text3 }}>Click <Icon name="arrowRight" size={13} color={C.text3} style={{ verticalAlign: "middle" }} /> to advance · ⋮ for details</span>
           </div>
         )}
-        {page === "dashboard" && <Dashboard />}
-        {page === "reports" && <Reports />}
-        {page === "users" && <UsersPage user={user} />}
+
+        <main style={{ flex: 1, padding: "20px 26px 40px", overflowX: "auto" }}>
+          {page === "board" && <OrderBoard user={user} search={search} weekOnly={weekOnly} refreshKey={boardKey} onOpenOrder={(o) => setSelectedOrder(o.id)} onCount={setBoardCount} />}
+          {page === "dashboard" && <Dashboard />}
+          {page === "delivery" && <Delivery user={user} />}
+          {page === "reports" && <Reports />}
+          {page === "remarks" && <Remarks user={user} />}
+          {page === "audit" && <Audit />}
+          {page === "users" && <Users user={user} />}
+          {page === "settings" && <Settings />}
+        </main>
       </div>
 
-      {/* Order Detail Modal */}
-      <Modal open={!!selectedOrderId} onClose={() => setSelectedOrderId(null)} title="Order Detail" width={640}>
-        {selectedOrderId && (
-          <OrderDetail
-            orderId={selectedOrderId} user={user}
-            onClose={() => setSelectedOrderId(null)}
-            onUpdated={() => setBoardKey(k => k + 1)}
-          />
-        )}
+      {showNotifs && <NotificationsPanel onClose={() => setShowNotifs(false)} onChanged={() => setUnread(0)} />}
+
+      <Modal open={!!selectedOrder} onClose={() => setSelectedOrder(null)} title="Order detail" width={640}>
+        {selectedOrder && <OrderDetail orderId={selectedOrder} user={user} onUpdated={bumpBoard} />}
       </Modal>
 
-      {/* Create Order Modal */}
-      <Modal open={showCreateOrder} onClose={() => setShowCreateOrder(false)} title="Create New Order" width={600}>
-        <CreateOrderForm
-          onCreated={() => { setShowCreateOrder(false); setBoardKey(k => k + 1); }}
-          onClose={() => setShowCreateOrder(false)}
-        />
+      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create new order" width={620}>
+        <CreateOrderForm onCreated={() => { setShowCreate(false); bumpBoard(); }} onClose={() => setShowCreate(false)} />
       </Modal>
     </div>
   );
