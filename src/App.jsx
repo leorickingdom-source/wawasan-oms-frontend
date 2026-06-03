@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
-// ─── Mock API (replace BASE_URL with your backend) ─────────────────────────
-const BASE_URL = "http://localhost:3001/api";
+// ─── API base URL ──────────────────────────────────────────────────────────
+// Set VITE_API_URL in your environment (e.g. the Vercel project settings) to
+// point at the deployed backend, e.g. https://your-backend.vercel.app/api
+// Falls back to the local dev server when the variable is not set.
+const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
 let _token = localStorage.getItem("oms_token") || "";
 
 async function api(method, path, body, isFormData = false) {

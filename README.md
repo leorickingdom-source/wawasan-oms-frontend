@@ -1,16 +1,46 @@
-# React + Vite
+# Wawasan Candle OMS — Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite single-page app for the Order Management System. It talks to the
+[`oms-backend`](../oms-backend) REST API over HTTP using a JWT bearer token.
 
-Currently, two official plugins are available:
+## Quick Start (local dev)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```bash
+npm install
+cp .env.example .env     # set VITE_API_URL (defaults to http://localhost:3001/api)
+npm run dev              # http://localhost:5173
+```
 
-## React Compiler
+Make sure the backend is running (or the app falls back to a read-only demo mode
+when it can't reach the API).
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Environment
 
-## Expanding the ESLint configuration
+| Variable       | Description                                              |
+|----------------|----------------------------------------------------------|
+| `VITE_API_URL` | Backend base URL **including** `/api`, no trailing slash |
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- Local:  `http://localhost:3001/api`
+- Prod:   `https://<your-backend>.vercel.app/api`
+
+> Vite only exposes variables prefixed with `VITE_`, and they are inlined at
+> **build time** — set `VITE_API_URL` in Vercel *before* deploying.
+
+## Deploy to Vercel
+
+1. Import the `wawasan-oms-frontend` folder as a Vercel project
+   (Root Directory = `wawasan-oms-frontend`; framework auto-detects as Vite).
+2. Add an Environment Variable `VITE_API_URL` = your deployed backend URL (+ `/api`).
+3. Deploy. `vercel.json` builds with Vite and serves the SPA from `dist/`.
+4. Add the resulting frontend URL to the backend's `FRONTEND_URL` (CORS allow-list).
+
+## Build
+
+```bash
+npm run build    # outputs to dist/
+npm run preview  # preview the production build locally
+```
+
+## Tech Stack
+- React 19 + Vite
+- Plain `fetch` API client (`src/App.jsx`), JWT stored in `localStorage`
