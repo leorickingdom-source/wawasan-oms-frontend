@@ -788,31 +788,77 @@ function Reports() {
 // ─── Delivery ──────────────────────────────────────────────────────────────────
 function Delivery({ user }) {
   const [list, setList] = useState(null);
-  const canManage = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
-  function load() { api("GET", "/delivery").then(setList).catch(() => setList([])); }
-  useEffect(() => { load(); }, []);
+  const [ready, setReady] = useState([]);
+  const [drivers, setDrivers] = useState([]);
+  const [show, setShow] = useState(false);
+  const [form, setForm] = useState({ order_id: "", delivery_man_id: "", scheduled_date: "", notes: "" });
+  const canAssign = ["super_admin", "operations_controller"].includes(user.role);
+  const canDeliver = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
+
+  async function load() {
+    const d = await api("GET", "/delivery").catch(() => []);
+    setList(d || []);
+    if (canAssign) {
+      const o = await api("GET", "/orders?stage=ready_for_delivery&limit=100").catch(() => ({ orders: [] }));
+      const u = await api("GET", "/users").catch(() => []);
+      const taken = new Set((d || []).filter((x) => x.status !== "delivered" && x.status !== "failed").map((x) => x.order_id));
+      setReady((o.orders || []).filter((x) => !taken.has(x.id)));
+      setDrivers((u || []).filter((x) => x.is_active && x.role === "delivery_team"));
+    }
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  async function assign() {
+    if (!form.order_id) { alert("Pick an order to schedule."); return; }
+    try {
+      await api("POST", "/delivery", form);
+      setShow(false); setForm({ order_id: "", delivery_man_id: "", scheduled_date: "", notes: "" });
+      load();
+    } catch (e) { alert(e.message); }
+  }
   async function markDelivered(id) { try { await api("POST", `/delivery/${id}/deliver`, {}); load(); } catch (e) { alert(e.message); } }
+
   if (!list) return <Loading />;
   const tone = { pending: C.packing, in_transit: C.order, delivered: C.ready, failed: C.danger };
+
   return (
-    <Card style={{ padding: 0, overflow: "hidden" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-        <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Driver", "Scheduled", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
-        <tbody>
-          {list.length === 0 && <tr><td colSpan={6}><Empty label="No deliveries scheduled yet. Assign one from a Ready-for-Delivery order." /></td></tr>}
-          {list.map((dv) => (
-            <tr key={dv.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-              <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{dv.invoice_number}</td>
-              <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.customer_name}</td>
-              <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.delivery_man_name || "—"}</td>
-              <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"}</td>
-              <td style={{ padding: "11px 16px" }}><Pill color={tone[dv.status] || C.text3}>{dv.status}</Pill></td>
-              <td style={{ padding: "11px 16px" }}>{canManage && dv.status !== "delivered" && <Btn size="sm" variant="success" onClick={() => markDelivered(dv.id)}>Mark delivered</Btn>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </Card>
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 13, color: C.text3 }}>{canAssign ? `${ready.length} order${ready.length === 1 ? "" : "s"} awaiting scheduling` : "Your delivery schedule"}</div>
+        {canAssign && <Btn onClick={() => setShow(true)} disabled={ready.length === 0}><Icon name="plus" size={15} /> Schedule delivery</Btn>}
+      </div>
+      <Card style={{ padding: 0, overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+          <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Driver", "Scheduled", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {list.length === 0 && <tr><td colSpan={6}><Empty label="No deliveries scheduled yet." /></td></tr>}
+            {list.map((dv) => (
+              <tr key={dv.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{dv.invoice_number}</td>
+                <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.customer_name}</td>
+                <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.delivery_man_name || "—"}</td>
+                <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"}</td>
+                <td style={{ padding: "11px 16px" }}><Pill color={tone[dv.status] || C.text3}>{dv.status}</Pill></td>
+                <td style={{ padding: "11px 16px" }}>{canDeliver && dv.status !== "delivered" && <Btn size="sm" variant="success" onClick={() => markDelivered(dv.id)}>Mark delivered</Btn>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+
+      <Modal open={show} onClose={() => setShow(false)} title="Schedule delivery">
+        <Field label="Order (ready for delivery)" value={form.order_id} onChange={(v) => setForm((f) => ({ ...f, order_id: v }))}
+          options={[{ value: "", label: "Select order…" }, ...ready.map((o) => ({ value: o.id, label: `${o.invoice_number} — ${o.customer_name}` }))]} />
+        <Field label="Driver" value={form.delivery_man_id} onChange={(v) => setForm((f) => ({ ...f, delivery_man_id: v }))}
+          options={[{ value: "", label: drivers.length ? "Unassigned" : "No delivery-team users yet" }, ...drivers.map((d) => ({ value: d.id, label: d.name }))]} />
+        <Field label="Scheduled date" type="date" value={form.scheduled_date} onChange={(v) => setForm((f) => ({ ...f, scheduled_date: v }))} />
+        <Field label="Notes" value={form.notes} onChange={(v) => setForm((f) => ({ ...f, notes: v }))} placeholder="Optional…" />
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
+          <Btn variant="ghost" onClick={() => setShow(false)}>Cancel</Btn>
+          <Btn onClick={assign}>Schedule</Btn>
+        </div>
+      </Modal>
+    </div>
   );
 }
 
