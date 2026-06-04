@@ -43,7 +43,7 @@ const FORWARD_STAGE = { order: "production", production: "packing", packing: "re
 const ADVANCE_LABEL = { order: "Send to production", production: "Mark production complete", packing: "Mark packed", ready_for_delivery: "Mark delivered" };
 function canAdvanceStage(role, stage) {
   if (role === "super_admin" || role === "operations_controller") return true;
-  if (stage === "production" && (role === "production_staff" || role === "production_lead")) return true;
+  if (stage === "production" && role === "production_staff") return true;
   if (stage === "packing" && role === "packing_staff") return true;
   return false;
 }
