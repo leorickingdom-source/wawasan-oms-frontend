@@ -228,7 +228,8 @@ function KanbanCard({ order, canMove, onOpen, onAdvance }) {
   const cd = countdown(order.required_delivery_date);
   const late = (daysUntil(order.required_delivery_date) ?? 0) < 0;
   const urgent = order.priority === "urgent";
-  const onHold = order.stage === "on_hold";
+  const onHold = !!order.on_hold;
+  const waiting = !!order.waiting_stock;
   const invColor = late ? C.danger : urgent ? C.accent2 : C.text;
   const next = BOARD_STAGES[BOARD_STAGES.indexOf(order.stage) + 1] || "delivered";
   return (
@@ -239,6 +240,7 @@ function KanbanCard({ order, canMove, onOpen, onAdvance }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
         <span style={{ fontFamily: MONO, fontSize: 15, fontWeight: 700, color: invColor, letterSpacing: 0.3 }}>{order.invoice_number}</span>
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {waiting && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
           {onHold && <Pill color={C.hold}>On hold</Pill>}
           {urgent && <Pill color={C.danger}>Urgent</Pill>}
           {order.skip_production && <Pill color={C.accent} bg="transparent">skip-prod</Pill>}
@@ -265,7 +267,7 @@ function KanbanCard({ order, canMove, onOpen, onAdvance }) {
             : <span style={{ fontSize: 12, color: C.text3 }}>Unassigned</span>}
         </div>
         <div style={{ display: "flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
-          {canMove && order.stage !== "on_hold" && <IconBtn icon="arrowRight" onClick={() => onAdvance(order, next)} title={`Advance to ${(STAGE_LABELS[next] || {}).label || next}`} color={C.ready} bg="#13301f" border="#1f5036" />}
+          {canMove && !order.on_hold && <IconBtn icon="arrowRight" onClick={() => onAdvance(order, next)} title={`Advance to ${(STAGE_LABELS[next] || {}).label || next}`} color={C.ready} bg="#13301f" border="#1f5036" />}
           <IconBtn icon="dots" onClick={() => onOpen(order)} title="Details & actions" />
         </div>
       </div>
@@ -432,6 +434,12 @@ function FloorDisplay({ onExit }) {
                     return (
                       <div key={o.id} style={{ background: C.surface, border: `1px solid ${urgent || late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${cfg.color}`, borderRadius: 9, padding: "9px 11px" }}>
                         <div style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
+                        {(o.waiting_stock || o.on_hold) && (
+                          <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
+                            {o.waiting_stock && <Pill color={C.danger} style={{ fontSize: 9.5, padding: "1px 6px" }}>⚠ Stock</Pill>}
+                            {o.on_hold && <Pill color={C.hold} style={{ fontSize: 9.5, padding: "1px 6px" }}>Hold</Pill>}
+                          </div>
+                        )}
                         <div style={{ fontSize: 12.5, color: cd.tone, marginTop: 3 }}>
                           <span style={{ color: C.text2 }}>{fmtDay(o.required_delivery_date)}</span> · {cd.text}{urgent ? " · URGENT" : ""}
                         </div>
@@ -511,6 +519,10 @@ function OrderDetail({ orderId, user, onUpdated }) {
     try { await api("PATCH", `/orders/${orderId}/items/${it.id}`, { made: !it.made }); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); }
   }
+  async function setFlag(body) {
+    try { await api("PATCH", `/orders/${orderId}/flags`, body); await load(); onUpdated && onUpdated(); }
+    catch (e) { alert(e.message); }
+  }
 
   if (!order) return <Loading />;
   if (order._error) return <div style={{ color: "#fca5a5" }}>⚠ {order._error}</div>;
@@ -519,9 +531,11 @@ function OrderDetail({ orderId, user, onUpdated }) {
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
         <span style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, color: C.text }}>{order.invoice_number}</span>
         <Pill color={cfg.color}>{cfg.label}</Pill>
+        {order.waiting_stock && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
+        {order.on_hold && <Pill color={C.hold}>On hold</Pill>}
         {order.priority === "urgent" && <Pill color={C.danger}>Urgent</Pill>}
         {order.skip_production && <Pill color={C.accent} bg="transparent">skip-prod</Pill>}
       </div>
@@ -598,13 +612,14 @@ function OrderDetail({ orderId, user, onUpdated }) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
             <select value={moveStage} onChange={(e) => setMoveStage(e.target.value)} style={{ flex: 1, minWidth: 170, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }}>
               <option value="" style={{ background: C.bg2 }}>Move to…</option>
-              {Object.keys(STAGE_LABELS).filter((k) => k !== order.stage).map((k) => <option key={k} value={k} style={{ background: C.bg2 }}>{STAGE_LABELS[k].label}</option>)}
+              {Object.keys(STAGE_LABELS).filter((k) => k !== order.stage && k !== "on_hold" && k !== "cancelled").map((k) => <option key={k} value={k} style={{ background: C.bg2 }}>{STAGE_LABELS[k].label}</option>)}
             </select>
             <input placeholder="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} style={{ flex: 2, minWidth: 160, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }} />
             <Btn onClick={() => doMove(moveStage, reason)} disabled={!moveStage || busy}>Confirm</Btn>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {order.stage !== "on_hold" && <Btn variant="soft" size="sm" onClick={() => doMove("on_hold", reason || "On hold")} disabled={busy}>Put on hold</Btn>}
+            <Btn variant="soft" size="sm" onClick={() => setFlag({ on_hold: !order.on_hold, reason: reason || undefined })} disabled={busy}>{order.on_hold ? "Release hold" : "Put on hold"}</Btn>
+            <Btn variant="soft" size="sm" onClick={() => setFlag({ waiting_stock: !order.waiting_stock })} disabled={busy}>{order.waiting_stock ? "Clear waiting stock" : "Flag waiting stock"}</Btn>
             <Btn variant="danger" size="sm" onClick={() => { if (confirm("Cancel this order?")) doMove("cancelled", reason || "Cancelled"); }} disabled={busy}>Cancel order</Btn>
           </div>
         </div>
