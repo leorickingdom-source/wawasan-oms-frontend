@@ -342,10 +342,51 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
 }
 
 // ─── Order Board ───────────────────────────────────────────────────────────────
+function AdvanceConfirmModal({ order, to, onConfirm, onClose }) {
+  const [detail, setDetail] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api("GET", `/orders/${order.id}`).then(setDetail).catch(() => setDetail({ items: [] })); }, [order.id]);
+  const items = (detail && detail.items) || [];
+  const allMade = items.length > 0 && items.every((it) => it.made);
+  const title = ADVANCE_LABEL[order.stage] || `Advance to ${(STAGE_LABELS[to] || {}).label || to}`;
+  async function go() { setBusy(true); try { await onConfirm(); } finally { setBusy(false); } }
+  return (
+    <Modal open onClose={onClose} title={title} width={520}>
+      <div style={{ fontSize: 14, marginBottom: 4 }}>
+        <span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{order.invoice_number}</span> <span style={{ color: C.text2 }}>· {order.customer_name}</span>
+      </div>
+      <div style={{ fontSize: 12.5, color: C.text3, marginBottom: 14 }}>Check the items below are done, then confirm the move to <b style={{ color: C.text2 }}>{(STAGE_LABELS[to] || {}).label || to}</b>.</div>
+      {!detail ? <Loading /> : (
+        <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", marginBottom: 14 }}>
+          {items.length === 0 && <Empty label="No line items on this order." />}
+          {items.map((it) => (
+            <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderBottom: `1px solid ${C.border}` }}>
+              <span style={{ width: 9, height: 9, borderRadius: "50%", background: it.made ? C.ready : C.text3, flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: MONO, fontSize: 11.5, color: C.text3 }}>{it.sku}</div>
+                <div style={{ fontSize: 13.5, color: C.text }}>{it.name}</div>
+              </div>
+              <div style={{ fontWeight: 700, color: C.text, marginRight: 6 }}>{Math.round(it.quantity)}<span style={{ fontSize: 11, color: C.text3, fontWeight: 400 }}> {it.unit || "pcs"}</span></div>
+              {it.made ? <span style={{ color: C.ready, fontSize: 13, fontWeight: 700 }}>✓</span> : <span style={{ color: C.text3, fontSize: 12 }}>pending</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {order.stage === "production" && items.length > 0 && !allMade && (
+        <div style={{ fontSize: 12.5, color: C.packing, marginBottom: 12 }}>⚠ Not all SKUs are marked made yet — confirm only if production is actually complete.</div>
+      )}
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn onClick={go} disabled={busy}><Icon name="check" size={15} /> {busy ? "Moving…" : "Confirm & advance"}</Btn>
+      </div>
+    </Modal>
+  );
+}
 function OrderBoard({ user, search, weekOnly, onOpenOrder, refreshKey, onCount }) {
   const [board, setBoard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const [confirmAdv, setConfirmAdv] = useState(null);
   const canMove = ["super_admin", "operations_controller"].includes(user.role);
   const stages = visibleStages(user.role);
 
@@ -360,8 +401,10 @@ function OrderBoard({ user, search, weekOnly, onOpenOrder, refreshKey, onCount }
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [weekOnly, refreshKey]);
 
-  async function advance(order, to) {
-    try { await api("POST", `/orders/${order.id}/move`, { to_stage: to }); load(); }
+  function advance(order, to) { setConfirmAdv({ order, to }); }
+  async function doAdvance() {
+    const { order, to } = confirmAdv;
+    try { await api("POST", `/orders/${order.id}/move`, { to_stage: to }); setConfirmAdv(null); load(); }
     catch (e) { alert(e.message); }
   }
   const filt = (arr) => {
@@ -396,6 +439,7 @@ function OrderBoard({ user, search, weekOnly, onOpenOrder, refreshKey, onCount }
           );
         })}
       </div>
+      {confirmAdv && <AdvanceConfirmModal order={confirmAdv.order} to={confirmAdv.to} onConfirm={doAdvance} onClose={() => setConfirmAdv(null)} />}
     </div>
   );
 }
