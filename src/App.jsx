@@ -39,6 +39,7 @@ const STAGES = {
   ready_for_delivery: { label: "Ready for Delivery", color: C.ready },
 };
 const BOARD_STAGES = ["order", "production", "packing", "ready_for_delivery"];
+const MAX_UPLOAD_MB = 5;
 const FORWARD_STAGE = { order: "production", production: "packing", packing: "ready_for_delivery", ready_for_delivery: "delivered" };
 const ADVANCE_LABEL = { order: "Send to production", production: "Mark production complete", packing: "Mark packed", ready_for_delivery: "Mark delivered" };
 // Which roles can be the PIC at each stage (shown in the PIC picker).
@@ -132,12 +133,10 @@ function downloadCsv(filename, rows) {
   URL.revokeObjectURL(url);
 }
 function printPickingSlip(order) {
-  const w = window.open("", "_blank", "width=760,height=900");
-  if (!w) { alert("Please allow pop-ups to print the picking slip."); return; }
   const rows = (order.items || []).map((it) =>
     `<tr><td class="m">${escHtml(it.sku)}</td><td>${escHtml(it.name)}</td><td class="q">${Math.round(it.quantity)}</td><td>${escHtml(it.unit || "pcs")}</td><td class="chk">&#9744;</td></tr>`
   ).join("");
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Picking Slip ${escHtml(order.invoice_number)}</title>
+  const html = (`<!doctype html><html><head><meta charset="utf-8"><title>Picking Slip ${escHtml(order.invoice_number)}</title>
 <style>
   *{box-sizing:border-box} body{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#111;margin:32px}
   h1{font-size:22px;margin:0 0 2px} .sub{color:#666;margin-bottom:18px}
@@ -157,7 +156,19 @@ function printPickingSlip(order) {
   <tbody>${rows || '<tr><td colspan="5">No items.</td></tr>'}</tbody></table>
   <p style="margin-top:24px;color:#888;font-size:12px">Printed ${escHtml(new Date().toLocaleString())}</p>
 </body></html>`);
-  w.document.close(); w.focus(); w.print();
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+  document.body.appendChild(iframe);
+  const doc = iframe.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+  setTimeout(() => {
+    try {
+      const w = iframe.contentWindow;
+      w.onafterprint = () => { try { iframe.remove(); } catch (e) {} };
+      w.focus(); w.print();
+      setTimeout(() => { try { iframe.remove(); } catch (e) {} }, 60000);
+    } catch (e) { alert("Could not open the print dialog: " + e.message); try { iframe.remove(); } catch (_) {} }
+  }, 350);
 }
 
 // ─── Icons ───────────────────────────────────────────────────────────────────
@@ -674,9 +685,15 @@ function OrderDetail({ orderId, user, onUpdated }) {
   }
   async function uploadAttachment(file) {
     if (!file) return;
+    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) { alert(`File too large — max ${MAX_UPLOAD_MB} MB. Please compress it first.`); return; }
     setUploading(true);
     try { const fd = new FormData(); fd.append("file", file); await api("POST", `/orders/${orderId}/attachments`, fd, true); await load(); }
     catch (e) { alert(e.message); } finally { setUploading(false); }
+  }
+  async function removeAttachment(attId) {
+    if (!confirm("Remove this attachment? This also frees the storage it uses.")) return;
+    try { await api("DELETE", `/orders/${orderId}/attachments/${attId}`); await load(); }
+    catch (e) { alert(e.message); }
   }
 
   if (!order) return <Loading />;
@@ -795,7 +812,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
           <div style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <input type="file" id="att-file-input" onChange={(e) => { uploadAttachment(e.target.files[0]); e.target.value = ""; }} style={{ display: "none" }} />
             <Btn size="sm" variant="soft" onClick={() => document.getElementById("att-file-input").click()} disabled={uploading}><Icon name="plus" size={14} /> {uploading ? "Uploading…" : "Upload attachment"}</Btn>
-            <span style={{ fontSize: 12, color: C.text3 }}>Invoice PDF, customer note, or image</span>
+            <span style={{ fontSize: 12, color: C.text3 }}>PDF or image · max {MAX_UPLOAD_MB} MB</span>
           </div>
           {(order.attachments || []).length === 0 && <Empty label="No attachments yet." />}
           {(order.attachments || []).map((a) => (
@@ -804,7 +821,9 @@ function OrderDetail({ orderId, user, onUpdated }) {
               {a.url
                 ? <a href={a.url} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: C.accent2, textDecoration: "none" }}>{a.original_name}</a>
                 : <span style={{ fontSize: 13, color: C.text }}>{a.original_name}</span>}
+              {a.size != null && <span style={{ fontSize: 11, color: C.text3 }}>{a.size >= 1048576 ? (a.size / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(a.size / 1024)) + " KB"}</span>}
               <span style={{ fontSize: 11.5, color: C.text3, marginLeft: "auto" }}>{a.uploaded_by_name}</span>
+              {canMove && <button onClick={() => removeAttachment(a.id)} title="Remove" style={{ background: "#3a1a1a", border: "none", borderRadius: 6, color: "#fca5a5", cursor: "pointer", width: 24, height: 24, flexShrink: 0 }}>×</button>}
             </div>
           ))}
         </div>
