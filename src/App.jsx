@@ -99,6 +99,48 @@ function countdown(s) {
 function initials(name = "") {
   return name.trim().split(/\s+/).map((w) => w[0]).join("").toUpperCase().slice(0, 2) || "?";
 }
+function escHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function downloadCsv(filename, rows) {
+  const csv = rows.map((r) => r.map((cell) => {
+    const s = String(cell == null ? "" : cell);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }).join(",")).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+function printPickingSlip(order) {
+  const w = window.open("", "_blank", "width=760,height=900");
+  if (!w) { alert("Please allow pop-ups to print the picking slip."); return; }
+  const rows = (order.items || []).map((it) =>
+    `<tr><td class="m">${escHtml(it.sku)}</td><td>${escHtml(it.name)}</td><td class="q">${Math.round(it.quantity)}</td><td>${escHtml(it.unit || "pcs")}</td><td class="chk">&#9744;</td></tr>`
+  ).join("");
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Picking Slip ${escHtml(order.invoice_number)}</title>
+<style>
+  *{box-sizing:border-box} body{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#111;margin:32px}
+  h1{font-size:22px;margin:0 0 2px} .sub{color:#666;margin-bottom:18px}
+  .meta{display:flex;gap:32px;flex-wrap:wrap;margin-bottom:18px} .meta div{font-size:13px} .meta b{display:block;color:#888;font-weight:600;font-size:11px;text-transform:uppercase}
+  table{width:100%;border-collapse:collapse;margin-top:8px} th,td{padding:9px 10px;border-bottom:1px solid #ddd;text-align:left}
+  th{font-size:11px;text-transform:uppercase;color:#888} .m{font-family:ui-monospace,Consolas,monospace;color:#555} .q{font-weight:700;text-align:right} .chk{width:30px;text-align:center;font-size:18px}
+  @media print{body{margin:12mm}}
+</style></head><body>
+  <h1>Picking Slip</h1><div class="sub">Wawasan Candle OMS — ${escHtml(order.invoice_number)}</div>
+  <div class="meta">
+    <div><b>Customer</b>${escHtml(order.customer_name)}</div>
+    <div><b>Delivery date</b>${escHtml(fmtDay(order.required_delivery_date))}</div>
+    <div><b>Stage</b>${escHtml((STAGE_LABELS[order.stage] || {}).label || order.stage)}</div>
+    <div><b>Priority</b>${order.priority === "urgent" ? "URGENT" : "Normal"}</div>
+  </div>
+  <table><thead><tr><th>SKU</th><th>Product</th><th style="text-align:right">Qty</th><th>Unit</th><th>Picked</th></tr></thead>
+  <tbody>${rows || '<tr><td colspan="5">No items.</td></tr>'}</tbody></table>
+  <p style="margin-top:24px;color:#888;font-size:12px">Printed ${escHtml(new Date().toLocaleString())}</p>
+</body></html>`);
+  w.document.close(); w.focus(); w.print();
+}
 
 // ─── Icons ───────────────────────────────────────────────────────────────────
 const ICONS = {
@@ -539,7 +581,10 @@ function OrderDetail({ orderId, user, onUpdated }) {
         {order.priority === "urgent" && <Pill color={C.danger}>Urgent</Pill>}
         {order.skip_production && <Pill color={C.accent} bg="transparent">skip-prod</Pill>}
       </div>
-      <div style={{ fontSize: 13, color: C.text3, marginBottom: 16 }}>{order.created_by_name ? `Created by ${order.created_by_name}` : ""} {order.order_date ? `· ${fmtDay(order.order_date)}` : ""}</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13, color: C.text3 }}>{order.created_by_name ? `Created by ${order.created_by_name}` : ""} {order.order_date ? `· ${fmtDay(order.order_date)}` : ""}</span>
+        <Btn variant="ghost" size="sm" onClick={() => printPickingSlip(order)}>Print picking slip</Btn>
+      </div>
 
       <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${C.border}`, marginBottom: 16 }}>
         {tabs.map((t) => (
@@ -752,17 +797,26 @@ function Reports() {
   };
   const trend = d.daily_trend || [];
   const maxT = Math.max(...trend.map((t) => t.count), 1);
+  function exportReport() {
+    const rows = [["Report", tab], ["Period", period], [], ["Metric", "Value"], ...(metrics[tab] || []).map(([k, v]) => [k, v == null ? "" : v])];
+    if (tab === "delivery" && (d.by_delivery_man || []).length) rows.push([], ["Driver", "Deliveries", "On time"], ...d.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
+    if (trend.length) rows.push([], ["Date", "Count"], ...trend.map((t) => [t.date, t.count]));
+    downloadCsv(`report-${tab}-${period}.csv`, rows);
+  }
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 18 }}>
         <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4 }}>
           {["production", "packing", "delivery"].map((t) => <button key={t} onClick={() => setTab(t)} style={{ background: tab === t ? C.surface2 : "transparent", border: "none", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 13, fontWeight: tab === t ? 700 : 500, color: tab === t ? C.text : C.text2, textTransform: "capitalize" }}>{t}</button>)}
         </div>
-        <select value={period} onChange={(e) => setPeriod(e.target.value)} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13 }}>
-          <option value="daily" style={{ background: C.bg2 }}>Today</option>
-          <option value="weekly" style={{ background: C.bg2 }}>This Week</option>
-          <option value="monthly" style={{ background: C.bg2 }}>This Month</option>
-        </select>
+        <div style={{ display: "flex", gap: 8 }}>
+          <select value={period} onChange={(e) => setPeriod(e.target.value)} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13 }}>
+            <option value="daily" style={{ background: C.bg2 }}>Today</option>
+            <option value="weekly" style={{ background: C.bg2 }}>This Week</option>
+            <option value="monthly" style={{ background: C.bg2 }}>This Month</option>
+          </select>
+          <Btn variant="soft" onClick={exportReport}>Export CSV</Btn>
+        </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 20 }}>
         {(metrics[tab] || []).map(([label, value]) => <Card key={label}><div style={{ fontSize: 28, fontWeight: 800, color: C.accent }}>{value ?? "—"}</div><div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{label}</div></Card>)}
@@ -779,6 +833,23 @@ function Reports() {
               </div>
             ))}
           </div>
+        </Card>
+      )}
+      {tab === "delivery" && (d.by_delivery_man || []).length > 0 && (
+        <Card style={{ marginTop: 18 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>By delivery person</h3>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr>{["Driver", "Deliveries", "On-time"].map((h) => <th key={h} style={{ textAlign: "left", padding: "7px 8px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {d.by_delivery_man.map((x) => (
+                <tr key={x.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "7px 8px", color: C.text }}>{x.name}</td>
+                  <td style={{ padding: "7px 8px", color: C.text2 }}>{x.total}</td>
+                  <td style={{ padding: "7px 8px", color: C.ready }}>{x.on_time}{x.total ? ` (${Math.round((x.on_time / x.total) * 100)}%)` : ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </Card>
       )}
     </div>
