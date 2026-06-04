@@ -246,10 +246,16 @@ function IconBtn({ icon, onClick, title, color = C.text2, bg = C.surface2, borde
   );
 }
 function Modal({ open, onClose, title, children, width = 560 }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
   if (!open) return null;
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1000, padding: "6vh 16px", overflowY: "auto" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.bg2, border: `1px solid ${C.border2}`, borderRadius: 16, padding: "22px 24px", width, maxWidth: "96vw", boxShadow: "0 30px 80px rgba(0,0,0,.55)", animation: "wws-fade .15s ease" }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.62)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1000, padding: "6vh 16px", overflowY: "auto" }}>
+      <div style={{ background: C.bg2, border: `1px solid ${C.border2}`, borderRadius: 16, padding: "22px 24px", width, maxWidth: "96vw", boxShadow: "0 30px 80px rgba(0,0,0,.55)", animation: "wws-fade .15s ease" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
           <h2 style={{ fontSize: 17, fontWeight: 700, color: C.text }}>{title}</h2>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: C.text3, display: "grid", placeItems: "center" }}><Icon name="x" size={20} color={C.text3} /></button>
