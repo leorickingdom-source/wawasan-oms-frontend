@@ -41,6 +41,8 @@ const STAGES = {
 const BOARD_STAGES = ["order", "production", "packing", "ready_for_delivery"];
 const FORWARD_STAGE = { order: "production", production: "packing", packing: "ready_for_delivery", ready_for_delivery: "delivered" };
 const ADVANCE_LABEL = { order: "Send to production", production: "Mark production complete", packing: "Mark packed", ready_for_delivery: "Mark delivered" };
+// Which roles can be the PIC at each stage (shown in the PIC picker).
+const STAGE_PIC_ROLES = { order: ["operations_controller"], production: ["production_lead", "production_staff"], packing: ["packing_staff"], ready_for_delivery: ["delivery_team"] };
 function canAdvanceStage(role, stage) {
   if (stage === "ready_for_delivery") return false; // completion happens in the Delivery workspace
   if (role === "super_admin" || role === "operations_controller") return true;
@@ -599,6 +601,8 @@ function OrderDetail({ orderId, user, onUpdated }) {
   if (order._error) return <div style={{ color: "#fca5a5" }}>⚠ {order._error}</div>;
   const cfg = STAGE_LABELS[order.stage] || { label: order.stage, color: C.text3 };
   const tabs = ["details", "timeline", "items", "attachments"];
+  const picRoles = STAGE_PIC_ROLES[order.stage];
+  const picUsers = picRoles ? users.filter((u) => picRoles.includes(u.role)) : users;
 
   return (
     <div>
@@ -694,7 +698,8 @@ function OrderDetail({ orderId, user, onUpdated }) {
             <span style={{ fontSize: 12.5, color: C.text2, minWidth: 28 }}>PIC</span>
             <select value={order.pic_id || ""} onChange={(e) => assignPic(e.target.value)} style={{ flex: 1, minWidth: 180, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }}>
               <option value="" style={{ background: C.bg2 }}>Unassigned</option>
-              {users.map((u) => <option key={u.id} value={u.id} style={{ background: C.bg2 }}>{u.name} — {ROLE_LABELS[u.role] || u.role}</option>)}
+              {order.pic_id && !picUsers.some((u) => u.id === order.pic_id) && <option value={order.pic_id} style={{ background: C.bg2 }}>{order.pic_name || "Current PIC"}</option>}
+              {picUsers.map((u) => <option key={u.id} value={u.id} style={{ background: C.bg2 }}>{u.name} — {ROLE_LABELS[u.role] || u.role}</option>)}
             </select>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
