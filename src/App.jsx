@@ -42,6 +42,7 @@ const BOARD_STAGES = ["order", "production", "packing", "ready_for_delivery"];
 const FORWARD_STAGE = { order: "production", production: "packing", packing: "ready_for_delivery", ready_for_delivery: "delivered" };
 const ADVANCE_LABEL = { order: "Send to production", production: "Mark production complete", packing: "Mark packed", ready_for_delivery: "Mark delivered" };
 function canAdvanceStage(role, stage) {
+  if (stage === "ready_for_delivery") return false; // completion happens in the Delivery workspace
   if (role === "super_admin" || role === "operations_controller") return true;
   if (stage === "production" && role === "production_staff") return true;
   if (stage === "packing" && role === "packing_staff") return true;
@@ -693,7 +694,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
             <select value={moveStage} onChange={(e) => setMoveStage(e.target.value)} style={{ flex: 1, minWidth: 170, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }}>
               <option value="" style={{ background: C.bg2 }}>Move to…</option>
-              {Object.keys(STAGE_LABELS).filter((k) => k !== order.stage && k !== "on_hold" && k !== "cancelled").map((k) => <option key={k} value={k} style={{ background: C.bg2 }}>{STAGE_LABELS[k].label}</option>)}
+              {Object.keys(STAGE_LABELS).filter((k) => k !== order.stage && k !== "on_hold" && k !== "cancelled" && k !== "delivered").map((k) => <option key={k} value={k} style={{ background: C.bg2 }}>{STAGE_LABELS[k].label}</option>)}
             </select>
             <input placeholder="Reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} style={{ flex: 2, minWidth: 160, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }} />
             <Btn onClick={() => doMove(moveStage, reason)} disabled={!moveStage || busy}>Confirm</Btn>
@@ -897,14 +898,18 @@ function Delivery({ user }) {
   const [list, setList] = useState(null);
   const [ready, setReady] = useState([]);
   const [drivers, setDrivers] = useState([]);
+  const [completed, setCompleted] = useState([]);
   const [show, setShow] = useState(false);
   const [form, setForm] = useState({ order_id: "", delivery_man_id: "", scheduled_date: "", notes: "" });
   const canAssign = ["super_admin", "operations_controller"].includes(user.role);
   const canDeliver = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
+  const isDriver = user.role === "delivery_team";
 
   async function load() {
     const d = await api("GET", "/delivery").catch(() => []);
     setList(d || []);
+    const comp = await api("GET", "/orders?stage=delivered&limit=100").catch(() => ({ orders: [] }));
+    setCompleted(comp.orders || []);
     if (canAssign) {
       const o = await api("GET", "/orders?stage=ready_for_delivery&limit=100").catch(() => ({ orders: [] }));
       const u = await api("GET", "/users").catch(() => []);
@@ -927,31 +932,61 @@ function Delivery({ user }) {
 
   if (!list) return <Loading />;
   const tone = { pending: C.packing, in_transit: C.order, delivered: C.ready, failed: C.danger };
+  let active = list.filter((x) => x.status !== "delivered");
+  if (isDriver) active = active.filter((x) => x.delivery_man_id === user.id);
+  const delByOrder = {};
+  for (const dv of list) delByOrder[dv.order_id] = dv;
 
   return (
-    <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
-        <div style={{ fontSize: 13, color: C.text3 }}>{canAssign ? `${ready.length} order${ready.length === 1 ? "" : "s"} awaiting scheduling` : "Your delivery schedule"}</div>
-        {canAssign && <Btn onClick={() => setShow(true)} disabled={ready.length === 0}><Icon name="plus" size={15} /> Schedule delivery</Btn>}
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{isDriver ? "My deliveries" : "Active deliveries"}{canAssign ? ` · ${ready.length} awaiting scheduling` : ""}</h3>
+          {canAssign && <Btn onClick={() => setShow(true)} disabled={ready.length === 0}><Icon name="plus" size={15} /> Schedule delivery</Btn>}
+        </div>
+        <Card style={{ padding: 0, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Driver", "Scheduled", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {active.length === 0 && <tr><td colSpan={6}><Empty label={isDriver ? "No deliveries assigned to you yet." : "Nothing to dispatch. Schedule a Ready-for-Delivery order."} /></td></tr>}
+              {active.map((dv) => (
+                <tr key={dv.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{dv.invoice_number}</td>
+                  <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.customer_name}</td>
+                  <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.delivery_man_name || "—"}</td>
+                  <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"}</td>
+                  <td style={{ padding: "11px 16px" }}><Pill color={tone[dv.status] || C.text3}>{dv.status}</Pill></td>
+                  <td style={{ padding: "11px 16px" }}>{canDeliver && <Btn size="sm" variant="success" onClick={() => markDelivered(dv.id)}>Mark delivered</Btn>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
       </div>
-      <Card style={{ padding: 0, overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-          <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Driver", "Scheduled", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
-          <tbody>
-            {list.length === 0 && <tr><td colSpan={6}><Empty label="No deliveries scheduled yet." /></td></tr>}
-            {list.map((dv) => (
-              <tr key={dv.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{dv.invoice_number}</td>
-                <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.customer_name}</td>
-                <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.delivery_man_name || "—"}</td>
-                <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"}</td>
-                <td style={{ padding: "11px 16px" }}><Pill color={tone[dv.status] || C.text3}>{dv.status}</Pill></td>
-                <td style={{ padding: "11px 16px" }}>{canDeliver && dv.status !== "delivered" && <Btn size="sm" variant="success" onClick={() => markDelivered(dv.id)}>Mark delivered</Btn>}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+
+      <div>
+        <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Completed orders · {completed.length}</h3>
+        <Card style={{ padding: 0, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Driver", "Delivered", "Due"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {completed.length === 0 && <tr><td colSpan={5}><Empty label="No completed orders yet." /></td></tr>}
+              {completed.map((o) => {
+                const dv = delByOrder[o.id];
+                return (
+                  <tr key={o.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{o.invoice_number}</td>
+                    <td style={{ padding: "11px 16px", color: C.text2 }}>{o.customer_name}</td>
+                    <td style={{ padding: "11px 16px", color: C.text2 }}>{dv && dv.delivery_man_name ? dv.delivery_man_name : "—"}</td>
+                    <td style={{ padding: "11px 16px", color: C.ready }}>{dv && dv.delivered_at ? fmtDateTime(dv.delivered_at) : "Delivered"}</td>
+                    <td style={{ padding: "11px 16px", color: C.text3 }}>{fmtDay(o.required_delivery_date)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </Card>
+      </div>
 
       <Modal open={show} onClose={() => setShow(false)} title="Schedule delivery">
         <Field label="Order (ready for delivery)" value={form.order_id} onChange={(v) => setForm((f) => ({ ...f, order_id: v }))}
