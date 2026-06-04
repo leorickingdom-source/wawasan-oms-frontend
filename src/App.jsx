@@ -39,6 +39,14 @@ const STAGES = {
   ready_for_delivery: { label: "Ready for Delivery", color: C.ready },
 };
 const BOARD_STAGES = ["order", "production", "packing", "ready_for_delivery"];
+const FORWARD_STAGE = { order: "production", production: "packing", packing: "ready_for_delivery", ready_for_delivery: "delivered" };
+const ADVANCE_LABEL = { order: "Send to production", production: "Mark production complete", packing: "Mark packed", ready_for_delivery: "Mark delivered" };
+function canAdvanceStage(role, stage) {
+  if (role === "super_admin" || role === "operations_controller") return true;
+  if (stage === "production" && (role === "production_staff" || role === "production_lead")) return true;
+  if (stage === "packing" && role === "packing_staff") return true;
+  return false;
+}
 const STAGE_LABELS = {
   ...STAGES, on_hold: { label: "On Hold", color: C.hold },
   delivered: { label: "Delivered", color: C.text3 }, cancelled: { label: "Cancelled", color: "#6b7280" },
@@ -265,7 +273,7 @@ function Empty({ label }) {
 }
 
 // ─── Kanban card (board) ───────────────────────────────────────────────────────
-function KanbanCard({ order, canMove, onOpen, onAdvance }) {
+function KanbanCard({ order, user, onOpen, onAdvance }) {
   const stage = STAGES[order.stage] || { color: C.text3 };
   const cd = countdown(order.required_delivery_date);
   const late = (daysUntil(order.required_delivery_date) ?? 0) < 0;
@@ -309,7 +317,7 @@ function KanbanCard({ order, canMove, onOpen, onAdvance }) {
             : <span style={{ fontSize: 12, color: C.text3 }}>Unassigned</span>}
         </div>
         <div style={{ display: "flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
-          {canMove && !order.on_hold && <IconBtn icon="arrowRight" onClick={() => onAdvance(order, next)} title={`Advance to ${(STAGE_LABELS[next] || {}).label || next}`} color={C.ready} bg="#13301f" border="#1f5036" />}
+          {canAdvanceStage(user.role, order.stage) && !order.on_hold && <IconBtn icon="arrowRight" onClick={() => onAdvance(order, next)} title={(user.role === "super_admin" || user.role === "operations_controller") ? `Advance to ${(STAGE_LABELS[next] || {}).label || next}` : (ADVANCE_LABEL[order.stage] || "Advance")} color={C.ready} bg="#13301f" border="#1f5036" />}
           <IconBtn icon="dots" onClick={() => onOpen(order)} title="Details & actions" />
         </div>
       </div>
@@ -364,7 +372,7 @@ function OrderBoard({ user, search, weekOnly, onOpenOrder, refreshKey, onCount }
                 <span style={{ background: C.surface2, color: C.text2, borderRadius: 7, padding: "1px 9px", fontSize: 13, fontWeight: 700 }}>{orders.length}</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                {orders.map((o) => <KanbanCard key={o.id} order={o} canMove={canMove} onOpen={onOpenOrder} onAdvance={advance} />)}
+                {orders.map((o) => <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} />)}
                 {orders.length === 0 && <Empty label="No orders" />}
               </div>
             </div>
@@ -648,6 +656,13 @@ function OrderDetail({ orderId, user, onUpdated }) {
               <span style={{ fontSize: 11.5, color: C.text3 }}>{a.uploaded_by_name}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {!canMove && canAdvanceStage(user.role, order.stage) && !order.on_hold && (
+        <div style={{ marginTop: 22, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
+          <Btn onClick={() => doMove(FORWARD_STAGE[order.stage])} disabled={busy}>{ADVANCE_LABEL[order.stage] || "Mark complete"} →</Btn>
+          <p style={{ fontSize: 12, color: C.text3, marginTop: 8 }}>Marks your stage done and moves the order to the next stage.</p>
         </div>
       )}
 
