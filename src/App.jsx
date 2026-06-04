@@ -57,7 +57,7 @@ const NAV = [
   { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "operations_controller"] },
   { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead"] },
   { id: "audit", label: "Audit Trail", icon: "audit", roles: ["super_admin"] },
-  { id: "users", label: "User Management", icon: "users", roles: ["super_admin"] },
+  { id: "users", label: "User Management", icon: "users", roles: ["super_admin", "operations_controller"] },
   { id: "settings", label: "System Settings", icon: "settings", roles: ["super_admin"] },
 ];
 const PAGE_META = {
@@ -999,17 +999,27 @@ function Users({ user }) {
   const [list, setList] = useState(null);
   const [show, setShow] = useState(false);
   const [f, setF] = useState({ name: "", email: "", role: "production_staff", password: "" });
+  const [resetFor, setResetFor] = useState(null);
+  const [newPw, setNewPw] = useState("");
+  const isAdmin = user.role === "super_admin";
   function load() { api("GET", "/users").then(setList).catch(() => setList([])); }
   useEffect(() => { load(); }, []);
   async function create() { try { await api("POST", "/users", f); setShow(false); setF({ name: "", email: "", role: "production_staff", password: "" }); load(); } catch (e) { alert(e.message); } }
   async function toggle(u) { try { await api("PATCH", `/users/${u.id}`, { is_active: !u.is_active }); load(); } catch (e) { alert(e.message); } }
+  async function resetPw() {
+    if (newPw.length < 8) { alert("New password must be at least 8 characters."); return; }
+    try { await api("PATCH", `/users/${resetFor.id}`, { password: newPw }); setResetFor(null); setNewPw(""); alert("Password reset."); } catch (e) { alert(e.message); }
+  }
+  // Ops can manage everyone except Super Admins; only a Super Admin manages Super Admins.
+  const canManage = (u) => isAdmin || u.role !== "super_admin";
+  const roleOptions = Object.entries(ROLE_LABELS).filter(([v]) => isAdmin || v !== "super_admin").map(([value, label]) => ({ value, label }));
   if (!list) return <Loading />;
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}><Btn onClick={() => setShow(true)}><Icon name="plus" size={15} /> Add user</Btn></div>
       <Card style={{ padding: 0, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-          <thead><tr style={{ background: C.bg2 }}>{["User", "Email", "Role", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+          <thead><tr style={{ background: C.bg2 }}>{["User", "Email", "Role", "Status", "Actions"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
           <tbody>
             {list.map((u) => (
               <tr key={u.id} style={{ borderBottom: `1px solid ${C.border}` }}>
@@ -1017,7 +1027,12 @@ function Users({ user }) {
                 <td style={{ padding: "11px 16px", color: C.text2 }}>{u.email}</td>
                 <td style={{ padding: "11px 16px" }}><Pill color={C.text2}>{ROLE_LABELS[u.role] || u.role}</Pill></td>
                 <td style={{ padding: "11px 16px" }}><Pill color={u.is_active ? C.ready : C.danger}>{u.is_active ? "Active" : "Disabled"}</Pill></td>
-                <td style={{ padding: "11px 16px" }}>{u.id !== user.id && <Btn size="sm" variant="ghost" onClick={() => toggle(u)}>{u.is_active ? "Disable" : "Enable"}</Btn>}</td>
+                <td style={{ padding: "11px 16px" }}>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {canManage(u) && <Btn size="sm" variant="ghost" onClick={() => { setResetFor(u); setNewPw(""); }}>Reset PW</Btn>}
+                    {u.id !== user.id && canManage(u) && <Btn size="sm" variant="ghost" onClick={() => toggle(u)}>{u.is_active ? "Disable" : "Enable"}</Btn>}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -1026,9 +1041,14 @@ function Users({ user }) {
       <Modal open={show} onClose={() => setShow(false)} title="Create user">
         <Field label="Full name" value={f.name} onChange={(v) => setF((p) => ({ ...p, name: v }))} required />
         <Field label="Email" type="email" value={f.email} onChange={(v) => setF((p) => ({ ...p, email: v }))} required />
-        <Field label="Role" value={f.role} onChange={(v) => setF((p) => ({ ...p, role: v }))} options={Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label }))} />
-        <Field label="Password" type="password" value={f.password} onChange={(v) => setF((p) => ({ ...p, password: v }))} required />
+        <Field label="Role" value={f.role} onChange={(v) => setF((p) => ({ ...p, role: v }))} options={roleOptions} />
+        <Field label="Temporary password" type="password" value={f.password} onChange={(v) => setF((p) => ({ ...p, password: v }))} required />
+        <p style={{ fontSize: 12, color: C.text3, margin: "-4px 0 10px" }}>The new staff member can change this after their first login.</p>
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}><Btn variant="ghost" onClick={() => setShow(false)}>Cancel</Btn><Btn onClick={create}>Create</Btn></div>
+      </Modal>
+      <Modal open={!!resetFor} onClose={() => setResetFor(null)} title={resetFor ? `Reset password — ${resetFor.name}` : "Reset password"} width={420}>
+        <Field label="New password (min 8 chars)" type="password" value={newPw} onChange={setNewPw} required />
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}><Btn variant="ghost" onClick={() => setResetFor(null)}>Cancel</Btn><Btn onClick={resetPw}>Set password</Btn></div>
       </Modal>
     </div>
   );
@@ -1120,6 +1140,37 @@ function NotificationsPanel({ onClose, onChanged }) {
   );
 }
 
+// ─── Change password (self-service) ─────────────────────────────────────────
+function ChangePasswordModal({ onClose }) {
+  const [cur, setCur] = useState("");
+  const [nw, setNw] = useState("");
+  const [nw2, setNw2] = useState("");
+  const [err, setErr] = useState("");
+  const [ok, setOk] = useState(false);
+  const [busy, setBusy] = useState(false);
+  async function submit() {
+    setErr("");
+    if (nw.length < 8) { setErr("New password must be at least 8 characters."); return; }
+    if (nw !== nw2) { setErr("New passwords don't match."); return; }
+    setBusy(true);
+    try { await api("POST", "/auth/change-password", { currentPassword: cur, newPassword: nw }); setOk(true); setTimeout(onClose, 1200); }
+    catch (e) { setErr(e.message); setBusy(false); }
+  }
+  return (
+    <Modal open onClose={onClose} title="Change password" width={420}>
+      {ok ? <div style={{ color: C.ready, fontSize: 14 }}>Password changed ✓</div> : (
+        <>
+          <Field label="Current password" type="password" value={cur} onChange={setCur} />
+          <Field label="New password" type="password" value={nw} onChange={setNw} />
+          <Field label="Confirm new password" type="password" value={nw2} onChange={setNw2} />
+          {err && <p style={{ color: "#fca5a5", fontSize: 13, margin: "-4px 0 10px" }}>{err}</p>}
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 }}><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn onClick={submit} disabled={busy}>{busy ? "Saving…" : "Change password"}</Btn></div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 // ─── Login ─────────────────────────────────────────────────────────────────────
 function LoginPage({ onLogin }) {
   const [email, setEmail] = useState("");
@@ -1161,6 +1212,7 @@ export default function App() {
   const [showCreate, setShowCreate] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [showChangePw, setShowChangePw] = useState(false);
   const [boardKey, setBoardKey] = useState(0);
   const [boardCount, setBoardCount] = useState(null);
 
@@ -1209,7 +1261,8 @@ export default function App() {
             );
           })}
         </nav>
-        <button onClick={logout} style={{ display: "flex", alignItems: "center", gap: 10, margin: "10px 16px 18px", padding: "10px 12px", background: "transparent", border: "none", color: C.text3, cursor: "pointer", fontSize: 13.5 }}><Icon name="logout" size={17} color={C.text3} /> Log out</button>
+        <button onClick={() => setShowChangePw(true)} style={{ display: "flex", alignItems: "center", gap: 10, margin: "10px 16px 0", padding: "10px 12px", background: "transparent", border: "none", color: C.text3, cursor: "pointer", fontSize: 13.5 }}><Icon name="settings" size={16} color={C.text3} /> Change password</button>
+        <button onClick={logout} style={{ display: "flex", alignItems: "center", gap: 10, margin: "2px 16px 18px", padding: "10px 12px", background: "transparent", border: "none", color: C.text3, cursor: "pointer", fontSize: 13.5 }}><Icon name="logout" size={17} color={C.text3} /> Log out</button>
       </aside>
 
       {/* Main */}
@@ -1260,6 +1313,7 @@ export default function App() {
       </div>
 
       {showNotifs && <NotificationsPanel onClose={() => setShowNotifs(false)} onChanged={() => setUnread(0)} />}
+      {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
 
       <Modal open={!!selectedOrder} onClose={() => setSelectedOrder(null)} title="Order detail" width={640}>
         {selectedOrder && <OrderDetail orderId={selectedOrder} user={user} onUpdated={bumpBoard} />}
