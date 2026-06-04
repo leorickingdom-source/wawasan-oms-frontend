@@ -1036,21 +1036,58 @@ function Users({ user }) {
 
 // ─── Settings ──────────────────────────────────────────────────────────────────
 function Settings() {
+  const [s, setS] = useState(null);
+  const [holidays, setHolidays] = useState([]);
+  const [hForm, setHForm] = useState({ date: "", name: "" });
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function load() {
+    setS(await api("GET", "/settings").catch(() => ({})));
+    setHolidays(await api("GET", "/settings/holidays").catch(() => []));
+  }
+  useEffect(() => { load(); }, []);
+
+  const fields = [
+    ["stage_order_name", "Stage 1 name"], ["stage_production_name", "Stage 2 name"],
+    ["stage_packing_name", "Stage 3 name"], ["stage_delivery_name", "Stage 4 name"],
+    ["priority_normal_label", "Normal priority label"], ["priority_urgent_label", "Urgent priority label"],
+    ["session_timeout_hours", "Session timeout (hours)"],
+  ];
+  function setField(k, v) { setS((p) => ({ ...p, [k]: v })); setSaved(false); }
+  async function save() { setBusy(true); try { await api("PUT", "/settings", { settings: s }); setSaved(true); } catch (e) { alert(e.message); } finally { setBusy(false); } }
+  async function addHoliday() { if (!hForm.date || !hForm.name) return; try { await api("POST", "/settings/holidays", hForm); setHForm({ date: "", name: "" }); load(); } catch (e) { alert(e.message); } }
+  async function delHoliday(id) { try { await api("DELETE", `/settings/holidays/${id}`); load(); } catch (e) { alert(e.message); } }
+
+  if (!s) return <Loading />;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 760 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 820 }}>
       <Card>
-        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>Workflow stages</h3>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>{BOARD_STAGES.map((s) => <Pill key={s} color={STAGES[s].color} style={{ fontSize: 12, padding: "5px 11px" }}>{STAGES[s].label}</Pill>)}</div>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 14 }}>Labels & session</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 14px" }}>
+          {fields.map(([k, label]) => <Field key={k} label={label} value={s[k] ?? ""} onChange={(v) => setField(k, v)} />)}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4 }}>
+          <Btn onClick={save} disabled={busy}>{busy ? "Saving…" : "Save settings"}</Btn>
+          {saved && <span style={{ color: C.ready, fontSize: 13 }}>Saved ✓</span>}
+        </div>
       </Card>
       <Card>
-        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>Roles</h3>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{Object.values(ROLE_LABELS).map((r) => <Pill key={r} color={C.text2} style={{ fontSize: 12, padding: "5px 11px" }}>{r}</Pill>)}</div>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>Holiday calendar</h3>
+        <div style={{ display: "flex", gap: 10, marginBottom: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div style={{ width: 180 }}><Field label="Date" type="date" value={hForm.date} onChange={(v) => setHForm((f) => ({ ...f, date: v }))} /></div>
+          <div style={{ flex: 1, minWidth: 200 }}><Field label="Name" value={hForm.name} onChange={(v) => setHForm((f) => ({ ...f, name: v }))} placeholder="e.g. Hari Raya" /></div>
+          <Btn onClick={addHoliday} style={{ marginBottom: 13 }}><Icon name="plus" size={14} /> Add</Btn>
+        </div>
+        {holidays.length === 0 && <Empty label="No holidays added yet." />}
+        {holidays.map((h) => (
+          <div key={h.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${C.border}` }}>
+            <span style={{ fontSize: 13.5, color: C.text }}><span style={{ fontWeight: 600 }}>{fmtDay(h.date)}</span> — {h.name}</span>
+            <Btn size="sm" variant="danger" onClick={() => delHoliday(h.id)}>Remove</Btn>
+          </div>
+        ))}
       </Card>
-      <Card>
-        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 8 }}>Session</h3>
-        <div style={{ fontSize: 13.5, color: C.text2 }}>Login session timeout: 8 hours · Auth: JWT</div>
-      </Card>
-      <div style={{ fontSize: 12.5, color: C.text3 }}>Editable stage names, holiday calendar, priorities and SMTP configuration are planned for the next phase.</div>
+      <div style={{ fontSize: 12.5, color: C.text3 }}>Stage-name and label changes are saved to the database. Surfacing custom stage names as the live board column titles is a small follow-up if you want it.</div>
     </div>
   );
 }
