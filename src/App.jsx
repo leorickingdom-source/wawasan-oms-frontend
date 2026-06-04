@@ -949,36 +949,92 @@ function Delivery({ user }) {
 }
 
 // ─── Production remarks ──────────────────────────────────────────────────────
+function isoWeekLabel(dateStr) {
+  const d = parseDate(dateStr);
+  if (!d) return "";
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((t - yearStart) / 86400000) + 1) / 7);
+  return `W${week} ${t.getUTCFullYear()}`;
+}
+function fmtDateTime(s) {
+  const d = s ? new Date(s) : null;
+  if (!d || isNaN(d)) return "";
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) + ", " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
 function Remarks({ user }) {
   const [list, setList] = useState(null);
+  const [cur, setCur] = useState(undefined); // current-week remark, or null
   const [content, setContent] = useState("");
   const [busy, setBusy] = useState(false);
-  function load() { api("GET", "/remarks").then(setList).catch(() => setList([])); }
-  useEffect(() => { load(); }, []);
-  async function post() { if (!content.trim()) return; setBusy(true); try { await api("POST", "/remarks", { content }); setContent(""); load(); } catch (e) { alert(e.message); } finally { setBusy(false); } }
+  const [saved, setSaved] = useState(false);
   const canPost = ["super_admin", "production_lead"].includes(user.role);
-  if (!list) return <Loading />;
+
+  async function load() {
+    const all = await api("GET", "/remarks").catch(() => []);
+    setList(all || []);
+    const c = await api("GET", "/remarks/current").catch(() => null);
+    setCur(c || null);
+    setContent(c ? c.content : "");
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  async function save() {
+    if (!content.trim()) return;
+    setBusy(true); setSaved(false);
+    try {
+      if (cur) await api("PATCH", `/remarks/${cur.id}`, { content });
+      else await api("POST", "/remarks", { content });
+      setSaved(true);
+      await load();
+    } catch (e) { alert(e.message); } finally { setBusy(false); }
+  }
+
+  if (list === null || cur === undefined) return <Loading />;
+  const archive = list.filter((r) => !cur || r.id !== cur.id);
+  const weekLabel = isoWeekLabel(cur ? cur.week_start : new Date().toISOString().slice(0, 10));
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 760 }}>
-      {canPost && (
-        <Card>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 10 }}>This week's remark</h3>
-          <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={4} placeholder="Production notes for this week…" style={{ width: "100%", padding: "10px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 14, resize: "vertical" }} />
-          <div style={{ marginTop: 10, textAlign: "right" }}><Btn onClick={post} disabled={busy}>{busy ? "Posting…" : "Post remark"}</Btn></div>
-        </Card>
-      )}
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {list.length === 0 && <Empty label="No remarks yet." />}
-        {list.map((r) => (
-          <Card key={r.id}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontWeight: 700, color: C.text, fontSize: 13.5 }}>{r.author_name}</span>
-              <span style={{ color: C.text3, fontSize: 12.5 }}>w/c {fmtDay(r.week_start)}</span>
+    <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 920 }}>
+      <Card style={{ padding: "20px 22px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Icon name="message" size={20} color={C.accent} />
+            <span style={{ fontSize: 16, fontWeight: 800, color: C.text }}>This week — {weekLabel}</span>
+          </div>
+          <span style={{ fontSize: 13, color: C.text3 }}>Visible to Admin &amp; Production Lead</span>
+        </div>
+        {canPost ? (
+          <>
+            <textarea value={content} onChange={(e) => { setContent(e.target.value); setSaved(false); }} rows={4}
+              placeholder="Production notes for this week…"
+              style={{ width: "100%", padding: "12px 14px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 10, color: C.text, fontSize: 14, resize: "vertical", lineHeight: 1.5 }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+              <Btn onClick={save} disabled={busy || !content.trim()}><Icon name="check" size={15} /> {busy ? "Saving…" : "Save remark"}</Btn>
+              {saved && <span style={{ color: C.ready, fontSize: 13 }}>Saved ✓</span>}
+              {cur && <span style={{ color: C.text3, fontSize: 12.5 }}>Last updated {fmtDateTime(cur.updated_at || cur.created_at)} · {cur.author_name}</span>}
+            </div>
+          </>
+        ) : (
+          <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{cur ? cur.content : <span style={{ color: C.text3 }}>No remark yet this week.</span>}</div>
+        )}
+      </Card>
+
+      <Card style={{ padding: "20px 22px" }}>
+        <h3 style={{ fontSize: 16, fontWeight: 800, color: C.text, marginBottom: 16 }}>Archive</h3>
+        {archive.length === 0 && <Empty label="No archived remarks yet." />}
+        {archive.map((r) => (
+          <div key={r.id} style={{ paddingBottom: 16, marginBottom: 16, borderBottom: `1px solid ${C.border}` }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
+              <Pill color={C.accent} style={{ fontSize: 12, padding: "3px 11px" }}>{isoWeekLabel(r.week_start)}</Pill>
+              <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.text3 }}>{fmtDateTime(r.created_at)} · {r.author_name}</span>
             </div>
             <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{r.content}</div>
-          </Card>
+          </div>
         ))}
-      </div>
+      </Card>
     </div>
   );
 }
