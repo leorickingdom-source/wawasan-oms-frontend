@@ -623,10 +623,14 @@ function OrderDetail({ orderId, user, onUpdated }) {
   const [busy, setBusy] = useState(false);
   const [users, setUsers] = useState([]);
   const [newItem, setNewItem] = useState({ sku: "", name: "", quantity: 1, unit: "pcs" });
+  const [notes, setNotes] = useState("");
+  const [notesBusy, setNotesBusy] = useState(false);
+  const [notesSaved, setNotesSaved] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const canMove = ["super_admin", "operations_controller"].includes(user.role);
   const canMark = ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff"].includes(user.role);
 
-  async function load() { try { setOrder(await api("GET", `/orders/${orderId}`)); } catch (e) { setOrder({ _error: e.message }); } }
+  async function load() { try { const o = await api("GET", `/orders/${orderId}`); setOrder(o); setNotes(o.notes || ""); } catch (e) { setOrder({ _error: e.message }); } }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
   useEffect(() => { if (canMove) api("GET", "/users").then(setUsers).catch(() => setUsers([])); /* eslint-disable-next-line */ }, []);
 
@@ -663,6 +667,17 @@ function OrderDetail({ orderId, user, onUpdated }) {
   }
   const cellInput = (w) => ({ padding: "6px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 7, fontSize: 13, color: C.text, width: w || "100%", boxSizing: "border-box" });
   const madeBtn = (made) => ({ cursor: "pointer", border: `1px solid ${made ? C.ready + "66" : C.border2}`, background: made ? C.ready + "1f" : C.surface2, color: made ? C.ready : C.text3, borderRadius: 7, padding: "4px 10px", fontSize: 12, fontWeight: 700 });
+  async function saveNotes() {
+    setNotesBusy(true); setNotesSaved(false);
+    try { await api("PATCH", `/orders/${orderId}`, { notes }); setNotesSaved(true); onUpdated && onUpdated(); }
+    catch (e) { alert(e.message); } finally { setNotesBusy(false); }
+  }
+  async function uploadAttachment(file) {
+    if (!file) return;
+    setUploading(true);
+    try { const fd = new FormData(); fd.append("file", file); await api("POST", `/orders/${orderId}/attachments`, fd, true); await load(); }
+    catch (e) { alert(e.message); } finally { setUploading(false); }
+  }
 
   if (!order) return <Loading />;
   if (order._error) return <div style={{ color: "#fca5a5" }}>⚠ {order._error}</div>;
@@ -693,15 +708,30 @@ function OrderDetail({ orderId, user, onUpdated }) {
       </div>
 
       {tab === "details" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <LV label="Customer" v={order.customer_name} />
-          <LV label="Contact" v={order.customer_contact || "—"} />
-          <LV label="Order date" v={order.order_date ? fmtDay(order.order_date) : "—"} />
-          <LV label="Delivery" v={<span style={{ color: countdown(order.required_delivery_date).tone }}>{fmtDay(order.required_delivery_date)} · {countdown(order.required_delivery_date).text}</span>} />
-          <LV label="Expiry" v={order.expiry_date ? fmtDay(order.expiry_date) : "—"} />
-          <LV label="PIC" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />
-          <LV label="Source" v={order.source === "sql_account" ? "SQL Account" : "Manual"} />
-          {order.notes && <div style={{ gridColumn: "span 2" }}><LV label="Notes" v={order.notes} /></div>}
+        <div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <LV label="Customer" v={order.customer_name} />
+            <LV label="Contact" v={order.customer_contact || "—"} />
+            <LV label="Order date" v={order.order_date ? fmtDay(order.order_date) : "—"} />
+            <LV label="Delivery" v={<span style={{ color: countdown(order.required_delivery_date).tone }}>{fmtDay(order.required_delivery_date)} · {countdown(order.required_delivery_date).text}</span>} />
+            <LV label="Expiry" v={order.expiry_date ? fmtDay(order.expiry_date) : "—"} />
+            <LV label="PIC" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />
+            <LV label="Source" v={order.source === "sql_account" ? "SQL Account" : "Manual"} />
+          </div>
+          <div style={{ marginTop: 18 }}>
+            <div style={{ fontSize: 11, color: C.text3, fontWeight: 600, marginBottom: 6, letterSpacing: 0.4 }}>INTERNAL NOTES</div>
+            {canMove ? (
+              <>
+                <textarea value={notes} onChange={(e) => { setNotes(e.target.value); setNotesSaved(false); }} rows={3} placeholder="Internal notes (not shown to the customer)…" style={{ width: "100%", padding: "10px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 14, resize: "vertical", lineHeight: 1.5, boxSizing: "border-box" }} />
+                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}>
+                  <Btn size="sm" onClick={saveNotes} disabled={notesBusy}>{notesBusy ? "Saving…" : "Save notes"}</Btn>
+                  {notesSaved && <span style={{ color: C.ready, fontSize: 12.5 }}>Saved ✓</span>}
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: 14, color: order.notes ? C.text2 : C.text3, whiteSpace: "pre-wrap" }}>{order.notes || "No internal notes."}</div>
+            )}
+          </div>
         </div>
       )}
       {tab === "timeline" && (
@@ -762,12 +792,19 @@ function OrderDetail({ orderId, user, onUpdated }) {
       )}
       {tab === "attachments" && (
         <div>
-          {(order.attachments || []).length === 0 && <Empty label="No attachments." />}
+          <div style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <input type="file" id="att-file-input" onChange={(e) => { uploadAttachment(e.target.files[0]); e.target.value = ""; }} style={{ display: "none" }} />
+            <Btn size="sm" variant="soft" onClick={() => document.getElementById("att-file-input").click()} disabled={uploading}><Icon name="plus" size={14} /> {uploading ? "Uploading…" : "Upload attachment"}</Btn>
+            <span style={{ fontSize: 12, color: C.text3 }}>Invoice PDF, customer note, or image</span>
+          </div>
+          {(order.attachments || []).length === 0 && <Empty label="No attachments yet." />}
           {(order.attachments || []).map((a) => (
             <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${C.border}` }}>
               <Icon name="message" size={15} color={C.text3} />
-              <span style={{ fontSize: 13, color: C.text }}>{a.original_name}</span>
-              <span style={{ fontSize: 11.5, color: C.text3 }}>{a.uploaded_by_name}</span>
+              {a.url
+                ? <a href={a.url} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: C.accent2, textDecoration: "none" }}>{a.original_name}</a>
+                : <span style={{ fontSize: 13, color: C.text }}>{a.original_name}</span>}
+              <span style={{ fontSize: 11.5, color: C.text3, marginLeft: "auto" }}>{a.uploaded_by_name}</span>
             </div>
           ))}
         </div>
