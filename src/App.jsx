@@ -47,6 +47,13 @@ function canAdvanceStage(role, stage) {
   if (stage === "packing" && role === "packing_staff") return true;
   return false;
 }
+// Which board columns a role may see. Roles below production lead see only their own.
+function visibleStages(role) {
+  if (role === "production_staff") return ["production"];
+  if (role === "packing_staff") return ["packing"];
+  if (role === "delivery_team") return ["ready_for_delivery"];
+  return BOARD_STAGES; // super_admin, operations_controller, production_lead
+}
 const STAGE_LABELS = {
   ...STAGES, on_hold: { label: "On Hold", color: C.hold },
   delivered: { label: "Delivered", color: C.text3 }, cancelled: { label: "Cancelled", color: "#6b7280" },
@@ -331,13 +338,14 @@ function OrderBoard({ user, search, weekOnly, onOpenOrder, refreshKey, onCount }
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const canMove = ["super_admin", "operations_controller"].includes(user.role);
+  const stages = visibleStages(user.role);
 
   async function load() {
     setLoading(true); setErr("");
     try {
       const d = await api("GET", `/orders/kanban${weekOnly ? "?week=current" : ""}`);
       setBoard(d);
-      onCount && onCount(BOARD_STAGES.reduce((a, s) => a + (d[s] ? d[s].length : 0), 0));
+      onCount && onCount(stages.reduce((a, s) => a + (d[s] ? d[s].length : 0), 0));
     } catch (e) { setErr(e.message); setBoard({ order: [], production: [], packing: [], ready_for_delivery: [], on_hold: [] }); }
     finally { setLoading(false); }
   }
@@ -358,8 +366,8 @@ function OrderBoard({ user, search, weekOnly, onOpenOrder, refreshKey, onCount }
   return (
     <div>
       {err && <div style={{ marginBottom: 14, color: "#fca5a5", fontSize: 13 }}>⚠ {err}</div>}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(230px, 1fr))", gap: 16, alignItems: "start" }}>
-        {BOARD_STAGES.map((s) => {
+      <div style={{ display: "grid", gridTemplateColumns: stages.length >= 3 ? `repeat(${stages.length}, minmax(230px, 1fr))` : `repeat(${stages.length}, minmax(280px, 440px))`, gap: 16, alignItems: "start" }}>
+        {stages.map((s) => {
           const cfg = STAGES[s];
           const orders = filt((board && board[s]) || []);
           return (
