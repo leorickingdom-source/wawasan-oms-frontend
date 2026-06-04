@@ -1228,7 +1228,14 @@ export default function App() {
     poll(); const t = setInterval(poll, 30000); return () => clearInterval(t);
   }, [user]);
 
-  function logout() { api("POST", "/auth/logout").catch(() => {}); _token = ""; localStorage.removeItem("oms_token"); setUser(null); }
+  // Keep the active page valid for the current role; otherwise fall back to the board.
+  useEffect(() => {
+    if (!user) return;
+    const allowed = NAV.filter((n) => !n.roles || n.roles.includes(user.role)).map((n) => n.id);
+    if (page !== "floor" && !allowed.includes(page)) setPage("board");
+  }, [user, page]);
+
+  function logout() { api("POST", "/auth/logout").catch(() => {}); _token = ""; localStorage.removeItem("oms_token"); setPage("board"); setUser(null); }
   function bumpBoard() { setBoardKey((k) => k + 1); }
 
   if (booting) return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", color: C.text3 }}>Loading…</div>;
