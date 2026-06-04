@@ -342,10 +342,15 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
 }
 
 // ─── Order Board ───────────────────────────────────────────────────────────────
-function AdvanceConfirmModal({ order, to, onConfirm, onClose }) {
+function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
   const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { api("GET", `/orders/${order.id}`).then(setDetail).catch(() => setDetail({ items: [] })); }, [order.id]);
+  const canMark = user && ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff"].includes(user.role);
+  async function toggleMade(it) {
+    try { await api("PATCH", `/orders/${order.id}/items/${it.id}`, { made: !it.made }); const d = await api("GET", `/orders/${order.id}`).catch(() => null); if (d) setDetail(d); }
+    catch (e) { alert(e.message); }
+  }
   const items = (detail && detail.items) || [];
   const allMade = items.length > 0 && items.every((it) => it.made);
   const title = ADVANCE_LABEL[order.stage] || `Advance to ${(STAGE_LABELS[to] || {}).label || to}`;
@@ -367,7 +372,9 @@ function AdvanceConfirmModal({ order, to, onConfirm, onClose }) {
                 <div style={{ fontSize: 13.5, color: C.text }}>{it.name}</div>
               </div>
               <div style={{ fontWeight: 700, color: C.text, marginRight: 6 }}>{Math.round(it.quantity)}<span style={{ fontSize: 11, color: C.text3, fontWeight: 400 }}> {it.unit || "pcs"}</span></div>
-              {it.made ? <span style={{ color: C.ready, fontSize: 13, fontWeight: 700 }}>✓</span> : <span style={{ color: C.text3, fontSize: 12 }}>pending</span>}
+              {canMark
+                ? <button onClick={() => toggleMade(it)} style={{ cursor: "pointer", border: `1px solid ${it.made ? C.ready + "66" : C.border2}`, background: it.made ? C.ready + "1f" : C.surface2, color: it.made ? C.ready : C.text3, borderRadius: 7, padding: "4px 10px", fontSize: 12, fontWeight: 700 }}>{it.made ? "✓ Made" : "Mark"}</button>
+                : (it.made ? <span style={{ color: C.ready, fontSize: 13, fontWeight: 700 }}>✓</span> : <span style={{ color: C.text3, fontSize: 12 }}>pending</span>)}
             </div>
           ))}
         </div>
@@ -439,7 +446,7 @@ function OrderBoard({ user, search, weekOnly, onOpenOrder, refreshKey, onCount }
           );
         })}
       </div>
-      {confirmAdv && <AdvanceConfirmModal order={confirmAdv.order} to={confirmAdv.to} onConfirm={doAdvance} onClose={() => setConfirmAdv(null)} />}
+      {confirmAdv && <AdvanceConfirmModal order={confirmAdv.order} to={confirmAdv.to} user={user} onConfirm={doAdvance} onClose={() => setConfirmAdv(null)} />}
     </div>
   );
 }
@@ -615,6 +622,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [users, setUsers] = useState([]);
+  const [newItem, setNewItem] = useState({ sku: "", name: "", quantity: 1, unit: "pcs" });
   const canMove = ["super_admin", "operations_controller"].includes(user.role);
   const canMark = ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff"].includes(user.role);
 
@@ -640,6 +648,21 @@ function OrderDetail({ orderId, user, onUpdated }) {
     try { await api("POST", `/orders/${orderId}/assign-pic`, { pic_id: picId || null }); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); }
   }
+  async function updateItem(itemId, patch) {
+    try { await api("PATCH", `/orders/${orderId}/items/${itemId}`, patch); onUpdated && onUpdated(); }
+    catch (e) { alert(e.message); load(); }
+  }
+  async function removeItem(itemId) {
+    try { await api("DELETE", `/orders/${orderId}/items/${itemId}`); await load(); onUpdated && onUpdated(); }
+    catch (e) { alert(e.message); }
+  }
+  async function addItem() {
+    if (!newItem.name.trim()) return;
+    try { await api("POST", `/orders/${orderId}/items`, newItem); setNewItem({ sku: "", name: "", quantity: 1, unit: "pcs" }); await load(); onUpdated && onUpdated(); }
+    catch (e) { alert(e.message); }
+  }
+  const cellInput = (w) => ({ padding: "6px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 7, fontSize: 13, color: C.text, width: w || "100%", boxSizing: "border-box" });
+  const madeBtn = (made) => ({ cursor: "pointer", border: `1px solid ${made ? C.ready + "66" : C.border2}`, background: made ? C.ready + "1f" : C.surface2, color: made ? C.ready : C.text3, borderRadius: 7, padding: "4px 10px", fontSize: 12, fontWeight: 700 });
 
   if (!order) return <Loading />;
   if (order._error) return <div style={{ color: "#fca5a5" }}>⚠ {order._error}</div>;
@@ -673,6 +696,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <LV label="Customer" v={order.customer_name} />
           <LV label="Contact" v={order.customer_contact || "—"} />
+          <LV label="Order date" v={order.order_date ? fmtDay(order.order_date) : "—"} />
           <LV label="Delivery" v={<span style={{ color: countdown(order.required_delivery_date).tone }}>{fmtDay(order.required_delivery_date)} · {countdown(order.required_delivery_date).text}</span>} />
           <LV label="Expiry" v={order.expiry_date ? fmtDay(order.expiry_date) : "—"} />
           <LV label="PIC" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />
@@ -696,24 +720,45 @@ function OrderDetail({ orderId, user, onUpdated }) {
         </div>
       )}
       {tab === "items" && (
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead><tr>{["SKU", "Product", "Qty", "Unit", "Made"].map((h) => <th key={h} style={{ textAlign: "left", padding: "8px 10px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
-          <tbody>
-            {(order.items || []).map((it) => (
-              <tr key={it.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                <td style={{ padding: "8px 10px", fontFamily: MONO, color: C.text2 }}>{it.sku}</td>
-                <td style={{ padding: "8px 10px", color: C.text }}>{it.name}</td>
-                <td style={{ padding: "8px 10px", fontWeight: 700, color: C.text }}>{Math.round(it.quantity)}</td>
-                <td style={{ padding: "8px 10px", color: C.text3 }}>{it.unit}</td>
-                <td style={{ padding: "8px 10px" }}>
-                  {canMark
-                    ? <button onClick={() => toggleMade(it)} style={{ cursor: "pointer", border: `1px solid ${it.made ? C.green + "66" : C.border2}`, background: it.made ? C.green + "1f" : C.surface2, color: it.made ? C.green : C.text3, borderRadius: 7, padding: "4px 10px", fontSize: 12, fontWeight: 700 }}>{it.made ? "✓ Made" : "Mark"}</button>
-                    : (it.made ? <span style={{ color: C.green }}>✓</span> : <span style={{ color: C.text3 }}>—</span>)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr>{(canMove ? ["SKU", "Product", "Qty", "Unit", "Made", ""] : ["SKU", "Product", "Qty", "Unit", "Made"]).map((h, i) => <th key={i} style={{ textAlign: "left", padding: "8px 10px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {(order.items || []).length === 0 && <tr><td colSpan={canMove ? 6 : 5}><Empty label="No items." /></td></tr>}
+              {(order.items || []).map((it) => (
+                <tr key={it.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  {canMove ? (
+                    <>
+                      <td style={{ padding: "6px 8px" }}><input defaultValue={it.sku} onBlur={(e) => e.target.value !== it.sku && updateItem(it.id, { sku: e.target.value })} style={cellInput(110)} /></td>
+                      <td style={{ padding: "6px 8px" }}><input defaultValue={it.name} onBlur={(e) => e.target.value !== it.name && updateItem(it.id, { name: e.target.value })} style={cellInput()} /></td>
+                      <td style={{ padding: "6px 8px" }}><input type="number" min="0" defaultValue={Math.round(it.quantity)} onBlur={(e) => +e.target.value !== Math.round(it.quantity) && updateItem(it.id, { quantity: +e.target.value })} style={cellInput(70)} /></td>
+                      <td style={{ padding: "6px 8px" }}><input defaultValue={it.unit} onBlur={(e) => e.target.value !== it.unit && updateItem(it.id, { unit: e.target.value })} style={cellInput(64)} /></td>
+                      <td style={{ padding: "6px 8px" }}><button onClick={() => toggleMade(it)} style={madeBtn(it.made)}>{it.made ? "✓ Made" : "Mark"}</button></td>
+                      <td style={{ padding: "6px 8px" }}><button onClick={() => removeItem(it.id)} title="Remove" style={{ background: "#3a1a1a", border: "none", borderRadius: 7, color: "#fca5a5", cursor: "pointer", width: 28, height: 28 }}>×</button></td>
+                    </>
+                  ) : (
+                    <>
+                      <td style={{ padding: "8px 10px", fontFamily: MONO, color: C.text2 }}>{it.sku}</td>
+                      <td style={{ padding: "8px 10px", color: C.text }}>{it.name}</td>
+                      <td style={{ padding: "8px 10px", fontWeight: 700, color: C.text }}>{Math.round(it.quantity)}</td>
+                      <td style={{ padding: "8px 10px", color: C.text3 }}>{it.unit}</td>
+                      <td style={{ padding: "8px 10px" }}>{canMark ? <button onClick={() => toggleMade(it)} style={madeBtn(it.made)}>{it.made ? "✓ Made" : "Mark"}</button> : (it.made ? <span style={{ color: C.green }}>✓</span> : <span style={{ color: C.text3 }}>—</span>)}</td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {canMove && (
+            <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <input placeholder="SKU" value={newItem.sku} onChange={(e) => setNewItem((p) => ({ ...p, sku: e.target.value }))} style={cellInput(100)} />
+              <input placeholder="Product" value={newItem.name} onChange={(e) => setNewItem((p) => ({ ...p, name: e.target.value }))} style={cellInput(170)} />
+              <input type="number" min="1" placeholder="Qty" value={newItem.quantity} onChange={(e) => setNewItem((p) => ({ ...p, quantity: e.target.value }))} style={cellInput(64)} />
+              <input placeholder="unit" value={newItem.unit} onChange={(e) => setNewItem((p) => ({ ...p, unit: e.target.value }))} style={cellInput(60)} />
+              <Btn size="sm" variant="soft" onClick={addItem} disabled={!newItem.name.trim()}>+ Add item</Btn>
+            </div>
+          )}
+        </div>
       )}
       {tab === "attachments" && (
         <div>
