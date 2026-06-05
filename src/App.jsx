@@ -803,7 +803,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
       )}
       {tab === "timeline" && (() => {
         const log = order.activity || [];
-        const LIMIT = 5;
+        const LIMIT = 3;
         const shown = logOpen ? log : log.slice(0, LIMIT);
         return (
         <div>
