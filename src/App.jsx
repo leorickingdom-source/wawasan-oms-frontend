@@ -115,6 +115,12 @@ function countdown(s) {
   if (n <= 6) return { text: `${n}d`, tone: C.packing, n };
   return { text: `${n}d`, tone: C.ready, n };
 }
+function itemStat(it) {
+  const q = Math.round(it.quantity) || 0, m = Math.min(Math.round(it.made_qty) || 0, q);
+  if (q > 0 && m >= q) return { k: "done", label: "Done", color: C.ready, m, q };
+  if (m > 0) return { k: "partial", label: `${m}/${q}`, color: C.packing, m, q };
+  return { k: "pending", label: "Pending", color: C.text3, m, q };
+}
 function initials(name = "") {
   return name.trim().split(/\s+/).map((w) => w[0]).join("").toUpperCase().slice(0, 2) || "?";
 }
@@ -493,7 +499,7 @@ function FloorDisplay({ onExit }) {
   async function load() {
     try {
       const [b, s] = await Promise.all([api("GET", "/orders/kanban"), api("GET", "/orders/stats")]);
-      setBoard(b); setStats(s);
+      setBoard(b); setStats(s); cache.current = {};
     } catch (e) { /* keep last */ }
   }
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, []);
@@ -583,6 +589,16 @@ function FloorDisplay({ onExit }) {
                           <span style={{ color: C.text2 }}>{fmtDay(o.required_delivery_date)}</span> · {cd.text}{urgent ? " · URGENT" : ""}
                         </div>
                         <div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{o.total_units != null ? `${o.total_units} units` : `${o.item_count} lines`}</div>
+                        {(o.stage === "production" || o.stage === "packing") && o.item_count > 0 && (() => {
+                          const mu = o.made_units || 0, tu = o.total_units || 0, full = (o.made_count || 0) >= o.item_count;
+                          const p = tu > 0 ? Math.round((mu / tu) * 100) : (full ? 100 : 0);
+                          return (
+                            <div style={{ marginTop: 5 }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: full ? C.green : C.accent2, marginBottom: 3 }}>{full ? "All made ✓" : `${mu}/${tu} units · ${p}%`}</div>
+                              <div style={{ height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: full ? C.green : C.accent }} /></div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })}
@@ -603,21 +619,41 @@ function FloorDisplay({ onExit }) {
               </div>
               <div style={{ fontFamily: MONO, fontSize: 52, fontWeight: 800, color: C.accent2, margin: "10px 0 6px", lineHeight: 1 }}>{spot.invoice_number}</div>
               <div style={{ fontSize: 15, color: C.text2, marginBottom: 8 }}>{spot.customer_name}</div>
+              {detail && detail.id === spot.id && (detail.items || []).length > 0 && (() => {
+                const its = detail.items || [];
+                const tu = its.reduce((s, it) => s + itemStat(it).q, 0);
+                const mu = its.reduce((s, it) => s + itemStat(it).m, 0);
+                const p = tu > 0 ? Math.round((mu / tu) * 100) : 0;
+                return (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 5 }}>
+                      <span style={{ color: C.text2 }}>{mu}/{tu} units made</span>
+                      <span style={{ color: p >= 100 ? C.green : C.accent2, fontWeight: 800 }}>{p}%</span>
+                    </div>
+                    <div style={{ height: 7, background: C.surface2, borderRadius: 5, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: p >= 100 ? C.green : C.accent, transition: "width .3s" }} /></div>
+                  </div>
+                );
+              })()}
               <div style={{ flex: 1, overflowY: "auto" }}>
                 {detail && detail.id === spot.id
-                  ? (detail.items || []).map((it) => (
+                  ? (detail.items || []).map((it) => {
+                    const st = itemStat(it);
+                    const dot = st.k === "done" ? C.green : st.k === "partial" ? C.packing : C.accent;
+                    return (
                     <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "13px 0", borderBottom: `1px solid ${C.border}` }}>
-                      <span style={{ width: 10, height: 10, borderRadius: "50%", background: it.made ? C.green : C.accent, boxShadow: `0 0 8px ${it.made ? C.green : C.accent}`, flexShrink: 0 }} />
+                      <span style={{ width: 10, height: 10, borderRadius: "50%", background: dot, boxShadow: `0 0 8px ${dot}`, flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontFamily: MONO, fontSize: 12.5, color: C.text3, letterSpacing: 0.5 }}>{it.sku}</div>
                         <div style={{ fontSize: 19, fontWeight: 600, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
                       </div>
                       <div style={{ textAlign: "right", flexShrink: 0 }}>
-                        <span style={{ fontSize: 42, fontWeight: 800, color: it.made ? C.green : C.accent2, lineHeight: 1 }}>{Math.round(it.quantity)}</span>
-                        <span style={{ fontSize: 14, color: C.text3, marginLeft: 5 }}>{it.unit || "pcs"}{it.made ? " ✓" : ""}</span>
+                        <span style={{ fontSize: 42, fontWeight: 800, color: dot, lineHeight: 1 }}>{st.m}</span>
+                        <span style={{ fontSize: 22, fontWeight: 700, color: C.text3 }}>/{st.q}</span>
+                        <span style={{ fontSize: 14, color: C.text3, marginLeft: 5 }}>{it.unit || "pcs"}{st.k === "done" ? " ✓" : ""}</span>
                       </div>
                     </div>
-                  ))
+                    );
+                  })
                   : <div style={{ color: C.text3, padding: "12px 0" }}>Loading line items…</div>}
               </div>
               <div style={{ marginTop: 12 }}>
@@ -692,7 +728,6 @@ function OrderDetail({ orderId, user, onUpdated }) {
   }
   const cellInput = (w) => ({ padding: "6px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 7, fontSize: 13, color: C.text, width: w || "100%", boxSizing: "border-box" });
   const madeBtn = (made) => ({ cursor: "pointer", border: `1px solid ${made ? C.ready + "66" : C.border2}`, background: made ? C.ready + "1f" : C.surface2, color: made ? C.ready : C.text3, borderRadius: 7, padding: "4px 10px", fontSize: 12, fontWeight: 700 });
-  const itemStat = (it) => { const q = Math.round(it.quantity) || 0, m = Math.min(Math.round(it.made_qty) || 0, q); if (q > 0 && m >= q) return { k: "done", label: "Done", color: C.ready, m, q }; if (m > 0) return { k: "partial", label: `${m}/${q}`, color: C.packing, m, q }; return { k: "pending", label: "Pending", color: C.text3, m, q }; };
   async function saveNotes() {
     setNotesBusy(true); setNotesSaved(false);
     try { await api("PATCH", `/orders/${orderId}`, { notes }); setNotesSaved(true); onUpdated && onUpdated(); }
