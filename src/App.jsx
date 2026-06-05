@@ -83,6 +83,16 @@ const IMPORTANCE_OPTS = [
 ];
 const impCfg = (level) => IMPORTANCE[level] || IMPORTANCE.standard;
 
+// Delivery sub-status pill for Ready-for-Delivery cards (board + floor): once a
+// delivery is scheduled the order reads "Pending", otherwise "Ready for Delivery".
+// Colours mirror the Delivery tab (green ready, amber pending, blue in-transit).
+function deliveryTag(o) {
+  if (!o || o.stage !== "ready_for_delivery") return null;
+  if (o.delivery_status === "pending") return { label: "Pending", color: C.packing };
+  if (o.delivery_status === "in_transit") return { label: "In transit", color: C.order };
+  return { label: "Ready for Delivery", color: C.ready };
+}
+
 const NAV = [
   { id: "board", label: "Order Board", icon: "board", roles: null },
   { id: "floor", label: "Floor Display", icon: "display", roles: null },
@@ -330,6 +340,7 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
   const waiting = !!order.waiting_stock;
   const imp = impCfg(order.importance);
   const showName = !!order.customer_name;
+  const dtag = deliveryTag(order);
   const invColor = late ? C.danger : urgent ? C.accent2 : C.text;
   const next = BOARD_STAGES[BOARD_STAGES.indexOf(order.stage) + 1] || "delivered";
   return (
@@ -342,6 +353,7 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
           {urgent && <Pill color={C.danger}>Urgent</Pill>}
           {showName && <Pill color={imp.color}>{imp.label}</Pill>}
+          {dtag && <Pill color={dtag.color}>{dtag.label}</Pill>}
           {waiting && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
           {onHold && <Pill color={C.hold}>On hold</Pill>}
           {order.skip_production && <Pill color={C.accent} bg="transparent">skip-prod</Pill>}
@@ -567,6 +579,7 @@ function FloorDisplay({ onExit }) {
   const cols = filter === "all" ? BOARD_STAGES : [filter];
   const spotStage = spot ? (STAGE_LABELS[spot.stage] || { label: spot.stage, color: C.accent }) : null;
   const spotCd = spot ? countdown(spot.required_delivery_date) : null;
+  const spotDtag = spot ? deliveryTag(spot) : null;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 2000, display: "flex", flexDirection: "column", padding: 22 }}>
@@ -613,12 +626,14 @@ function FloorDisplay({ onExit }) {
                   {orders.map((o) => {
                     const cd = countdown(o.required_delivery_date);
                     const late = (cd.n ?? 0) < 0, urgent = o.priority === "urgent";
+                    const dtag = deliveryTag(o);
                     return (
                       <div key={o.id} style={{ background: C.surface, border: `1px solid ${urgent || late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${cfg.color}`, borderRadius: 9, padding: "9px 11px" }}>
                         <div style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 5 }}>
                           {urgent && <Pill color={C.danger} style={{ fontSize: 9.5, padding: "1px 6px" }}>Urgent</Pill>}
                           <Pill color={impCfg(o.importance).color} style={{ fontSize: 9.5, padding: "1px 6px" }}>{impCfg(o.importance).label}</Pill>
+                          {dtag && <Pill color={dtag.color} style={{ fontSize: 9.5, padding: "1px 6px" }}>{dtag.label}</Pill>}
                           {o.waiting_stock && <Pill color={C.danger} style={{ fontSize: 9.5, padding: "1px 6px" }}>⚠ Stock</Pill>}
                           {o.on_hold && <Pill color={C.hold} style={{ fontSize: 9.5, padding: "1px 6px" }}>Hold</Pill>}
                         </div>
@@ -651,9 +666,10 @@ function FloorDisplay({ onExit }) {
           {!spot ? <div style={{ margin: "auto", color: C.text3 }}>No active orders</div> : (
             <>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <Pill color={spotStage.color} style={{ fontSize: 12, padding: "4px 10px" }}>● {spotStage.label}</Pill>
                   {spot.priority === "urgent" && <Pill color={C.danger} style={{ fontSize: 12, padding: "4px 10px" }}>Urgent</Pill>}
+                  {spotDtag && <Pill color={spotDtag.color} style={{ fontSize: 12, padding: "4px 10px" }}>{spotDtag.label}</Pill>}
                 </div>
                 <span style={{ fontSize: 14, color: C.text3 }}>{(spotIdx % pool.length) + 1} / {pool.length}</span>
               </div>
