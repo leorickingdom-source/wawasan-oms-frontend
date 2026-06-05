@@ -68,6 +68,21 @@ const ROLE_LABELS = {
   packing_staff: "Packing Staff", delivery_team: "Delivery Team",
 };
 
+// Customer importance tiers — mirrors the backend `importance` column (low → high).
+// Production-floor roles see this in place of the customer name. To rename a tier,
+// change the label here (and the CHECK values in schema.sql if you add/remove one).
+const IMPORTANCE = {
+  standard: { label: "Standard", color: C.text3 },
+  priority: { label: "Priority", color: C.accent },
+  vip: { label: "VIP", color: C.danger },
+};
+const IMPORTANCE_OPTS = [
+  { value: "standard", label: "Standard" },
+  { value: "priority", label: "Priority" },
+  { value: "vip", label: "VIP" },
+];
+const impCfg = (level) => IMPORTANCE[level] || IMPORTANCE.standard;
+
 const NAV = [
   { id: "board", label: "Order Board", icon: "board", roles: null },
   { id: "floor", label: "Floor Display", icon: "display", roles: null },
@@ -153,7 +168,7 @@ function printPickingSlip(order) {
 </style></head><body>
   <h1>Picking Slip</h1><div class="sub">Wawasan Candle — ${escHtml(order.invoice_number)}</div>
   <div class="meta">
-    <div><b>Customer</b>${escHtml(order.customer_name)}</div>
+    <div><b>Customer</b>${escHtml(order.customer_name || impCfg(order.importance).label)}</div>
     <div><b>Delivery date</b>${escHtml(fmtDay(order.required_delivery_date))}</div>
     <div><b>Stage</b>${escHtml((STAGE_LABELS[order.stage] || {}).label || order.stage)}</div>
     <div><b>Priority</b>${order.priority === "urgent" ? "URGENT" : "Normal"}</div>
@@ -323,6 +338,7 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
         <span style={{ fontFamily: MONO, fontSize: 15, fontWeight: 700, color: invColor, letterSpacing: 0.3 }}>{order.invoice_number}</span>
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {order.importance && order.importance !== "standard" && <Pill color={impCfg(order.importance).color}>{impCfg(order.importance).label}</Pill>}
           {waiting && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
           {onHold && <Pill color={C.hold}>On hold</Pill>}
           {urgent && <Pill color={C.danger}>Urgent</Pill>}
@@ -334,7 +350,7 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
         <span style={{ color: C.text2 }}>{fmtDay(order.required_delivery_date)}</span>
         {cd.text && <span style={{ color: cd.tone, fontWeight: 600 }}>· {cd.text}</span>}
       </div>
-      <div style={{ fontSize: 13, color: C.text, fontWeight: 500, marginBottom: 3 }}>{order.customer_name}</div>
+      <div style={{ fontSize: 13, color: order.customer_name ? C.text : impCfg(order.importance).color, fontWeight: order.customer_name ? 500 : 700, marginBottom: 3 }}>{order.customer_name || impCfg(order.importance).label}</div>
       <div style={{ fontSize: 12, color: C.text3, marginBottom: 5 }}>
         {order.total_units != null ? `${order.total_units} units · ` : ""}{order.item_count} {order.item_count === 1 ? "line" : "lines"}
       </div>
@@ -385,7 +401,7 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
   return (
     <Modal open onClose={onClose} title={title} width={520}>
       <div style={{ fontSize: 14, marginBottom: 4 }}>
-        <span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{order.invoice_number}</span> <span style={{ color: C.text2 }}>· {order.customer_name}</span>
+        <span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{order.invoice_number}</span> <span style={{ color: C.text2 }}>· {order.customer_name || impCfg(order.importance).label}</span>
       </div>
       <div style={{ fontSize: 12.5, color: C.text3, marginBottom: 14 }}>Check the items below are done, then confirm the move to <b style={{ color: C.text2 }}>{(STAGE_LABELS[to] || {}).label || to}</b>.</div>
       {!detail ? <Loading /> : (
@@ -579,6 +595,11 @@ function FloorDisplay({ onExit }) {
                     return (
                       <div key={o.id} style={{ background: C.surface, border: `1px solid ${urgent || late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${cfg.color}`, borderRadius: 9, padding: "9px 11px" }}>
                         <div style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
+                        {o.importance && o.importance !== "standard" && (
+                          <div style={{ marginTop: 4 }}>
+                            <span style={{ display: "inline-block", padding: "1px 7px", borderRadius: 5, fontSize: 10, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase", color: impCfg(o.importance).color, background: impCfg(o.importance).color + "1f", border: `1px solid ${impCfg(o.importance).color}55` }}>{impCfg(o.importance).label}</span>
+                          </div>
+                        )}
                         {(o.waiting_stock || o.on_hold) && (
                           <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
                             {o.waiting_stock && <Pill color={C.danger} style={{ fontSize: 9.5, padding: "1px 6px" }}>⚠ Stock</Pill>}
@@ -618,7 +639,9 @@ function FloorDisplay({ onExit }) {
                 <span style={{ fontSize: 14, color: C.text3 }}>{(spotIdx % pool.length) + 1} / {pool.length}</span>
               </div>
               <div style={{ fontFamily: MONO, fontSize: 52, fontWeight: 800, color: C.accent2, margin: "10px 0 6px", lineHeight: 1 }}>{spot.invoice_number}</div>
-              <div style={{ fontSize: 15, color: C.text2, marginBottom: 8 }}>{spot.customer_name}</div>
+              <div style={{ marginBottom: 10 }}>
+                <span style={{ display: "inline-block", padding: "5px 14px", borderRadius: 8, fontSize: 16, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", color: impCfg(spot.importance).color, background: impCfg(spot.importance).color + "1f", border: `1px solid ${impCfg(spot.importance).color}55` }}>{impCfg(spot.importance).label}</span>
+              </div>
               {detail && detail.id === spot.id && (detail.items || []).length > 0 && (() => {
                 const its = detail.items || [];
                 const tu = its.reduce((s, it) => s + itemStat(it).q, 0);
@@ -713,6 +736,10 @@ function OrderDetail({ orderId, user, onUpdated }) {
     try { await api("POST", `/orders/${orderId}/assign-pic`, { pic_id: picId || null }); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); }
   }
+  async function setImportance(v) {
+    try { await api("PATCH", `/orders/${orderId}`, { importance: v }); await load(); onUpdated && onUpdated(); }
+    catch (e) { alert(e.message); }
+  }
   async function updateItem(itemId, patch) {
     try { await api("PATCH", `/orders/${orderId}/items/${itemId}`, patch); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); load(); }
@@ -758,6 +785,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
         <span style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, color: C.text }}>{order.invoice_number}</span>
         <Pill color={cfg.color}>{cfg.label}</Pill>
+        {order.importance && order.importance !== "standard" && <Pill color={impCfg(order.importance).color}>{impCfg(order.importance).label}</Pill>}
         {order.waiting_stock && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
         {order.on_hold && <Pill color={C.hold}>On hold</Pill>}
         {order.priority === "urgent" && <Pill color={C.danger}>Urgent</Pill>}
@@ -777,8 +805,13 @@ function OrderDetail({ orderId, user, onUpdated }) {
       {tab === "details" && (
         <div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-            <LV label="Customer" v={order.customer_name} />
-            <LV label="Contact" v={order.customer_contact || "—"} />
+            {order.customer_name != null && <LV label="Customer" v={order.customer_name} />}
+            {order.customer_name != null && <LV label="Contact" v={order.customer_contact || "—"} />}
+            <LV label="Importance" v={
+              canMove
+                ? <select value={order.importance || "standard"} onChange={(e) => setImportance(e.target.value)} style={{ padding: "5px 9px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13.5, fontWeight: 700, color: impCfg(order.importance).color }}>{IMPORTANCE_OPTS.map((o) => <option key={o.value} value={o.value} style={{ background: C.bg2, color: C.text }}>{o.label}</option>)}</select>
+                : <Pill color={impCfg(order.importance).color}>{impCfg(order.importance).label}</Pill>
+            } />
             <LV label="Order date" v={order.order_date ? fmtDay(order.order_date) : "—"} />
             <LV label="Delivery" v={<span style={{ color: countdown(order.required_delivery_date).tone }}>{fmtDay(order.required_delivery_date)} · {countdown(order.required_delivery_date).text}</span>} />
             <LV label="Expiry" v={order.expiry_date ? fmtDay(order.expiry_date) : "—"} />
@@ -965,7 +998,7 @@ function LV({ label, v }) {
 
 // ─── Create order ──────────────────────────────────────────────────────────────
 function CreateOrderForm({ onCreated, onClose }) {
-  const [f, setF] = useState({ invoice_number: "", customer_name: "", customer_contact: "", required_delivery_date: "", priority: "normal", skip_production: false, notes: "" });
+  const [f, setF] = useState({ invoice_number: "", customer_name: "", customer_contact: "", required_delivery_date: "", priority: "normal", importance: "standard", skip_production: false, notes: "" });
   const [items, setItems] = useState([{ sku: "", name: "", quantity: 1, unit: "pcs" }]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -984,6 +1017,7 @@ function CreateOrderForm({ onCreated, onClose }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <Field label="Invoice Number" value={f.invoice_number} onChange={(v) => set("invoice_number", v)} required placeholder="INV-26-0001" />
         <Field label="Priority" value={f.priority} onChange={(v) => set("priority", v)} options={[{ value: "normal", label: "Normal" }, { value: "urgent", label: "Urgent" }]} />
+        <Field label="Importance" value={f.importance} onChange={(v) => set("importance", v)} options={IMPORTANCE_OPTS} />
         <Field label="Customer Name" value={f.customer_name} onChange={(v) => set("customer_name", v)} required />
         <Field label="Contact" value={f.customer_contact} onChange={(v) => set("customer_contact", v)} placeholder="01X-XXXXXXX" />
         <Field label="Required Delivery Date" type="date" value={f.required_delivery_date} onChange={(v) => set("required_delivery_date", v)} required />
