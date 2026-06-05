@@ -1365,30 +1365,68 @@ function Remarks({ user }) {
 function Audit() {
   const [d, setD] = useState(null);
   const [allLogs, setAllLogs] = useState(false);
-  useEffect(() => { api("GET", "/reports/audit?limit=100").then(setD).catch(() => setD({ logs: [] })); }, []);
-  if (!d) return <Loading />;
-  const logs = d.logs || [];
+  const [period, setPeriod] = useState("all"); // all | weekly | monthly | custom
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+
+  const ymd = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+  useEffect(() => {
+    let f = "", t = "";
+    if (period === "weekly") { const x = new Date(); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); f = ymd(x); }
+    else if (period === "monthly") { const x = new Date(); f = ymd(new Date(x.getFullYear(), x.getMonth(), 1)); }
+    else if (period === "custom") { f = from; t = to; }
+    const p = new URLSearchParams({ limit: "200" });
+    if (f) p.set("from", f);
+    if (t) p.set("to", `${t} 23:59:59`);
+    setD(null); setAllLogs(false);
+    api("GET", `/reports/audit?${p.toString()}`).then(setD).catch(() => setD({ logs: [] }));
+  }, [period, from, to]);
+
+  const logs = d && d.logs ? d.logs : [];
   const shownLogs = allLogs ? logs : logs.slice(0, 3);
+  const total = d && d.total != null ? d.total : logs.length;
+  const tabBtn = (id, label) => (
+    <button key={id} onClick={() => setPeriod(id)} style={{ background: period === id ? C.surface2 : "transparent", border: "none", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontSize: 13, fontWeight: period === id ? 700 : 500, color: period === id ? C.text : C.text2 }}>{label}</button>
+  );
+  const dateInp = { padding: "7px 10px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, color: C.text, fontSize: 13, colorScheme: "dark" };
+
   return (
     <div>
-      <Card style={{ padding: 0, overflow: "hidden" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-        <thead><tr style={{ background: C.bg2 }}>{["When", "User", "Action", "Details", "Invoice"].map((h) => <th key={h} style={{ textAlign: "left", padding: "11px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
-        <tbody>
-          {logs.length === 0 && <tr><td colSpan={5}><Empty label="No audit entries." /></td></tr>}
-          {shownLogs.map((l) => (
-            <tr key={l.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-              <td style={{ padding: "9px 16px", color: C.text3, whiteSpace: "nowrap" }}>{new Date(l.created_at).toLocaleString()}</td>
-              <td style={{ padding: "9px 16px", color: C.text }}>{l.user_name}</td>
-              <td style={{ padding: "9px 16px" }}><Pill color={C.text2}>{l.action}</Pill></td>
-              <td style={{ padding: "9px 16px", color: C.text2 }}>{l.details}</td>
-              <td style={{ padding: "9px 16px", fontFamily: MONO, color: C.text2 }}>{l.invoice_number || "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      </Card>
-      {logs.length > 3 && <div style={{ marginTop: 12 }}><Btn variant="ghost" size="sm" onClick={() => setAllLogs((v) => !v)}>{allLogs ? "Show less ▲" : `Show all ${logs.length} ▼`}</Btn></div>}
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4 }}>
+          {tabBtn("all", "All")}{tabBtn("weekly", "This week")}{tabBtn("monthly", "This month")}{tabBtn("custom", "Custom")}
+        </div>
+        {period === "custom" && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={dateInp} />
+            <span style={{ color: C.text3, fontSize: 13 }}>→</span>
+            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={dateInp} />
+          </div>
+        )}
+        {d && <span style={{ fontSize: 12.5, color: C.text3, marginLeft: "auto" }}>{total} {total === 1 ? "entry" : "entries"}</span>}
+      </div>
+      {!d ? <Loading /> : (
+        <>
+          <Card style={{ padding: 0, overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead><tr style={{ background: C.bg2 }}>{["When", "User", "Action", "Details", "Invoice"].map((h) => <th key={h} style={{ textAlign: "left", padding: "11px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {logs.length === 0 && <tr><td colSpan={5}><Empty label="No audit entries for this range." /></td></tr>}
+                {shownLogs.map((l) => (
+                  <tr key={l.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <td style={{ padding: "9px 16px", color: C.text3, whiteSpace: "nowrap" }}>{new Date(l.created_at).toLocaleString()}</td>
+                    <td style={{ padding: "9px 16px", color: C.text }}>{l.user_name}</td>
+                    <td style={{ padding: "9px 16px" }}><Pill color={C.text2}>{l.action}</Pill></td>
+                    <td style={{ padding: "9px 16px", color: C.text2 }}>{l.details}</td>
+                    <td style={{ padding: "9px 16px", fontFamily: MONO, color: C.text2 }}>{l.invoice_number || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+          {logs.length > 3 && <div style={{ marginTop: 12 }}><Btn variant="ghost" size="sm" onClick={() => setAllLogs((v) => !v)}>{allLogs ? "Show less ▲" : `Show all ${logs.length}${total > logs.length ? ` of ${total}` : ""} ▼`}</Btn></div>}
+        </>
+      )}
     </div>
   );
 }
