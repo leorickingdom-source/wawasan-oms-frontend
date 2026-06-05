@@ -80,7 +80,7 @@ const NAV = [
   { id: "settings", label: "System Settings", icon: "settings", roles: ["super_admin"] },
 ];
 const PAGE_META = {
-  board: ["Order Board", "Live Kanban — Order → Production → Packing → Ready for Delivery"],
+  board: ["Order Board", ""],
   dashboard: ["Dashboard", "Operations overview"],
   delivery: ["Delivery", "Schedule and dispatch"],
   reports: ["Reports", "Department performance"],
@@ -151,7 +151,7 @@ function printPickingSlip(order) {
   th{font-size:11px;text-transform:uppercase;color:#888} .m{font-family:ui-monospace,Consolas,monospace;color:#555} .q{font-weight:700;text-align:right} .chk{width:30px;text-align:center;font-size:18px}
   @media print{body{margin:12mm}}
 </style></head><body>
-  <h1>Picking Slip</h1><div class="sub">Wawasan Candle OMS — ${escHtml(order.invoice_number)}</div>
+  <h1>Picking Slip</h1><div class="sub">Wawasan Candle — ${escHtml(order.invoice_number)}</div>
   <div class="meta">
     <div><b>Customer</b>${escHtml(order.customer_name)}</div>
     <div><b>Delivery date</b>${escHtml(fmtDay(order.required_delivery_date))}</div>
@@ -1077,18 +1077,28 @@ function Reports() {
   const [period, setPeriod] = useState("weekly");
   const [d, setD] = useState({});
   useEffect(() => { api("GET", `/reports/${tab}?period=${period}`).then(setD).catch(() => setD({})); }, [tab, period]);
-  const metrics = {
-    production: [["Orders Completed", d.completed], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["Avg Production", d.avg_production_hours ? d.avg_production_hours + "h" : "—"], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"]],
-    packing: [["Orders Packed", d.packed], ["Avg Pack Time", d.avg_pack_minutes ? d.avg_pack_minutes + "min" : "—"], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"]],
-    delivery: [["Total Deliveries", d.total_deliveries], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["On-Time Count", d.on_time_count]],
+  const metricDefs = {
+    production: (d) => [["Orders Completed", d.completed], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["Avg Production", d.avg_production_hours ? d.avg_production_hours + "h" : "—"], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"]],
+    packing: (d) => [["Orders Packed", d.packed], ["Avg Pack Time", d.avg_pack_minutes ? d.avg_pack_minutes + "min" : "—"], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"]],
+    delivery: (d) => [["Total Deliveries", d.total_deliveries], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["On-Time Count", d.on_time_count]],
   };
+  const metrics = { [tab]: metricDefs[tab](d) };
   const trend = d.daily_trend || [];
   const maxT = Math.max(...trend.map((t) => t.count), 1);
-  function exportReport() {
-    const rows = [["Report", tab], ["Period", period], [], ["Metric", "Value"], ...(metrics[tab] || []).map(([k, v]) => [k, v == null ? "" : v])];
-    if (tab === "delivery" && (d.by_delivery_man || []).length) rows.push([], ["Driver", "Deliveries", "On time"], ...d.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
-    if (trend.length) rows.push([], ["Date", "Count"], ...trend.map((t) => [t.date, t.count]));
-    downloadCsv(`report-${tab}-${period}.csv`, rows);
+  async function exportAll() {
+    const [prod, pack, del] = await Promise.all([
+      api("GET", `/reports/production?period=${period}`).catch(() => ({})),
+      api("GET", `/reports/packing?period=${period}`).catch(() => ({})),
+      api("GET", `/reports/delivery?period=${period}`).catch(() => ({})),
+    ]);
+    const rows = [["Wawasan Candle — Reports"], ["Period", period], []];
+    for (const [name, key, dd] of [["Production", "production", prod], ["Packing", "packing", pack], ["Delivery", "delivery", del]]) {
+      rows.push([name], ["Metric", "Value"], ...metricDefs[key](dd).map(([k, v]) => [k, v == null ? "" : v]));
+      if ((dd.by_delivery_man || []).length) rows.push([], ["Driver", "Deliveries", "On time"], ...dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
+      if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
+      rows.push([]);
+    }
+    downloadCsv(`reports-all-${period}.csv`, rows);
   }
   return (
     <div>
@@ -1102,7 +1112,7 @@ function Reports() {
             <option value="weekly" style={{ background: C.bg2 }}>This Week</option>
             <option value="monthly" style={{ background: C.bg2 }}>This Month</option>
           </select>
-          <Btn variant="soft" onClick={exportReport}>Export CSV</Btn>
+          <Btn variant="soft" onClick={exportAll}>Export all</Btn>
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 20 }}>
@@ -1150,6 +1160,7 @@ function Delivery({ user }) {
   const [drivers, setDrivers] = useState([]);
   const [completed, setCompleted] = useState([]);
   const [show, setShow] = useState(false);
+  const [allCompleted, setAllCompleted] = useState(false);
   const [form, setForm] = useState({ order_id: "", delivery_man_id: "", scheduled_date: "", notes: "" });
   const canAssign = ["super_admin", "operations_controller"].includes(user.role);
   const canDeliver = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
@@ -1186,6 +1197,7 @@ function Delivery({ user }) {
   if (isDriver) active = active.filter((x) => x.delivery_man_id === user.id);
   const delByOrder = {};
   for (const dv of list) delByOrder[dv.order_id] = dv;
+  const shownCompleted = allCompleted ? completed : completed.slice(0, 3);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -1221,7 +1233,7 @@ function Delivery({ user }) {
             <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Driver", "Delivered", "Due"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
               {completed.length === 0 && <tr><td colSpan={5}><Empty label="No completed orders yet." /></td></tr>}
-              {completed.map((o) => {
+              {shownCompleted.map((o) => {
                 const dv = delByOrder[o.id];
                 return (
                   <tr key={o.id} style={{ borderBottom: `1px solid ${C.border}` }}>
@@ -1236,6 +1248,7 @@ function Delivery({ user }) {
             </tbody>
           </table>
         </Card>
+        {completed.length > 3 && <div style={{ marginTop: 10 }}><Btn variant="ghost" size="sm" onClick={() => setAllCompleted((v) => !v)}>{allCompleted ? "Show less ▲" : `Show all ${completed.length} ▼`}</Btn></div>}
       </div>
 
       <Modal open={show} onClose={() => setShow(false)} title="Schedule delivery">
@@ -1276,6 +1289,7 @@ function Remarks({ user }) {
   const [content, setContent] = useState("");
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [allArchive, setAllArchive] = useState(false);
   const canPost = ["super_admin", "production_lead"].includes(user.role);
 
   async function load() {
@@ -1300,6 +1314,7 @@ function Remarks({ user }) {
 
   if (list === null || cur === undefined) return <Loading />;
   const archive = list.filter((r) => !cur || r.id !== cur.id);
+  const shownArchive = allArchive ? archive : archive.slice(0, 3);
   const weekLabel = isoWeekLabel(cur ? cur.week_start : new Date().toISOString().slice(0, 10));
 
   return (
@@ -1331,7 +1346,7 @@ function Remarks({ user }) {
       <Card style={{ padding: "20px 22px" }}>
         <h3 style={{ fontSize: 16, fontWeight: 800, color: C.text, marginBottom: 16 }}>Archive</h3>
         {archive.length === 0 && <Empty label="No archived remarks yet." />}
-        {archive.map((r) => (
+        {shownArchive.map((r) => (
           <div key={r.id} style={{ paddingBottom: 16, marginBottom: 16, borderBottom: `1px solid ${C.border}` }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
               <Pill color={C.accent} style={{ fontSize: 12, padding: "3px 11px" }}>{isoWeekLabel(r.week_start)}</Pill>
@@ -1340,6 +1355,7 @@ function Remarks({ user }) {
             <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{r.content}</div>
           </div>
         ))}
+        {archive.length > 3 && <Btn variant="ghost" size="sm" onClick={() => setAllArchive((v) => !v)}>{allArchive ? "Show less ▲" : `Show all ${archive.length} ▼`}</Btn>}
       </Card>
     </div>
   );
@@ -1348,15 +1364,19 @@ function Remarks({ user }) {
 // ─── Audit ─────────────────────────────────────────────────────────────────────
 function Audit() {
   const [d, setD] = useState(null);
+  const [allLogs, setAllLogs] = useState(false);
   useEffect(() => { api("GET", "/reports/audit?limit=100").then(setD).catch(() => setD({ logs: [] })); }, []);
   if (!d) return <Loading />;
+  const logs = d.logs || [];
+  const shownLogs = allLogs ? logs : logs.slice(0, 3);
   return (
-    <Card style={{ padding: 0, overflow: "hidden" }}>
+    <div>
+      <Card style={{ padding: 0, overflow: "hidden" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead><tr style={{ background: C.bg2 }}>{["When", "User", "Action", "Details", "Invoice"].map((h) => <th key={h} style={{ textAlign: "left", padding: "11px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
         <tbody>
-          {(d.logs || []).length === 0 && <tr><td colSpan={5}><Empty label="No audit entries." /></td></tr>}
-          {(d.logs || []).map((l) => (
+          {logs.length === 0 && <tr><td colSpan={5}><Empty label="No audit entries." /></td></tr>}
+          {shownLogs.map((l) => (
             <tr key={l.id} style={{ borderBottom: `1px solid ${C.border}` }}>
               <td style={{ padding: "9px 16px", color: C.text3, whiteSpace: "nowrap" }}>{new Date(l.created_at).toLocaleString()}</td>
               <td style={{ padding: "9px 16px", color: C.text }}>{l.user_name}</td>
@@ -1367,7 +1387,9 @@ function Audit() {
           ))}
         </tbody>
       </table>
-    </Card>
+      </Card>
+      {logs.length > 3 && <div style={{ marginTop: 12 }}><Btn variant="ghost" size="sm" onClick={() => setAllLogs((v) => !v)}>{allLogs ? "Show less ▲" : `Show all ${logs.length} ▼`}</Btn></div>}
+    </div>
   );
 }
 
@@ -1378,6 +1400,9 @@ function Users({ user }) {
   const [f, setF] = useState({ name: "", email: "", role: "production_staff", password: "" });
   const [resetFor, setResetFor] = useState(null);
   const [newPw, setNewPw] = useState("");
+  const [q, setQ] = useState("");
+  const [roleF, setRoleF] = useState("");
+  const [statusF, setStatusF] = useState("");
   const isAdmin = user.role === "super_admin";
   function load() { api("GET", "/users").then(setList).catch(() => setList([])); }
   useEffect(() => { load(); }, []);
@@ -1391,14 +1416,38 @@ function Users({ user }) {
   const canManage = (u) => isAdmin || u.role !== "super_admin";
   const roleOptions = Object.entries(ROLE_LABELS).filter(([v]) => isAdmin || v !== "super_admin").map(([value, label]) => ({ value, label }));
   if (!list) return <Loading />;
+  const ql = q.trim().toLowerCase();
+  const filtered = list.filter((u) =>
+    (!ql || u.name.toLowerCase().includes(ql) || (u.email || "").toLowerCase().includes(ql)) &&
+    (!roleF || u.role === roleF) &&
+    (!statusF || (statusF === "active" ? u.is_active : !u.is_active))
+  );
+  const ctrl = { padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13 };
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}><Btn onClick={() => setShow(true)}><Icon name="plus" size={15} /> Add user</Btn></div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 200, maxWidth: 320 }}>
+          <span style={{ position: "absolute", left: 11, top: 9 }}><Icon name="search" size={15} color={C.text3} /></span>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or email…" style={{ ...ctrl, width: "100%", padding: "8px 12px 8px 34px", fontSize: 13.5, outline: "none", boxSizing: "border-box" }} />
+        </div>
+        <select value={roleF} onChange={(e) => setRoleF(e.target.value)} style={ctrl}>
+          <option value="" style={{ background: C.bg2 }}>All roles</option>
+          {Object.entries(ROLE_LABELS).map(([v, l]) => <option key={v} value={v} style={{ background: C.bg2 }}>{l}</option>)}
+        </select>
+        <select value={statusF} onChange={(e) => setStatusF(e.target.value)} style={ctrl}>
+          <option value="" style={{ background: C.bg2 }}>All status</option>
+          <option value="active" style={{ background: C.bg2 }}>Active</option>
+          <option value="disabled" style={{ background: C.bg2 }}>Disabled</option>
+        </select>
+        <span style={{ fontSize: 12.5, color: C.text3 }}>{filtered.length} of {list.length}</span>
+        <Btn onClick={() => setShow(true)} style={{ marginLeft: "auto" }}><Icon name="plus" size={15} /> Add user</Btn>
+      </div>
       <Card style={{ padding: 0, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
           <thead><tr style={{ background: C.bg2 }}>{["User", "Email", "Role", "Status", "Actions"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
           <tbody>
-            {list.map((u) => (
+            {filtered.length === 0 && <tr><td colSpan={5}><Empty label="No users match these filters." /></td></tr>}
+            {filtered.map((u) => (
               <tr key={u.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                 <td style={{ padding: "11px 16px" }}><div style={{ display: "flex", alignItems: "center", gap: 10 }}><Avatar name={u.name} color={u.avatar_color} size={30} /><span style={{ color: C.text, fontWeight: 500 }}>{u.name}</span></div></td>
                 <td style={{ padding: "11px 16px", color: C.text2 }}>{u.email}</td>
@@ -1630,7 +1679,7 @@ export default function App() {
       <aside style={{ width: 248, background: C.bg2, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "20px 20px 18px" }}>
           <Logo size={38} />
-          <div><div style={{ fontSize: 15, fontWeight: 800, color: C.text, letterSpacing: 0.4 }}>WAWASAN</div><div style={{ fontSize: 10.5, fontWeight: 600, color: C.text3, letterSpacing: 1.5 }}>CANDLE OMS</div></div>
+          <div><div style={{ fontSize: 15, fontWeight: 800, color: C.text, letterSpacing: 0.4 }}>WAWASAN</div><div style={{ fontSize: 10.5, fontWeight: 600, color: C.text3, letterSpacing: 1.5 }}>CANDLE</div></div>
         </div>
         <div style={{ fontSize: 10.5, fontWeight: 700, color: C.text3, letterSpacing: 1.5, padding: "6px 22px" }}>WORKSPACE</div>
         <nav style={{ display: "flex", flexDirection: "column", gap: 2, padding: "4px 12px", overflowY: "auto", flex: 1 }}>
@@ -1654,7 +1703,7 @@ export default function App() {
         <header style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 26px", borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, background: C.bg + "ee", backdropFilter: "blur(6px)", zIndex: 100 }}>
           <div style={{ minWidth: 0 }}>
             <h1 style={{ fontSize: 19, fontWeight: 800, color: C.text }}>{title}</h1>
-            <div style={{ fontSize: 12.5, color: C.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{subtitle}</div>
+            {subtitle && <div style={{ fontSize: 12.5, color: C.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{subtitle}</div>}
           </div>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
             {page === "board" && (
@@ -1680,7 +1729,6 @@ export default function App() {
             <button onClick={() => setWeekOnly((w) => !w)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: weekOnly ? C.accent + "1c" : C.surface, border: `1px solid ${weekOnly ? C.accent + "55" : C.border2}`, borderRadius: 9, color: weekOnly ? C.accent : C.text2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
               <Icon name="calendar" size={15} color={weekOnly ? C.accent : C.text3} /> This week only
             </button>
-            <span style={{ marginLeft: "auto", fontSize: 12.5, color: C.text3 }}>Click <Icon name="arrowRight" size={13} color={C.text3} style={{ verticalAlign: "middle" }} /> to advance · ⋮ for details</span>
           </div>
         )}
 
