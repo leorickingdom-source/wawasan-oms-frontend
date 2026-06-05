@@ -332,11 +332,21 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
       <div style={{ fontSize: 12, color: C.text3, marginBottom: 5 }}>
         {order.total_units != null ? `${order.total_units} units · ` : ""}{order.item_count} {order.item_count === 1 ? "line" : "lines"}
       </div>
-      {(order.stage === "production" || order.stage === "packing") && order.item_count > 0 && (
-        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: (order.made_count || 0) >= order.item_count ? C.ready : C.accent }}>
-          {(order.made_count || 0) >= order.item_count ? "All SKUs made ✓" : `${order.made_count || 0}/${order.item_count} SKUs made — in progress`}
-        </div>
-      )}
+      {(order.stage === "production" || order.stage === "packing") && order.item_count > 0 && (() => {
+        const mu = order.made_units || 0, tu = order.total_units || 0;
+        const full = (order.made_count || 0) >= order.item_count;
+        const p = tu > 0 ? Math.round((mu / tu) * 100) : (full ? 100 : 0);
+        return (
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: full ? C.ready : C.accent, marginBottom: 4 }}>
+              {full ? "All SKUs made ✓" : `${order.made_count || 0}/${order.item_count} SKUs · ${mu}/${tu} units`}
+            </div>
+            <div style={{ height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${p}%`, background: full ? C.ready : C.accent }} />
+            </div>
+          </div>
+        );
+      })()}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderTop: `1px solid ${C.border}`, paddingTop: 9 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
           {order.pic_name
@@ -651,8 +661,11 @@ function OrderDetail({ orderId, user, onUpdated }) {
     try { await api("POST", `/orders/${orderId}/move`, { to_stage: to, reason: why || undefined }); setMoveStage(""); setReason(""); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); } finally { setBusy(false); }
   }
-  async function toggleMade(it) {
-    try { await api("PATCH", `/orders/${orderId}/items/${it.id}`, { made: !it.made }); await load(); onUpdated && onUpdated(); }
+  async function setItemProgress(it, made_qty) {
+    const q = Math.round(it.quantity) || 0;
+    const v = Math.max(0, Math.min(Math.round(made_qty) || 0, q));
+    if (v === (Math.round(it.made_qty) || 0)) return;
+    try { await api("PATCH", `/orders/${orderId}/items/${it.id}`, { made_qty: v }); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); }
   }
   async function setFlag(body) {
@@ -678,6 +691,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
   }
   const cellInput = (w) => ({ padding: "6px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 7, fontSize: 13, color: C.text, width: w || "100%", boxSizing: "border-box" });
   const madeBtn = (made) => ({ cursor: "pointer", border: `1px solid ${made ? C.ready + "66" : C.border2}`, background: made ? C.ready + "1f" : C.surface2, color: made ? C.ready : C.text3, borderRadius: 7, padding: "4px 10px", fontSize: 12, fontWeight: 700 });
+  const itemStat = (it) => { const q = Math.round(it.quantity) || 0, m = Math.min(Math.round(it.made_qty) || 0, q); if (q > 0 && m >= q) return { k: "done", label: "Done", color: C.ready, m, q }; if (m > 0) return { k: "partial", label: `${m}/${q}`, color: C.packing, m, q }; return { k: "pending", label: "Pending", color: C.text3, m, q }; };
   async function saveNotes() {
     setNotesBusy(true); setNotesSaved(false);
     try { await api("PATCH", `/orders/${orderId}`, { notes }); setNotesSaved(true); onUpdated && onUpdated(); }
@@ -766,13 +780,45 @@ function OrderDetail({ orderId, user, onUpdated }) {
           ))}
         </div>
       )}
-      {tab === "items" && (
+      {tab === "items" && (() => {
+        const items = order.items || [];
+        const tot = items.reduce((s, it) => s + (Math.round(it.quantity) || 0), 0);
+        const done = items.reduce((s, it) => s + itemStat(it).m, 0);
+        const doneLines = items.filter((it) => itemStat(it).k === "done").length;
+        const pct = tot > 0 ? Math.round((done / tot) * 100) : 0;
+        const head = canMove ? ["SKU", "Product", "Qty", "Unit", "Progress", "Status", ""]
+          : canMark ? ["SKU", "Product", "Qty", "Unit", "Progress", "Status"]
+          : ["SKU", "Product", "Qty", "Unit", "Status"];
+        return (
         <div>
+          {items.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: C.text2, marginBottom: 6 }}>
+                <span>{doneLines}/{items.length} SKUs · {done}/{tot} units made</span>
+                <span style={{ color: pct >= 100 ? C.ready : C.accent, fontWeight: 700 }}>{pct}%</span>
+              </div>
+              <div style={{ height: 6, background: C.surface2, borderRadius: 4, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${pct}%`, background: pct >= 100 ? C.ready : C.accent, transition: "width .2s" }} />
+              </div>
+            </div>
+          )}
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead><tr>{(canMove ? ["SKU", "Product", "Qty", "Unit", "Made", ""] : ["SKU", "Product", "Qty", "Unit", "Made"]).map((h, i) => <th key={i} style={{ textAlign: "left", padding: "8px 10px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
+            <thead><tr>{head.map((h, i) => <th key={i} style={{ textAlign: "left", padding: "8px 10px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
             <tbody>
-              {(order.items || []).length === 0 && <tr><td colSpan={canMove ? 6 : 5}><Empty label="No items." /></td></tr>}
-              {(order.items || []).map((it) => (
+              {items.length === 0 && <tr><td colSpan={head.length}><Empty label="No items." /></td></tr>}
+              {items.map((it) => {
+                const st = itemStat(it);
+                const prog = (
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <input key={st.m} type="number" min="0" max={st.q} defaultValue={st.m}
+                      onBlur={(e) => setItemProgress(it, +e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={cellInput(56)} />
+                    <span style={{ color: C.text3, fontSize: 12 }}>/ {st.q}</span>
+                    <button onClick={() => setItemProgress(it, st.k === "done" ? 0 : st.q)} style={madeBtn(st.k === "done")}>{st.k === "done" ? "✓ All" : "All"}</button>
+                  </div>
+                );
+                const pill = <span style={{ display: "inline-block", padding: "3px 9px", borderRadius: 20, fontSize: 11.5, fontWeight: 700, color: st.color, background: st.color + "1f", border: `1px solid ${st.color}44` }}>{st.label}</span>;
+                return (
                 <tr key={it.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                   {canMove ? (
                     <>
@@ -780,7 +826,8 @@ function OrderDetail({ orderId, user, onUpdated }) {
                       <td style={{ padding: "6px 8px" }}><input defaultValue={it.name} onBlur={(e) => e.target.value !== it.name && updateItem(it.id, { name: e.target.value })} style={cellInput()} /></td>
                       <td style={{ padding: "6px 8px" }}><input type="number" min="0" defaultValue={Math.round(it.quantity)} onBlur={(e) => +e.target.value !== Math.round(it.quantity) && updateItem(it.id, { quantity: +e.target.value })} style={cellInput(70)} /></td>
                       <td style={{ padding: "6px 8px" }}><input defaultValue={it.unit} onBlur={(e) => e.target.value !== it.unit && updateItem(it.id, { unit: e.target.value })} style={cellInput(64)} /></td>
-                      <td style={{ padding: "6px 8px" }}><button onClick={() => toggleMade(it)} style={madeBtn(it.made)}>{it.made ? "✓ Made" : "Mark"}</button></td>
+                      <td style={{ padding: "6px 8px" }}>{prog}</td>
+                      <td style={{ padding: "6px 8px" }}>{pill}</td>
                       <td style={{ padding: "6px 8px" }}><button onClick={() => removeItem(it.id)} title="Remove" style={{ background: "#3a1a1a", border: "none", borderRadius: 7, color: "#fca5a5", cursor: "pointer", width: 28, height: 28 }}>×</button></td>
                     </>
                   ) : (
@@ -789,11 +836,12 @@ function OrderDetail({ orderId, user, onUpdated }) {
                       <td style={{ padding: "8px 10px", color: C.text }}>{it.name}</td>
                       <td style={{ padding: "8px 10px", fontWeight: 700, color: C.text }}>{Math.round(it.quantity)}</td>
                       <td style={{ padding: "8px 10px", color: C.text3 }}>{it.unit}</td>
-                      <td style={{ padding: "8px 10px" }}>{canMark ? <button onClick={() => toggleMade(it)} style={madeBtn(it.made)}>{it.made ? "✓ Made" : "Mark"}</button> : (it.made ? <span style={{ color: C.green }}>✓</span> : <span style={{ color: C.text3 }}>—</span>)}</td>
+                      {canMark && <td style={{ padding: "8px 10px" }}>{prog}</td>}
+                      <td style={{ padding: "8px 10px" }}>{pill}</td>
                     </>
                   )}
                 </tr>
-              ))}
+              );})}
             </tbody>
           </table>
           {canMove && (
@@ -806,7 +854,8 @@ function OrderDetail({ orderId, user, onUpdated }) {
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
       {tab === "attachments" && (
         <div>
           <div style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
