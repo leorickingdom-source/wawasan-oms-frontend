@@ -648,6 +648,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
   const [notesBusy, setNotesBusy] = useState(false);
   const [notesSaved, setNotesSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
   const canMove = ["super_admin", "operations_controller"].includes(user.role);
   const canMark = ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff"].includes(user.role);
 
@@ -713,7 +714,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
   if (!order) return <Loading />;
   if (order._error) return <div style={{ color: "#fca5a5" }}>⚠ {order._error}</div>;
   const cfg = STAGE_LABELS[order.stage] || { label: order.stage, color: C.text3 };
-  const tabs = ["details", "timeline", "items", "attachments"];
+  const tabs = ["details", "items", "timeline", "attachments"];
   const picRoles = STAGE_PIC_ROLES[order.stage];
   const picUsers = picRoles ? users.filter((u) => picRoles.includes(u.role)) : users;
 
@@ -765,10 +766,14 @@ function OrderDetail({ orderId, user, onUpdated }) {
           </div>
         </div>
       )}
-      {tab === "timeline" && (
+      {tab === "timeline" && (() => {
+        const log = order.activity || [];
+        const LIMIT = 5;
+        const shown = logOpen ? log : log.slice(0, LIMIT);
+        return (
         <div>
-          {(order.activity || []).length === 0 && <Empty label="No activity yet." />}
-          {(order.activity || []).map((a) => (
+          {log.length === 0 && <Empty label="No activity yet." />}
+          {shown.map((a) => (
             <div key={a.id} style={{ display: "flex", gap: 11, marginBottom: 13 }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: C.accent, marginTop: 6, flexShrink: 0 }} />
               <div>
@@ -778,8 +783,12 @@ function OrderDetail({ orderId, user, onUpdated }) {
               </div>
             </div>
           ))}
+          {log.length > LIMIT && (
+            <Btn variant="ghost" size="sm" onClick={() => setLogOpen((v) => !v)}>{logOpen ? "Show less ▲" : `Show all ${log.length} ▼`}</Btn>
+          )}
         </div>
-      )}
+        );
+      })()}
       {tab === "items" && (() => {
         const items = order.items || [];
         const tot = items.reduce((s, it) => s + (Math.round(it.quantity) || 0), 0);
