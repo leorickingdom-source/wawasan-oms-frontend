@@ -392,8 +392,11 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
   const [busy, setBusy] = useState(false);
   useEffect(() => { api("GET", `/orders/${order.id}`).then(setDetail).catch(() => setDetail({ items: [] })); }, [order.id]);
   const canMark = user && ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff"].includes(user.role);
-  async function toggleMade(it) {
-    try { await api("PATCH", `/orders/${order.id}/items/${it.id}`, { made: !it.made }); const d = await api("GET", `/orders/${order.id}`).catch(() => null); if (d) setDetail(d); }
+  async function setProgress(it, v) {
+    const q = Math.round(it.quantity) || 0;
+    const val = Math.max(0, Math.min(Math.round(v) || 0, q));
+    if (val === (Math.round(it.made_qty) || 0)) return;
+    try { await api("PATCH", `/orders/${order.id}/items/${it.id}`, { made_qty: val }); const d = await api("GET", `/orders/${order.id}`).catch(() => null); if (d) setDetail(d); }
     catch (e) { alert(e.message); }
   }
   const items = (detail && detail.items) || [];
@@ -409,19 +412,31 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
       {!detail ? <Loading /> : (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden", marginBottom: 14 }}>
           {items.length === 0 && <Empty label="No line items on this order." />}
-          {items.map((it) => (
+          {items.map((it) => {
+            const stt = itemStat(it);
+            const dot = stt.k === "done" ? C.ready : stt.k === "partial" ? C.packing : C.text3;
+            return (
             <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderBottom: `1px solid ${C.border}` }}>
-              <span style={{ width: 9, height: 9, borderRadius: "50%", background: it.made ? C.ready : C.text3, flexShrink: 0 }} />
+              <span style={{ width: 9, height: 9, borderRadius: "50%", background: dot, flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontFamily: MONO, fontSize: 11.5, color: C.text3 }}>{it.sku}</div>
                 <div style={{ fontSize: 13.5, color: C.text }}>{it.name}</div>
               </div>
-              <div style={{ fontWeight: 700, color: C.text, marginRight: 6 }}>{Math.round(it.quantity)}<span style={{ fontSize: 11, color: C.text3, fontWeight: 400 }}> {it.unit || "pcs"}</span></div>
-              {canMark
-                ? <button onClick={() => toggleMade(it)} style={{ cursor: "pointer", border: `1px solid ${it.made ? C.ready + "66" : C.border2}`, background: it.made ? C.ready + "1f" : C.surface2, color: it.made ? C.ready : C.text3, borderRadius: 7, padding: "4px 10px", fontSize: 12, fontWeight: 700 }}>{it.made ? "✓ Made" : "Mark"}</button>
-                : (it.made ? <span style={{ color: C.ready, fontSize: 13, fontWeight: 700 }}>✓</span> : <span style={{ color: C.text3, fontSize: 12 }}>pending</span>)}
+              {canMark ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <input key={stt.m} type="number" min="0" max={stt.q} defaultValue={stt.m}
+                    onBlur={(e) => setProgress(it, +e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                    style={{ padding: "6px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 7, fontSize: 13, color: C.text, width: 54, boxSizing: "border-box" }} />
+                  <span style={{ color: C.text3, fontSize: 12 }}>/ {stt.q}</span>
+                  <button onClick={() => setProgress(it, stt.k === "done" ? 0 : stt.q)} style={{ cursor: "pointer", border: `1px solid ${stt.k === "done" ? C.ready + "66" : C.border2}`, background: stt.k === "done" ? C.ready + "1f" : C.surface2, color: stt.k === "done" ? C.ready : C.text3, borderRadius: 7, padding: "4px 10px", fontSize: 12, fontWeight: 700 }}>{stt.k === "done" ? "✓ All" : "All"}</button>
+                </div>
+              ) : (
+                <div style={{ fontWeight: 700, color: stt.color, marginRight: 6 }}>{stt.m}/{stt.q}<span style={{ fontSize: 11, color: C.text3, fontWeight: 400 }}> {it.unit || "pcs"}</span></div>
+              )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
       {order.stage === "production" && items.length > 0 && !allMade && (
@@ -601,17 +616,14 @@ function FloorDisplay({ onExit }) {
                     return (
                       <div key={o.id} style={{ background: C.surface, border: `1px solid ${urgent || late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${cfg.color}`, borderRadius: 9, padding: "9px 11px" }}>
                         <div style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
-                        <div style={{ marginTop: 4 }}>
-                          <span style={{ display: "inline-block", padding: "1px 7px", borderRadius: 5, fontSize: 10, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase", color: impCfg(o.importance).color, background: impCfg(o.importance).color + "1f", border: `1px solid ${impCfg(o.importance).color}55` }}>{impCfg(o.importance).label}</span>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 5 }}>
+                          <Pill color={impCfg(o.importance).color} style={{ fontSize: 9.5, padding: "1px 6px" }}>{impCfg(o.importance).label}</Pill>
+                          {urgent && <Pill color={C.danger} style={{ fontSize: 9.5, padding: "1px 6px" }}>Urgent</Pill>}
+                          {o.waiting_stock && <Pill color={C.danger} style={{ fontSize: 9.5, padding: "1px 6px" }}>⚠ Stock</Pill>}
+                          {o.on_hold && <Pill color={C.hold} style={{ fontSize: 9.5, padding: "1px 6px" }}>Hold</Pill>}
                         </div>
-                        {(o.waiting_stock || o.on_hold) && (
-                          <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
-                            {o.waiting_stock && <Pill color={C.danger} style={{ fontSize: 9.5, padding: "1px 6px" }}>⚠ Stock</Pill>}
-                            {o.on_hold && <Pill color={C.hold} style={{ fontSize: 9.5, padding: "1px 6px" }}>Hold</Pill>}
-                          </div>
-                        )}
                         <div style={{ fontSize: 12.5, color: cd.tone, marginTop: 3 }}>
-                          <span style={{ color: C.text2 }}>{fmtDay(o.required_delivery_date)}</span> · {cd.text}{urgent ? " · URGENT" : ""}
+                          <span style={{ color: C.text2 }}>{fmtDay(o.required_delivery_date)}</span> · {cd.text}
                         </div>
                         <div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{o.total_units != null ? `${o.total_units} units` : `${o.item_count} lines`}</div>
                         {(o.stage === "production" || o.stage === "packing") && o.item_count > 0 && (() => {
@@ -639,12 +651,15 @@ function FloorDisplay({ onExit }) {
           {!spot ? <div style={{ margin: "auto", color: C.text3 }}>No active orders</div> : (
             <>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <Pill color={spotStage.color} style={{ fontSize: 12, padding: "4px 10px" }}>● {spotStage.label}</Pill>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Pill color={spotStage.color} style={{ fontSize: 12, padding: "4px 10px" }}>● {spotStage.label}</Pill>
+                  {spot.priority === "urgent" && <Pill color={C.danger} style={{ fontSize: 12, padding: "4px 10px" }}>Urgent</Pill>}
+                </div>
                 <span style={{ fontSize: 14, color: C.text3 }}>{(spotIdx % pool.length) + 1} / {pool.length}</span>
               </div>
               <div style={{ fontFamily: MONO, fontSize: 52, fontWeight: 800, color: C.accent2, margin: "10px 0 6px", lineHeight: 1 }}>{spot.invoice_number}</div>
               <div style={{ marginBottom: 10 }}>
-                <span style={{ display: "inline-block", padding: "5px 14px", borderRadius: 8, fontSize: 16, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", color: impCfg(spot.importance).color, background: impCfg(spot.importance).color + "1f", border: `1px solid ${impCfg(spot.importance).color}55` }}>{impCfg(spot.importance).label}</span>
+                <Pill color={impCfg(spot.importance).color} style={{ fontSize: 14, padding: "4px 12px" }}>{impCfg(spot.importance).label}</Pill>
               </div>
               {detail && detail.id === spot.id && (detail.items || []).length > 0 && (() => {
                 const its = detail.items || [];
@@ -1243,12 +1258,14 @@ function Delivery({ user }) {
     } catch (e) { alert(e.message); }
   }
   async function markDelivered(id) { try { await api("POST", `/delivery/${id}/deliver`, {}); load(); } catch (e) { alert(e.message); } }
+  function scheduleFor(orderId) { setForm((f) => ({ ...f, order_id: orderId })); setShow(true); }
 
   if (!list) return <Loading />;
-  // Match the order board / floor: a 'pending' delivery is an order still sitting
-  // in Ready for Delivery (green); 'delivered' matches the board's grey Delivered.
-  const tone = { pending: C.ready, in_transit: C.order, delivered: C.text3, failed: C.danger };
-  const statusLabel = { pending: "Ready for Delivery", in_transit: "In transit", delivered: "Delivered", failed: "Failed" };
+  // Tag colours follow the board/floor stage palette: unscheduled orders sit in
+  // their own green "Ready for Delivery" section; once scheduled they become amber
+  // "Pending". in_transit blue, delivered grey.
+  const tone = { pending: C.packing, in_transit: C.order, delivered: C.text3, failed: C.danger };
+  const statusLabel = { pending: "Pending", in_transit: "In transit", delivered: "Delivered", failed: "Failed" };
   let active = list.filter((x) => x.status !== "delivered");
   if (isDriver) active = active.filter((x) => x.delivery_man_id === user.id);
   const delByOrder = {};
@@ -1257,23 +1274,44 @@ function Delivery({ user }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      <div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{isDriver ? "My deliveries" : "Active deliveries"}{canAssign ? ` · ${ready.length} awaiting scheduling` : ""}</h3>
-          {canAssign && <Btn onClick={() => setShow(true)} disabled={ready.length === 0}><Icon name="plus" size={15} /> Schedule delivery</Btn>}
+      {canAssign && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Ready for Delivery · {ready.length}</h3>
+            <Btn onClick={() => setShow(true)} disabled={ready.length === 0}><Icon name="plus" size={15} /> Schedule delivery</Btn>
+          </div>
+          <Card style={{ padding: 0, overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+              <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Due", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {ready.length === 0 && <tr><td colSpan={5}><Empty label="No orders waiting to be scheduled." /></td></tr>}
+                {ready.map((o) => (
+                  <tr key={o.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{o.invoice_number}</td>
+                    <td style={{ padding: "11px 16px", color: C.text2 }}>{o.customer_name}</td>
+                    <td style={{ padding: "11px 16px", color: countdown(o.required_delivery_date).tone }}>{fmtDay(o.required_delivery_date)}</td>
+                    <td style={{ padding: "11px 16px" }}><Pill color={C.ready}>Ready for Delivery</Pill></td>
+                    <td style={{ padding: "11px 16px" }}><Btn size="sm" onClick={() => scheduleFor(o.id)}>Schedule →</Btn></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
         </div>
+      )}
+
+      <div>
+        <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>{isDriver ? "My deliveries" : "Pending"} · {active.length}</h3>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Driver", "Scheduled", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Address", "Driver", "Scheduled", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
-              {active.length === 0 && <tr><td colSpan={6}><Empty label={isDriver ? "No deliveries assigned to you yet." : "Nothing to dispatch. Schedule a Ready-for-Delivery order."} /></td></tr>}
+              {active.length === 0 && <tr><td colSpan={7}><Empty label={isDriver ? "No deliveries assigned to you yet." : "Nothing pending. Schedule a Ready-for-Delivery order above."} /></td></tr>}
               {active.map((dv) => (
                 <tr key={dv.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                   <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{dv.invoice_number}</td>
-                  <td style={{ padding: "11px 16px", color: C.text2 }}>
-                    {dv.customer_name}
-                    {dv.address && <div style={{ fontSize: 11.5, color: C.text3, marginTop: 2 }}>{dv.address}</div>}
-                  </td>
+                  <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.customer_name}</td>
+                  <td style={{ padding: "11px 16px", color: dv.address ? C.text2 : C.text3 }}>{dv.address || "—"}</td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.delivery_man_name || "—"}</td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"}</td>
                   <td style={{ padding: "11px 16px" }}><Pill color={tone[dv.status] || C.text3}>{statusLabel[dv.status] || dv.status}</Pill></td>
@@ -1662,13 +1700,17 @@ function ChangePasswordModal({ onClose }) {
   return (
     <Modal open onClose={onClose} title="Change password" width={420}>
       {ok ? <div style={{ color: C.ready, fontSize: 14 }}>Password changed ✓</div> : (
-        <>
-          <Field label="Current password" type="password" name="current-password" autoComplete="current-password" value={cur} onChange={setCur} />
-          <Field label="New password" type="password" name="new-password" autoComplete="new-password" value={nw} onChange={setNw} />
-          <Field label="Confirm new password" type="password" name="confirm-password" autoComplete="new-password" value={nw2} onChange={setNw2} />
+        <form autoComplete="off" onSubmit={(e) => e.preventDefault()}>
+          {/* Chrome ignores autoComplete=off; these off-screen decoys give it throwaway
+              targets so it stops filling the saved login into the page's search box. */}
+          <input type="text" name="username" autoComplete="username" tabIndex={-1} aria-hidden="true" style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }} />
+          <input type="password" name="password" autoComplete="new-password" tabIndex={-1} aria-hidden="true" style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }} />
+          <Field label="Current password" type="password" name="cur-pw-field" autoComplete="off" value={cur} onChange={setCur} />
+          <Field label="New password" type="password" name="new-pw-field" autoComplete="new-password" value={nw} onChange={setNw} />
+          <Field label="Confirm new password" type="password" name="confirm-pw-field" autoComplete="new-password" value={nw2} onChange={setNw2} />
           {err && <p style={{ color: "#fca5a5", fontSize: 13, margin: "-4px 0 10px" }}>{err}</p>}
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 }}><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn onClick={submit} disabled={busy}>{busy ? "Saving…" : "Change password"}</Btn></div>
-        </>
+        </form>
       )}
     </Modal>
   );
