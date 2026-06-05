@@ -340,10 +340,10 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
         <span style={{ fontFamily: MONO, fontSize: 15, fontWeight: 700, color: invColor, letterSpacing: 0.3 }}>{order.invoice_number}</span>
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {urgent && <Pill color={C.danger}>Urgent</Pill>}
           {showName && <Pill color={imp.color}>{imp.label}</Pill>}
           {waiting && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
           {onHold && <Pill color={C.hold}>On hold</Pill>}
-          {urgent && <Pill color={C.danger}>Urgent</Pill>}
           {order.skip_production && <Pill color={C.accent} bg="transparent">skip-prod</Pill>}
         </div>
       </div>
@@ -617,8 +617,8 @@ function FloorDisplay({ onExit }) {
                       <div key={o.id} style={{ background: C.surface, border: `1px solid ${urgent || late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${cfg.color}`, borderRadius: 9, padding: "9px 11px" }}>
                         <div style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 5 }}>
-                          <Pill color={impCfg(o.importance).color} style={{ fontSize: 9.5, padding: "1px 6px" }}>{impCfg(o.importance).label}</Pill>
                           {urgent && <Pill color={C.danger} style={{ fontSize: 9.5, padding: "1px 6px" }}>Urgent</Pill>}
+                          <Pill color={impCfg(o.importance).color} style={{ fontSize: 9.5, padding: "1px 6px" }}>{impCfg(o.importance).label}</Pill>
                           {o.waiting_stock && <Pill color={C.danger} style={{ fontSize: 9.5, padding: "1px 6px" }}>⚠ Stock</Pill>}
                           {o.on_hold && <Pill color={C.hold} style={{ fontSize: 9.5, padding: "1px 6px" }}>Hold</Pill>}
                         </div>
@@ -716,6 +716,7 @@ function FloorDisplay({ onExit }) {
 // ─── Order detail modal ──────────────────────────────────────────────────────
 function OrderDetail({ orderId, user, onUpdated }) {
   const [order, setOrder] = useState(null);
+  const [delivery, setDelivery] = useState(null);
   const [tab, setTab] = useState("details");
   const [moveStage, setMoveStage] = useState("");
   const [reason, setReason] = useState("");
@@ -733,6 +734,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
 
   async function load() { try { const o = await api("GET", `/orders/${orderId}`); setOrder(o); setNotes(o.notes || ""); } catch (e) { setOrder({ _error: e.message }); } }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
+  useEffect(() => { api("GET", `/delivery?order_id=${orderId}`).then((d) => setDelivery((d && d[0]) || null)).catch(() => setDelivery(null)); }, [orderId]);
   useEffect(() => { if (canMove) api("GET", "/users").then(setUsers).catch(() => setUsers([])); /* eslint-disable-next-line */ }, []);
 
   async function doMove(to, why) {
@@ -809,10 +811,10 @@ function OrderDetail({ orderId, user, onUpdated }) {
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
         <span style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, color: C.text }}>{order.invoice_number}</span>
         <Pill color={cfg.color}>{cfg.label}</Pill>
+        {order.priority === "urgent" && <Pill color={C.danger}>Urgent</Pill>}
         {order.importance && order.importance !== "standard" && <Pill color={impCfg(order.importance).color}>{impCfg(order.importance).label}</Pill>}
         {order.waiting_stock && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
         {order.on_hold && <Pill color={C.hold}>On hold</Pill>}
-        {order.priority === "urgent" && <Pill color={C.danger}>Urgent</Pill>}
         {order.skip_production && <Pill color={C.accent} bg="transparent">skip-prod</Pill>}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
@@ -846,6 +848,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
             <LV label="Expiry" v={order.expiry_date ? fmtDay(order.expiry_date) : "—"} />
             <LV label="PIC" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />
             <LV label="Source" v={order.source === "sql_account" ? "SQL Account" : "Manual"} />
+            {order.customer_name != null && delivery && delivery.address && <LV label="Delivery address" v={delivery.address} />}
           </div>
           <div style={{ marginTop: 18 }}>
             <div style={{ fontSize: 11, color: C.text3, fontWeight: 600, marginBottom: 6, letterSpacing: 0.4 }}>INTERNAL NOTES</div>
@@ -1229,6 +1232,7 @@ function Delivery({ user }) {
   const [completed, setCompleted] = useState([]);
   const [show, setShow] = useState(false);
   const [allCompleted, setAllCompleted] = useState(false);
+  const [confirmDeliver, setConfirmDeliver] = useState(null);
   const [form, setForm] = useState({ order_id: "", delivery_man_id: "", scheduled_date: "", address: "", notes: "" });
   const canAssign = ["super_admin", "operations_controller"].includes(user.role);
   const canDeliver = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
@@ -1257,13 +1261,12 @@ function Delivery({ user }) {
       load();
     } catch (e) { alert(e.message); }
   }
-  async function markDelivered(id) { try { await api("POST", `/delivery/${id}/deliver`, {}); load(); } catch (e) { alert(e.message); } }
+  async function markDelivered(id) { try { await api("POST", `/delivery/${id}/deliver`, {}); setConfirmDeliver(null); load(); } catch (e) { alert(e.message); } }
   function scheduleFor(orderId) { setForm((f) => ({ ...f, order_id: orderId })); setShow(true); }
 
   if (!list) return <Loading />;
-  // Tag colours follow the board/floor stage palette: unscheduled orders sit in
-  // their own green "Ready for Delivery" section; once scheduled they become amber
-  // "Pending". in_transit blue, delivered grey.
+  // Ready-for-Delivery keeps the board's green; Pending is amber to stay visually
+  // distinct from it. in_transit blue, delivered grey, failed red.
   const tone = { pending: C.packing, in_transit: C.order, delivered: C.text3, failed: C.danger };
   const statusLabel = { pending: "Pending", in_transit: "In transit", delivered: "Delivered", failed: "Failed" };
   let active = list.filter((x) => x.status !== "delivered");
@@ -1276,10 +1279,7 @@ function Delivery({ user }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {canAssign && (
         <div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12, flexWrap: "wrap" }}>
-            <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Ready for Delivery · {ready.length}</h3>
-            <Btn onClick={() => setShow(true)} disabled={ready.length === 0}><Icon name="plus" size={15} /> Schedule delivery</Btn>
-          </div>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Ready for Delivery · {ready.length}</h3>
           <Card style={{ padding: 0, overflow: "hidden" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
               <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Due", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
@@ -1304,9 +1304,9 @@ function Delivery({ user }) {
         <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>{isDriver ? "My deliveries" : "Pending"} · {active.length}</h3>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Address", "Driver", "Scheduled", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Address", "Driver", "Scheduled", "Due", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
-              {active.length === 0 && <tr><td colSpan={7}><Empty label={isDriver ? "No deliveries assigned to you yet." : "Nothing pending. Schedule a Ready-for-Delivery order above."} /></td></tr>}
+              {active.length === 0 && <tr><td colSpan={8}><Empty label={isDriver ? "No deliveries assigned to you yet." : "Nothing pending. Schedule a Ready-for-Delivery order above."} /></td></tr>}
               {active.map((dv) => (
                 <tr key={dv.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                   <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{dv.invoice_number}</td>
@@ -1314,8 +1314,9 @@ function Delivery({ user }) {
                   <td style={{ padding: "11px 16px", color: dv.address ? C.text2 : C.text3 }}>{dv.address || "—"}</td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.delivery_man_name || "—"}</td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"}</td>
+                  <td style={{ padding: "11px 16px", color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</td>
                   <td style={{ padding: "11px 16px" }}><Pill color={tone[dv.status] || C.text3}>{statusLabel[dv.status] || dv.status}</Pill></td>
-                  <td style={{ padding: "11px 16px" }}>{canDeliver && <Btn size="sm" variant="success" onClick={() => markDelivered(dv.id)}>Mark delivered</Btn>}</td>
+                  <td style={{ padding: "11px 16px" }}>{canDeliver && <Btn size="sm" variant="success" onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}</td>
                 </tr>
               ))}
             </tbody>
@@ -1360,6 +1361,24 @@ function Delivery({ user }) {
           <Btn variant="ghost" onClick={() => setShow(false)}>Cancel</Btn>
           <Btn onClick={assign}>Schedule</Btn>
         </div>
+      </Modal>
+
+      <Modal open={!!confirmDeliver} onClose={() => setConfirmDeliver(null)} title="Confirm delivery" width={440}>
+        {confirmDeliver && (
+          <>
+            <div style={{ fontSize: 14, marginBottom: 8 }}><span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{confirmDeliver.invoice_number}</span> <span style={{ color: C.text2 }}>· {confirmDeliver.customer_name}</span></div>
+            <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.8, marginBottom: 12 }}>
+              {confirmDeliver.address && <div><span style={{ color: C.text3 }}>Address: </span>{confirmDeliver.address}</div>}
+              <div><span style={{ color: C.text3 }}>Driver: </span>{confirmDeliver.delivery_man_name || "Unassigned"}</div>
+              <div><span style={{ color: C.text3 }}>Scheduled: </span>{confirmDeliver.scheduled_date ? fmtDay(confirmDeliver.scheduled_date) : "—"}</div>
+            </div>
+            <div style={{ fontSize: 12.5, color: C.text3, marginBottom: 16 }}>This marks the order delivered and moves it out of Pending. This can't be undone.</div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <Btn variant="ghost" onClick={() => setConfirmDeliver(null)}>Cancel</Btn>
+              <Btn variant="success" onClick={() => markDelivered(confirmDeliver.id)}><Icon name="check" size={15} /> Confirm delivered</Btn>
+            </div>
+          </>
+        )}
       </Modal>
     </div>
   );
