@@ -72,7 +72,7 @@ const ROLE_LABELS = {
 // Production-floor roles see this in place of the customer name. To rename a tier,
 // change the label here (and the CHECK values in schema.sql if you add/remove one).
 const IMPORTANCE = {
-  standard: { label: "Standard", color: C.text3 },
+  standard: { label: "Standard", color: C.text2 },
   priority: { label: "Priority", color: C.accent },
   vip: { label: "VIP", color: C.danger },
 };
@@ -328,6 +328,8 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
   const urgent = order.priority === "urgent";
   const onHold = !!order.on_hold;
   const waiting = !!order.waiting_stock;
+  const imp = impCfg(order.importance);
+  const showName = !!order.customer_name;
   const invColor = late ? C.danger : urgent ? C.accent2 : C.text;
   const next = BOARD_STAGES[BOARD_STAGES.indexOf(order.stage) + 1] || "delivered";
   return (
@@ -338,7 +340,7 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
         <span style={{ fontFamily: MONO, fontSize: 15, fontWeight: 700, color: invColor, letterSpacing: 0.3 }}>{order.invoice_number}</span>
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {order.importance && order.importance !== "standard" && <Pill color={impCfg(order.importance).color}>{impCfg(order.importance).label}</Pill>}
+          {showName && <Pill color={imp.color}>{imp.label}</Pill>}
           {waiting && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
           {onHold && <Pill color={C.hold}>On hold</Pill>}
           {urgent && <Pill color={C.danger}>Urgent</Pill>}
@@ -350,7 +352,7 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
         <span style={{ color: C.text2 }}>{fmtDay(order.required_delivery_date)}</span>
         {cd.text && <span style={{ color: cd.tone, fontWeight: 600 }}>· {cd.text}</span>}
       </div>
-      <div style={{ fontSize: 13, color: order.customer_name ? C.text : impCfg(order.importance).color, fontWeight: order.customer_name ? 500 : 700, marginBottom: 3 }}>{order.customer_name || impCfg(order.importance).label}</div>
+      <div style={{ fontSize: 13, color: showName ? C.text : imp.color, fontWeight: showName ? 500 : 700, marginBottom: 3 }}>{showName ? order.customer_name : imp.label}</div>
       <div style={{ fontSize: 12, color: C.text3, marginBottom: 5 }}>
         {order.total_units != null ? `${order.total_units} units · ` : ""}{order.item_count} {order.item_count === 1 ? "line" : "lines"}
       </div>
@@ -595,11 +597,9 @@ function FloorDisplay({ onExit }) {
                     return (
                       <div key={o.id} style={{ background: C.surface, border: `1px solid ${urgent || late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${cfg.color}`, borderRadius: 9, padding: "9px 11px" }}>
                         <div style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
-                        {o.importance && o.importance !== "standard" && (
-                          <div style={{ marginTop: 4 }}>
-                            <span style={{ display: "inline-block", padding: "1px 7px", borderRadius: 5, fontSize: 10, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase", color: impCfg(o.importance).color, background: impCfg(o.importance).color + "1f", border: `1px solid ${impCfg(o.importance).color}55` }}>{impCfg(o.importance).label}</span>
-                          </div>
-                        )}
+                        <div style={{ marginTop: 4 }}>
+                          <span style={{ display: "inline-block", padding: "1px 7px", borderRadius: 5, fontSize: 10, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase", color: impCfg(o.importance).color, background: impCfg(o.importance).color + "1f", border: `1px solid ${impCfg(o.importance).color}55` }}>{impCfg(o.importance).label}</span>
+                        </div>
                         {(o.waiting_stock || o.on_hold) && (
                           <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
                             {o.waiting_stock && <Pill color={C.danger} style={{ fontSize: 9.5, padding: "1px 6px" }}>⚠ Stock</Pill>}
