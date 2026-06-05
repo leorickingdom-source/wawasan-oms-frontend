@@ -299,14 +299,14 @@ function Modal({ open, onClose, title, children, width = 560 }) {
     </div>
   );
 }
-function Field({ label, value, onChange, type = "text", options, placeholder, required, min }) {
+function Field({ label, value, onChange, type = "text", options, placeholder, required, min, name, autoComplete }) {
   const st = { width: "100%", padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text, outline: "none" };
   return (
     <label style={{ display: "block", marginBottom: 13 }}>
       {label && <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: C.text2, marginBottom: 5 }}>{label}{required && <span style={{ color: C.danger }}> *</span>}</span>}
       {options
         ? <select value={value} onChange={(e) => onChange(e.target.value)} style={st}>{options.map((o) => <option key={o.value ?? o} value={o.value ?? o} style={{ background: C.bg2 }}>{o.label ?? o}</option>)}</select>
-        : <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} min={min} style={st} />}
+        : <input type={type} name={name} autoComplete={autoComplete} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} min={min} style={st} />}
     </label>
   );
 }
@@ -509,6 +509,7 @@ function FloorDisplay({ onExit }) {
   const [board, setBoard] = useState(null);
   const [stats, setStats] = useState({ active: 0, completed_today: 0 });
   const [filter, setFilter] = useState("all");
+  const [weekOnly, setWeekOnly] = useState(false);
   const [now, setNow] = useState(new Date());
   const [spotIdx, setSpotIdx] = useState(0);
   const [detail, setDetail] = useState(null);
@@ -516,11 +517,11 @@ function FloorDisplay({ onExit }) {
 
   async function load() {
     try {
-      const [b, s] = await Promise.all([api("GET", "/orders/kanban"), api("GET", "/orders/stats")]);
+      const [b, s] = await Promise.all([api("GET", `/orders/kanban${weekOnly ? "?week=current" : ""}`), api("GET", "/orders/stats")]);
       setBoard(b); setStats(s); cache.current = {};
     } catch (e) { /* keep last */ }
   }
-  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, []);
+  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [weekOnly]);
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
 
   const pool = useMemo(() => {
@@ -574,6 +575,9 @@ function FloorDisplay({ onExit }) {
             );
           })}
         </div>
+        <button onClick={() => setWeekOnly((w) => !w)} style={{ padding: "9px 16px", borderRadius: 9, border: `1px solid ${weekOnly ? C.accent + "66" : C.border}`, background: weekOnly ? C.accent + "22" : "transparent", color: weekOnly ? C.accent : C.text2, fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <Icon name="calendar" size={15} color={weekOnly ? C.accent : C.text3} /> This week
+        </button>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
           <span style={{ fontFamily: MONO, fontSize: 38, fontWeight: 700, color: C.text, letterSpacing: 2 }}>{clock}</span>
           <Btn variant="soft" onClick={onExit}><Icon name="x" size={15} /> Exit</Btn>
@@ -701,6 +705,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
   const [moveStage, setMoveStage] = useState("");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmAdv, setConfirmAdv] = useState(false);
   const [users, setUsers] = useState([]);
   const [newItem, setNewItem] = useState({ sku: "", name: "", quantity: 1, unit: "pcs" });
   const [notes, setNotes] = useState("");
@@ -738,6 +743,10 @@ function OrderDetail({ orderId, user, onUpdated }) {
   }
   async function setImportance(v) {
     try { await api("PATCH", `/orders/${orderId}`, { importance: v }); await load(); onUpdated && onUpdated(); }
+    catch (e) { alert(e.message); }
+  }
+  async function setPriority(v) {
+    try { await api("PATCH", `/orders/${orderId}`, { priority: v }); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); }
   }
   async function updateItem(itemId, patch) {
@@ -807,6 +816,11 @@ function OrderDetail({ orderId, user, onUpdated }) {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             {order.customer_name != null && <LV label="Customer" v={order.customer_name} />}
             {order.customer_name != null && <LV label="Contact" v={order.customer_contact || "—"} />}
+            <LV label="Priority" v={
+              canMove
+                ? <select value={order.priority || "normal"} onChange={(e) => setPriority(e.target.value)} style={{ padding: "5px 9px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13.5, fontWeight: 700, color: order.priority === "urgent" ? C.danger : C.text2 }}><option value="normal" style={{ background: C.bg2, color: C.text }}>Normal</option><option value="urgent" style={{ background: C.bg2, color: C.text }}>Urgent</option></select>
+                : <Pill color={order.priority === "urgent" ? C.danger : C.text2}>{order.priority === "urgent" ? "Urgent" : "Normal"}</Pill>
+            } />
             <LV label="Importance" v={
               canMove
                 ? <select value={order.importance || "standard"} onChange={(e) => setImportance(e.target.value)} style={{ padding: "5px 9px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13.5, fontWeight: 700, color: impCfg(order.importance).color }}>{IMPORTANCE_OPTS.map((o) => <option key={o.value} value={o.value} style={{ background: C.bg2, color: C.text }}>{o.label}</option>)}</select>
@@ -957,9 +971,14 @@ function OrderDetail({ orderId, user, onUpdated }) {
 
       {!canMove && canAdvanceStage(user.role, order.stage) && !order.on_hold && (
         <div style={{ marginTop: 22, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
-          <Btn onClick={() => doMove(FORWARD_STAGE[order.stage])} disabled={busy}>{ADVANCE_LABEL[order.stage] || "Mark complete"} →</Btn>
+          <Btn onClick={() => setConfirmAdv(true)} disabled={busy}>{ADVANCE_LABEL[order.stage] || "Mark complete"} →</Btn>
           <p style={{ fontSize: 12, color: C.text3, marginTop: 8 }}>Marks your stage done and moves the order to the next stage.</p>
         </div>
+      )}
+      {confirmAdv && (
+        <AdvanceConfirmModal order={order} to={FORWARD_STAGE[order.stage]} user={user}
+          onConfirm={async () => { await doMove(FORWARD_STAGE[order.stage]); setConfirmAdv(false); }}
+          onClose={() => setConfirmAdv(false)} />
       )}
 
       {canMove && (
@@ -1195,7 +1214,7 @@ function Delivery({ user }) {
   const [completed, setCompleted] = useState([]);
   const [show, setShow] = useState(false);
   const [allCompleted, setAllCompleted] = useState(false);
-  const [form, setForm] = useState({ order_id: "", delivery_man_id: "", scheduled_date: "", notes: "" });
+  const [form, setForm] = useState({ order_id: "", delivery_man_id: "", scheduled_date: "", address: "", notes: "" });
   const canAssign = ["super_admin", "operations_controller"].includes(user.role);
   const canDeliver = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
   const isDriver = user.role === "delivery_team";
@@ -1219,14 +1238,17 @@ function Delivery({ user }) {
     if (!form.order_id) { alert("Pick an order to schedule."); return; }
     try {
       await api("POST", "/delivery", form);
-      setShow(false); setForm({ order_id: "", delivery_man_id: "", scheduled_date: "", notes: "" });
+      setShow(false); setForm({ order_id: "", delivery_man_id: "", scheduled_date: "", address: "", notes: "" });
       load();
     } catch (e) { alert(e.message); }
   }
   async function markDelivered(id) { try { await api("POST", `/delivery/${id}/deliver`, {}); load(); } catch (e) { alert(e.message); } }
 
   if (!list) return <Loading />;
-  const tone = { pending: C.packing, in_transit: C.order, delivered: C.ready, failed: C.danger };
+  // Match the order board / floor: a 'pending' delivery is an order still sitting
+  // in Ready for Delivery (green); 'delivered' matches the board's grey Delivered.
+  const tone = { pending: C.ready, in_transit: C.order, delivered: C.text3, failed: C.danger };
+  const statusLabel = { pending: "Ready for Delivery", in_transit: "In transit", delivered: "Delivered", failed: "Failed" };
   let active = list.filter((x) => x.status !== "delivered");
   if (isDriver) active = active.filter((x) => x.delivery_man_id === user.id);
   const delByOrder = {};
@@ -1248,10 +1270,13 @@ function Delivery({ user }) {
               {active.map((dv) => (
                 <tr key={dv.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                   <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{dv.invoice_number}</td>
-                  <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.customer_name}</td>
+                  <td style={{ padding: "11px 16px", color: C.text2 }}>
+                    {dv.customer_name}
+                    {dv.address && <div style={{ fontSize: 11.5, color: C.text3, marginTop: 2 }}>{dv.address}</div>}
+                  </td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.delivery_man_name || "—"}</td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"}</td>
-                  <td style={{ padding: "11px 16px" }}><Pill color={tone[dv.status] || C.text3}>{dv.status}</Pill></td>
+                  <td style={{ padding: "11px 16px" }}><Pill color={tone[dv.status] || C.text3}>{statusLabel[dv.status] || dv.status}</Pill></td>
                   <td style={{ padding: "11px 16px" }}>{canDeliver && <Btn size="sm" variant="success" onClick={() => markDelivered(dv.id)}>Mark delivered</Btn>}</td>
                 </tr>
               ))}
@@ -1291,6 +1316,7 @@ function Delivery({ user }) {
         <Field label="Driver" value={form.delivery_man_id} onChange={(v) => setForm((f) => ({ ...f, delivery_man_id: v }))}
           options={[{ value: "", label: drivers.length ? "Unassigned" : "No delivery-team users yet" }, ...drivers.map((d) => ({ value: d.id, label: d.name }))]} />
         <Field label="Scheduled date" type="date" value={form.scheduled_date} onChange={(v) => setForm((f) => ({ ...f, scheduled_date: v }))} />
+        <Field label="Delivery address" value={form.address} onChange={(v) => setForm((f) => ({ ...f, address: v }))} placeholder="Street, city, postcode…" />
         <Field label="Notes" value={form.notes} onChange={(v) => setForm((f) => ({ ...f, notes: v }))} placeholder="Optional…" />
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
           <Btn variant="ghost" onClick={() => setShow(false)}>Cancel</Btn>
@@ -1484,6 +1510,10 @@ function Users({ user }) {
     if (newPw.length < 8) { alert("New password must be at least 8 characters."); return; }
     try { await api("PATCH", `/users/${resetFor.id}`, { password: newPw }); setResetFor(null); setNewPw(""); alert("Password reset."); } catch (e) { alert(e.message); }
   }
+  async function delUser(u) {
+    if (!confirm(`Permanently delete ${u.name}? This cannot be undone.`)) return;
+    try { await api("DELETE", `/users/${u.id}`); load(); } catch (e) { alert(e.message); }
+  }
   // Ops can manage everyone except Super Admins; only a Super Admin manages Super Admins.
   const canManage = (u) => isAdmin || u.role !== "super_admin";
   const roleOptions = Object.entries(ROLE_LABELS).filter(([v]) => isAdmin || v !== "super_admin").map(([value, label]) => ({ value, label }));
@@ -1500,7 +1530,7 @@ function Users({ user }) {
       <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ position: "relative", flex: 1, minWidth: 200, maxWidth: 320 }}>
           <span style={{ position: "absolute", left: 11, top: 9 }}><Icon name="search" size={15} color={C.text3} /></span>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or email…" style={{ ...ctrl, width: "100%", padding: "8px 12px 8px 34px", fontSize: 13.5, outline: "none", boxSizing: "border-box" }} />
+          <input type="search" name="user-search" autoComplete="off" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or email…" style={{ ...ctrl, width: "100%", padding: "8px 12px 8px 34px", fontSize: 13.5, outline: "none", boxSizing: "border-box" }} />
         </div>
         <select value={roleF} onChange={(e) => setRoleF(e.target.value)} style={ctrl}>
           <option value="" style={{ background: C.bg2 }}>All roles</option>
@@ -1529,6 +1559,7 @@ function Users({ user }) {
                   <div style={{ display: "flex", gap: 6 }}>
                     {canManage(u) && <Btn size="sm" variant="ghost" onClick={() => { setResetFor(u); setNewPw(""); }}>Reset PW</Btn>}
                     {u.id !== user.id && canManage(u) && <Btn size="sm" variant="ghost" onClick={() => toggle(u)}>{u.is_active ? "Disable" : "Enable"}</Btn>}
+                    {u.id !== user.id && canManage(u) && !u.is_active && <Btn size="sm" variant="danger" onClick={() => delUser(u)}>Delete</Btn>}
                   </div>
                 </td>
               </tr>
@@ -1540,12 +1571,12 @@ function Users({ user }) {
         <Field label="Full name" value={f.name} onChange={(v) => setF((p) => ({ ...p, name: v }))} required />
         <Field label="Email" type="email" value={f.email} onChange={(v) => setF((p) => ({ ...p, email: v }))} required />
         <Field label="Role" value={f.role} onChange={(v) => setF((p) => ({ ...p, role: v }))} options={roleOptions} />
-        <Field label="Temporary password" type="password" value={f.password} onChange={(v) => setF((p) => ({ ...p, password: v }))} required />
+        <Field label="Temporary password" type="password" name="new-password" autoComplete="new-password" value={f.password} onChange={(v) => setF((p) => ({ ...p, password: v }))} required />
         <p style={{ fontSize: 12, color: C.text3, margin: "-4px 0 10px" }}>The new staff member can change this after their first login.</p>
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}><Btn variant="ghost" onClick={() => setShow(false)}>Cancel</Btn><Btn onClick={create}>Create</Btn></div>
       </Modal>
       <Modal open={!!resetFor} onClose={() => setResetFor(null)} title={resetFor ? `Reset password — ${resetFor.name}` : "Reset password"} width={420}>
-        <Field label="New password (min 8 chars)" type="password" value={newPw} onChange={setNewPw} required />
+        <Field label="New password (min 8 chars)" type="password" name="new-password" autoComplete="new-password" value={newPw} onChange={setNewPw} required />
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}><Btn variant="ghost" onClick={() => setResetFor(null)}>Cancel</Btn><Btn onClick={resetPw}>Set password</Btn></div>
       </Modal>
     </div>
@@ -1555,57 +1586,31 @@ function Users({ user }) {
 // ─── Settings ──────────────────────────────────────────────────────────────────
 function Settings() {
   const [s, setS] = useState(null);
-  const [holidays, setHolidays] = useState([]);
-  const [hForm, setHForm] = useState({ date: "", name: "" });
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  async function load() {
-    setS(await api("GET", "/settings").catch(() => ({})));
-    setHolidays(await api("GET", "/settings/holidays").catch(() => []));
-  }
-  useEffect(() => { load(); }, []);
-
-  const fields = [
-    ["stage_order_name", "Stage 1 name"], ["stage_production_name", "Stage 2 name"],
-    ["stage_packing_name", "Stage 3 name"], ["stage_delivery_name", "Stage 4 name"],
-    ["priority_normal_label", "Normal priority label"], ["priority_urgent_label", "Urgent priority label"],
-    ["session_timeout_hours", "Session timeout (hours)"],
-  ];
+  useEffect(() => { api("GET", "/settings").then(setS).catch(() => setS({})); }, []);
   function setField(k, v) { setS((p) => ({ ...p, [k]: v })); setSaved(false); }
-  async function save() { setBusy(true); try { await api("PUT", "/settings", { settings: s }); setSaved(true); } catch (e) { alert(e.message); } finally { setBusy(false); } }
-  async function addHoliday() { if (!hForm.date || !hForm.name) return; try { await api("POST", "/settings/holidays", hForm); setHForm({ date: "", name: "" }); load(); } catch (e) { alert(e.message); } }
-  async function delHoliday(id) { try { await api("DELETE", `/settings/holidays/${id}`); load(); } catch (e) { alert(e.message); } }
+  async function save() {
+    setBusy(true);
+    try { await api("PUT", "/settings", { settings: { session_timeout_hours: s.session_timeout_hours } }); setSaved(true); }
+    catch (e) { alert(e.message); } finally { setBusy(false); }
+  }
 
   if (!s) return <Loading />;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 820 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 520 }}>
       <Card>
-        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 14 }}>Labels & session</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 14px" }}>
-          {fields.map(([k, label]) => <Field key={k} label={label} value={s[k] ?? ""} onChange={(v) => setField(k, v)} />)}
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 6 }}>Session</h3>
+        <p style={{ fontSize: 12.5, color: C.text3, marginBottom: 14 }}>How long a sign-in stays valid before users must log in again. Applies to new logins.</p>
+        <div style={{ maxWidth: 220 }}>
+          <Field label="Session timeout (hours)" type="number" min="1" value={s.session_timeout_hours ?? ""} onChange={(v) => setField("session_timeout_hours", v)} />
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4 }}>
           <Btn onClick={save} disabled={busy}>{busy ? "Saving…" : "Save settings"}</Btn>
           {saved && <span style={{ color: C.ready, fontSize: 13 }}>Saved ✓</span>}
         </div>
       </Card>
-      <Card>
-        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>Holiday calendar</h3>
-        <div style={{ display: "flex", gap: 10, marginBottom: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div style={{ width: 180 }}><Field label="Date" type="date" value={hForm.date} onChange={(v) => setHForm((f) => ({ ...f, date: v }))} /></div>
-          <div style={{ flex: 1, minWidth: 200 }}><Field label="Name" value={hForm.name} onChange={(v) => setHForm((f) => ({ ...f, name: v }))} placeholder="e.g. Hari Raya" /></div>
-          <Btn onClick={addHoliday} style={{ marginBottom: 13 }}><Icon name="plus" size={14} /> Add</Btn>
-        </div>
-        {holidays.length === 0 && <Empty label="No holidays added yet." />}
-        {holidays.map((h) => (
-          <div key={h.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "9px 0", borderBottom: `1px solid ${C.border}` }}>
-            <span style={{ fontSize: 13.5, color: C.text }}><span style={{ fontWeight: 600 }}>{fmtDay(h.date)}</span> — {h.name}</span>
-            <Btn size="sm" variant="danger" onClick={() => delHoliday(h.id)}>Remove</Btn>
-          </div>
-        ))}
-      </Card>
-      <div style={{ fontSize: 12.5, color: C.text3 }}>Stage-name and label changes are saved to the database. Surfacing custom stage names as the live board column titles is a small follow-up if you want it.</div>
     </div>
   );
 }
@@ -1658,9 +1663,9 @@ function ChangePasswordModal({ onClose }) {
     <Modal open onClose={onClose} title="Change password" width={420}>
       {ok ? <div style={{ color: C.ready, fontSize: 14 }}>Password changed ✓</div> : (
         <>
-          <Field label="Current password" type="password" value={cur} onChange={setCur} />
-          <Field label="New password" type="password" value={nw} onChange={setNw} />
-          <Field label="Confirm new password" type="password" value={nw2} onChange={setNw2} />
+          <Field label="Current password" type="password" name="current-password" autoComplete="current-password" value={cur} onChange={setCur} />
+          <Field label="New password" type="password" name="new-password" autoComplete="new-password" value={nw} onChange={setNw} />
+          <Field label="Confirm new password" type="password" name="confirm-password" autoComplete="new-password" value={nw2} onChange={setNw2} />
           {err && <p style={{ color: "#fca5a5", fontSize: 13, margin: "-4px 0 10px" }}>{err}</p>}
           <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 }}><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn onClick={submit} disabled={busy}>{busy ? "Saving…" : "Change password"}</Btn></div>
         </>
@@ -1690,8 +1695,8 @@ function LoginPage({ onLogin }) {
           <div style={{ fontSize: 21, fontWeight: 800, color: C.text, marginTop: 14 }}>Wawasan Candle</div>
           <div style={{ fontSize: 13, color: C.text3, marginTop: 2 }}>Order Management System</div>
         </div>
-        <Field label="Email" type="email" value={email} onChange={setEmail} required placeholder="you@wawasancandle.com" />
-        <Field label="Password" type="password" value={password} onChange={setPassword} required />
+        <Field label="Email" type="email" name="email" autoComplete="username" value={email} onChange={setEmail} required placeholder="you@wawasancandle.com" />
+        <Field label="Password" type="password" name="current-password" autoComplete="current-password" value={password} onChange={setPassword} required />
         {err && <p style={{ color: "#fca5a5", fontSize: 13, margin: "-4px 0 12px" }}>{err}</p>}
         <Btn type="submit" onClick={() => {}} disabled={busy} style={{ width: "100%", justifyContent: "center" }}>{busy ? "Signing in…" : "Sign in"}</Btn>
       </form>
@@ -1781,7 +1786,7 @@ export default function App() {
             {page === "board" && (
               <div style={{ position: "relative", width: 260, maxWidth: "30vw" }}>
                 <span style={{ position: "absolute", left: 11, top: 9 }}><Icon name="search" size={15} color={C.text3} /></span>
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Invoice, customer…" style={{ width: "100%", padding: "8px 12px 8px 34px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5, outline: "none" }} />
+                <input type="search" name="board-search" autoComplete="off" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Invoice, customer…" style={{ width: "100%", padding: "8px 12px 8px 34px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5, outline: "none" }} />
               </div>
             )}
             {canCreate && <Btn onClick={() => setShowCreate(true)}><Icon name="plus" size={15} /> New Order</Btn>}
