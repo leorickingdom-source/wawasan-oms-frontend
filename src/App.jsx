@@ -47,6 +47,7 @@ const STAGE_PIC_ROLES = { order: ["operations_controller"], production: ["produc
 function canAdvanceStage(role, stage) {
   if (stage === "ready_for_delivery") return false; // completion happens in the Delivery workspace
   if (role === "super_admin" || role === "operations_controller") return true;
+  if (role === "production_lead" && (stage === "production" || stage === "packing")) return true;
   if (stage === "production" && role === "production_staff") return true;
   if (stage === "packing" && role === "packing_staff") return true;
   return false;
@@ -63,10 +64,12 @@ const STAGE_LABELS = {
   delivered: { label: "Delivered", color: C.text3 }, cancelled: { label: "Cancelled", color: "#6b7280" },
 };
 const ROLE_LABELS = {
-  super_admin: "Super Admin", operations_controller: "Ops Controller",
+  super_admin: "Boss", admin: "Admin", operations_controller: "Ops",
   production_lead: "Production Lead", production_staff: "Production Staff",
-  packing_staff: "Packing Staff", delivery_team: "Delivery Team",
+  packing_staff: "Packing Staff", delivery_team: "Delivery Coordinator",
 };
+// Every role except the system-only Admin — for nav pages Admin shouldn't see.
+const NON_ADMIN_ROLES = ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff", "delivery_team"];
 
 // Customer importance tiers — mirrors the backend `importance` column (low → high).
 // Production-floor roles see this in place of the customer name. To rename a tier,
@@ -94,15 +97,15 @@ function deliveryTag(o) {
 }
 
 const NAV = [
-  { id: "board", label: "Order Board", icon: "board", roles: null },
-  { id: "floor", label: "Floor Display", icon: "display", roles: null },
+  { id: "board", label: "Order Board", icon: "board", roles: NON_ADMIN_ROLES },
+  { id: "floor", label: "Floor Display", icon: "display", roles: NON_ADMIN_ROLES },
   { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "operations_controller"] },
   { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "operations_controller", "delivery_team"] },
-  { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "operations_controller"] },
+  { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "operations_controller", "production_lead", "delivery_team"] },
   { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead"] },
-  { id: "audit", label: "Audit Trail", icon: "audit", roles: ["super_admin"] },
-  { id: "users", label: "User Management", icon: "users", roles: ["super_admin", "operations_controller"] },
-  { id: "settings", label: "System Settings", icon: "settings", roles: ["super_admin"] },
+  { id: "audit", label: "Audit Trail", icon: "audit", roles: ["super_admin", "admin"] },
+  { id: "users", label: "User Management", icon: "users", roles: ["super_admin", "admin", "operations_controller"] },
+  { id: "settings", label: "System Settings", icon: "settings", roles: ["super_admin", "admin"] },
 ];
 const PAGE_META = {
   board: ["Order Board", ""],
@@ -140,11 +143,29 @@ function countdown(s) {
   if (n <= 6) return { text: `${n}d`, tone: C.packing, n };
   return { text: `${n}d`, tone: C.ready, n };
 }
-function itemStat(it) {
-  const q = Math.round(it.quantity) || 0, m = Math.min(Math.round(it.made_qty) || 0, q);
-  if (q > 0 && m >= q) return { k: "done", label: "Done", color: C.ready, m, q };
-  if (m > 0) return { k: "partial", label: `${m}/${q}`, color: C.packing, m, q };
-  return { k: "pending", label: "Pending", color: C.text3, m, q };
+// Items are tracked by status only (not_started → in_progress → done).
+const ITEM_STATUS = {
+  not_started: { k: "not_started", label: "Not started", short: "To do", color: C.text3 },
+  in_progress: { k: "in_progress", label: "In progress", short: "Making", color: C.packing },
+  done:        { k: "done", label: "Done", short: "Done", color: C.ready },
+};
+const ITEM_STATUS_ORDER = ["not_started", "in_progress", "done"];
+function itemStatusKey(it) { return it.status || (it.made ? "done" : "not_started"); }
+function itemStat(it) { return ITEM_STATUS[itemStatusKey(it)] || ITEM_STATUS.not_started; }
+function StatusPicker({ value, onChange, disabled }) {
+  return (
+    <div style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+      {ITEM_STATUS_ORDER.map((s) => {
+        const cfg = ITEM_STATUS[s], active = value === s;
+        return (
+          <button key={s} type="button" disabled={disabled} onClick={() => !disabled && onChange(s)}
+            style={{ cursor: disabled ? "default" : "pointer", border: `1px solid ${active ? cfg.color + "88" : C.border2}`, background: active ? cfg.color + "22" : C.surface2, color: active ? cfg.color : C.text3, borderRadius: 7, padding: "4px 9px", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+            {cfg.short}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 function initials(name = "") {
   return name.trim().split(/\s+/).map((w) => w[0]).join("").toUpperCase().slice(0, 2) || "?";
@@ -366,16 +387,16 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
       </div>
       <div style={{ fontSize: 13, color: showName ? C.text : imp.color, fontWeight: showName ? 500 : 700, marginBottom: 3 }}>{showName ? order.customer_name : imp.label}</div>
       <div style={{ fontSize: 12, color: C.text3, marginBottom: 5 }}>
-        {order.total_units != null ? `${order.total_units} units · ` : ""}{order.item_count} {order.item_count === 1 ? "line" : "lines"}
+        {order.item_count} {order.item_count === 1 ? "line" : "lines"}
       </div>
       {(order.stage === "production" || order.stage === "packing") && order.item_count > 0 && (() => {
-        const mu = order.made_units || 0, tu = order.total_units || 0;
-        const full = (order.made_count || 0) >= order.item_count;
-        const p = tu > 0 ? Math.round((mu / tu) * 100) : (full ? 100 : 0);
+        const done = order.made_count || 0, total = order.item_count || 0;
+        const full = total > 0 && done >= total;
+        const p = total > 0 ? Math.round((done / total) * 100) : 0;
         return (
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: full ? C.ready : C.accent, marginBottom: 4 }}>
-              {full ? "All SKUs made ✓" : `${order.made_count || 0}/${order.item_count} SKUs · ${mu}/${tu} units`}
+              {full ? "All SKUs done ✓" : `${done}/${total} SKUs done`}
             </div>
             <div style={{ height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}>
               <div style={{ height: "100%", width: `${p}%`, background: full ? C.ready : C.accent }} />
@@ -404,11 +425,9 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
   const [busy, setBusy] = useState(false);
   useEffect(() => { api("GET", `/orders/${order.id}`).then(setDetail).catch(() => setDetail({ items: [] })); }, [order.id]);
   const canMark = user && ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff"].includes(user.role);
-  async function setProgress(it, v) {
-    const q = Math.round(it.quantity) || 0;
-    const val = Math.max(0, Math.min(Math.round(v) || 0, q));
-    if (val === (Math.round(it.made_qty) || 0)) return;
-    try { await api("PATCH", `/orders/${order.id}/items/${it.id}`, { made_qty: val }); const d = await api("GET", `/orders/${order.id}`).catch(() => null); if (d) setDetail(d); }
+  async function setStatus(it, status) {
+    if (status === itemStatusKey(it)) return;
+    try { await api("PATCH", `/orders/${order.id}/items/${it.id}`, { status }); const d = await api("GET", `/orders/${order.id}`).catch(() => null); if (d) setDetail(d); }
     catch (e) { alert(e.message); }
   }
   const items = (detail && detail.items) || [];
@@ -426,7 +445,7 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
           {items.length === 0 && <Empty label="No line items on this order." />}
           {items.map((it) => {
             const stt = itemStat(it);
-            const dot = stt.k === "done" ? C.ready : stt.k === "partial" ? C.packing : C.text3;
+            const dot = stt.color;
             return (
             <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderBottom: `1px solid ${C.border}` }}>
               <span style={{ width: 9, height: 9, borderRadius: "50%", background: dot, flexShrink: 0 }} />
@@ -434,18 +453,9 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
                 <div style={{ fontFamily: MONO, fontSize: 11.5, color: C.text3 }}>{it.sku}</div>
                 <div style={{ fontSize: 13.5, color: C.text }}>{it.name}</div>
               </div>
-              {canMark ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                  <input key={stt.m} type="number" min="0" max={stt.q} defaultValue={stt.m}
-                    onBlur={(e) => setProgress(it, +e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
-                    style={{ padding: "6px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 7, fontSize: 13, color: C.text, width: 54, boxSizing: "border-box" }} />
-                  <span style={{ color: C.text3, fontSize: 12 }}>/ {stt.q}</span>
-                  <button onClick={() => setProgress(it, stt.k === "done" ? 0 : stt.q)} style={{ cursor: "pointer", border: `1px solid ${stt.k === "done" ? C.ready + "66" : C.border2}`, background: stt.k === "done" ? C.ready + "1f" : C.surface2, color: stt.k === "done" ? C.ready : C.text3, borderRadius: 7, padding: "4px 10px", fontSize: 12, fontWeight: 700 }}>{stt.k === "done" ? "✓ All" : "All"}</button>
-                </div>
-              ) : (
-                <div style={{ fontWeight: 700, color: stt.color, marginRight: 6 }}>{stt.m}/{stt.q}<span style={{ fontSize: 11, color: C.text3, fontWeight: 400 }}> {it.unit || "pcs"}</span></div>
-              )}
+              {canMark
+                ? <StatusPicker value={stt.k} onChange={(s) => setStatus(it, s)} />
+                : <div style={{ fontWeight: 700, color: stt.color, marginRight: 6, fontSize: 12.5 }}>{stt.label}</div>}
             </div>
             );
           })}
@@ -640,13 +650,13 @@ function FloorDisplay({ onExit }) {
                         <div style={{ fontSize: 12.5, color: cd.tone, marginTop: 3 }}>
                           <span style={{ color: C.text2 }}>{fmtDay(o.required_delivery_date)}</span> · {cd.text}
                         </div>
-                        <div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{o.total_units != null ? `${o.total_units} units` : `${o.item_count} lines`}</div>
+                        <div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{o.item_count} {o.item_count === 1 ? "line" : "lines"}</div>
                         {(o.stage === "production" || o.stage === "packing") && o.item_count > 0 && (() => {
-                          const mu = o.made_units || 0, tu = o.total_units || 0, full = (o.made_count || 0) >= o.item_count;
-                          const p = tu > 0 ? Math.round((mu / tu) * 100) : (full ? 100 : 0);
+                          const done = o.made_count || 0, total = o.item_count || 0, full = total > 0 && done >= total;
+                          const p = total > 0 ? Math.round((done / total) * 100) : 0;
                           return (
                             <div style={{ marginTop: 5 }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: full ? C.green : C.accent2, marginBottom: 3 }}>{full ? "All made ✓" : `${mu}/${tu} units · ${p}%`}</div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: full ? C.green : C.accent2, marginBottom: 3 }}>{full ? "All done ✓" : `${done}/${total} SKUs · ${p}%`}</div>
                               <div style={{ height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: full ? C.green : C.accent }} /></div>
                             </div>
                           );
@@ -679,13 +689,13 @@ function FloorDisplay({ onExit }) {
               </div>
               {detail && detail.id === spot.id && (detail.items || []).length > 0 && (() => {
                 const its = detail.items || [];
-                const tu = its.reduce((s, it) => s + itemStat(it).q, 0);
-                const mu = its.reduce((s, it) => s + itemStat(it).m, 0);
-                const p = tu > 0 ? Math.round((mu / tu) * 100) : 0;
+                const total = its.length;
+                const done = its.filter((it) => itemStatusKey(it) === "done").length;
+                const p = total > 0 ? Math.round((done / total) * 100) : 0;
                 return (
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 5 }}>
-                      <span style={{ color: C.text2 }}>{mu}/{tu} units made</span>
+                      <span style={{ color: C.text2 }}>{done}/{total} SKUs done</span>
                       <span style={{ color: p >= 100 ? C.green : C.accent2, fontWeight: 800 }}>{p}%</span>
                     </div>
                     <div style={{ height: 7, background: C.surface2, borderRadius: 5, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: p >= 100 ? C.green : C.accent, transition: "width .3s" }} /></div>
@@ -696,7 +706,7 @@ function FloorDisplay({ onExit }) {
                 {detail && detail.id === spot.id
                   ? (detail.items || []).map((it) => {
                     const st = itemStat(it);
-                    const dot = st.k === "done" ? C.green : st.k === "partial" ? C.packing : C.accent;
+                    const dot = st.k === "done" ? C.green : st.k === "in_progress" ? C.packing : C.accent;
                     return (
                     <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "13px 0", borderBottom: `1px solid ${C.border}` }}>
                       <span style={{ width: 10, height: 10, borderRadius: "50%", background: dot, boxShadow: `0 0 8px ${dot}`, flexShrink: 0 }} />
@@ -705,9 +715,7 @@ function FloorDisplay({ onExit }) {
                         <div style={{ fontSize: 19, fontWeight: 600, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
                       </div>
                       <div style={{ textAlign: "right", flexShrink: 0 }}>
-                        <span style={{ fontSize: 42, fontWeight: 800, color: dot, lineHeight: 1 }}>{st.m}</span>
-                        <span style={{ fontSize: 22, fontWeight: 700, color: C.text3 }}>/{st.q}</span>
-                        <span style={{ fontSize: 14, color: C.text3, marginLeft: 5 }}>{it.unit || "pcs"}{st.k === "done" ? " ✓" : ""}</span>
+                        <span style={{ fontSize: 20, fontWeight: 800, color: dot, lineHeight: 1, textTransform: "uppercase", letterSpacing: 0.5 }}>{st.label}</span>
                       </div>
                     </div>
                     );
@@ -747,6 +755,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
   const [logOpen, setLogOpen] = useState(false);
   const canMove = ["super_admin", "operations_controller"].includes(user.role);
   const canMark = ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff"].includes(user.role);
+  const isLead = user.role === "production_lead";
 
   async function load() { try { const o = await api("GET", `/orders/${orderId}`); setOrder(o); setNotes(o.notes || ""); } catch (e) { setOrder({ _error: e.message }); } }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
@@ -759,11 +768,9 @@ function OrderDetail({ orderId, user, onUpdated }) {
     try { await api("POST", `/orders/${orderId}/move`, { to_stage: to, reason: why || undefined }); setMoveStage(""); setReason(""); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); } finally { setBusy(false); }
   }
-  async function setItemProgress(it, made_qty) {
-    const q = Math.round(it.quantity) || 0;
-    const v = Math.max(0, Math.min(Math.round(made_qty) || 0, q));
-    if (v === (Math.round(it.made_qty) || 0)) return;
-    try { await api("PATCH", `/orders/${orderId}/items/${it.id}`, { made_qty: v }); await load(); onUpdated && onUpdated(); }
+  async function setItemStatus(it, status) {
+    if (status === itemStatusKey(it)) return;
+    try { await api("PATCH", `/orders/${orderId}/items/${it.id}`, { status }); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); }
   }
   async function setFlag(body) {
@@ -796,7 +803,6 @@ function OrderDetail({ orderId, user, onUpdated }) {
     catch (e) { alert(e.message); }
   }
   const cellInput = (w) => ({ padding: "6px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 7, fontSize: 13, color: C.text, width: w || "100%", boxSizing: "border-box" });
-  const madeBtn = (made) => ({ cursor: "pointer", border: `1px solid ${made ? C.ready + "66" : C.border2}`, background: made ? C.ready + "1f" : C.surface2, color: made ? C.ready : C.text3, borderRadius: 7, padding: "4px 10px", fontSize: 12, fontWeight: 700 });
   async function saveNotes() {
     setNotesBusy(true); setNotesSaved(false);
     try { await api("PATCH", `/orders/${orderId}`, { notes }); setNotesSaved(true); onUpdated && onUpdated(); }
@@ -884,10 +890,33 @@ function OrderDetail({ orderId, user, onUpdated }) {
       )}
       {tab === "timeline" && (() => {
         const log = order.activity || [];
+        const trans = order.transitions || [];
         const LIMIT = 3;
         const shown = logOpen ? log : log.slice(0, LIMIT);
+        const fmtGap = (ms) => { const h = ms / 3600000; return h >= 48 ? `${Math.round(h / 24)}d` : h >= 1 ? `${Math.round(h)}h` : `${Math.max(1, Math.round(h * 60))}m`; };
         return (
         <div>
+          {trans.length > 0 && (
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 11, color: C.text3, fontWeight: 600, marginBottom: 8, letterSpacing: 0.4 }}>STAGE TIMELINE</div>
+              {trans.map((t, i) => {
+                const next = trans[i + 1];
+                const dur = next ? (new Date(next.created_at) - new Date(t.created_at)) : (order.stage !== "delivered" && order.stage !== "cancelled" ? (Date.now() - new Date(t.created_at)) : null);
+                const lbl = (STAGE_LABELS[t.to_stage] || {}).label || t.to_stage;
+                const col = (STAGE_LABELS[t.to_stage] || {}).color || C.accent;
+                return (
+                  <div key={t.id} style={{ display: "flex", gap: 11, marginBottom: 10 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: col, marginTop: 6, flexShrink: 0 }} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13 }}><span style={{ fontWeight: 700, color: C.text }}>{lbl}</span>{dur != null && <span style={{ color: C.text3 }}> · {fmtGap(dur)}{!next ? " (current)" : ""}</span>}</div>
+                      <div style={{ fontSize: 11.5, color: C.text3 }}>{new Date(t.created_at).toLocaleString()}{t.by_name ? ` · ${t.by_name}` : ""}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: C.text3, fontWeight: 600, marginBottom: 8, letterSpacing: 0.4 }}>ACTIVITY</div>
           {log.length === 0 && <Empty label="No activity yet." />}
           {shown.map((a) => (
             <div key={a.id} style={{ display: "flex", gap: 11, marginBottom: 13 }}>
@@ -907,19 +936,17 @@ function OrderDetail({ orderId, user, onUpdated }) {
       })()}
       {tab === "items" && (() => {
         const items = order.items || [];
-        const tot = items.reduce((s, it) => s + (Math.round(it.quantity) || 0), 0);
-        const done = items.reduce((s, it) => s + itemStat(it).m, 0);
-        const doneLines = items.filter((it) => itemStat(it).k === "done").length;
-        const pct = tot > 0 ? Math.round((done / tot) * 100) : 0;
-        const head = canMove ? ["SKU", "Product", "Qty", "Unit", "Progress", "Status", ""]
-          : canMark ? ["SKU", "Product", "Qty", "Unit", "Progress", "Status"]
+        const total = items.length;
+        const doneLines = items.filter((it) => itemStatusKey(it) === "done").length;
+        const pct = total > 0 ? Math.round((doneLines / total) * 100) : 0;
+        const head = canMove ? ["SKU", "Product", "Qty", "Unit", "Status", ""]
           : ["SKU", "Product", "Qty", "Unit", "Status"];
         return (
         <div>
           {items.length > 0 && (
             <div style={{ marginBottom: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: C.text2, marginBottom: 6 }}>
-                <span>{doneLines}/{items.length} SKUs · {done}/{tot} units made</span>
+                <span>{doneLines}/{total} SKUs done</span>
                 <span style={{ color: pct >= 100 ? C.ready : C.accent, fontWeight: 700 }}>{pct}%</span>
               </div>
               <div style={{ height: 6, background: C.surface2, borderRadius: 4, overflow: "hidden" }}>
@@ -933,15 +960,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
               {items.length === 0 && <tr><td colSpan={head.length}><Empty label="No items." /></td></tr>}
               {items.map((it) => {
                 const st = itemStat(it);
-                const prog = (
-                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <input key={st.m} type="number" min="0" max={st.q} defaultValue={st.m}
-                      onBlur={(e) => setItemProgress(it, +e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={cellInput(56)} />
-                    <span style={{ color: C.text3, fontSize: 12 }}>/ {st.q}</span>
-                    <button onClick={() => setItemProgress(it, st.k === "done" ? 0 : st.q)} style={madeBtn(st.k === "done")}>{st.k === "done" ? "✓ All" : "All"}</button>
-                  </div>
-                );
+                const prog = <StatusPicker value={st.k} onChange={(s) => setItemStatus(it, s)} />;
                 const pill = <span style={{ display: "inline-block", padding: "3px 9px", borderRadius: 20, fontSize: 11.5, fontWeight: 700, color: st.color, background: st.color + "1f", border: `1px solid ${st.color}44` }}>{st.label}</span>;
                 return (
                 <tr key={it.id} style={{ borderBottom: `1px solid ${C.border}` }}>
@@ -952,7 +971,6 @@ function OrderDetail({ orderId, user, onUpdated }) {
                       <td style={{ padding: "6px 8px" }}><input type="number" min="0" defaultValue={Math.round(it.quantity)} onBlur={(e) => +e.target.value !== Math.round(it.quantity) && updateItem(it.id, { quantity: +e.target.value })} style={cellInput(70)} /></td>
                       <td style={{ padding: "6px 8px" }}><input defaultValue={it.unit} onBlur={(e) => e.target.value !== it.unit && updateItem(it.id, { unit: e.target.value })} style={cellInput(64)} /></td>
                       <td style={{ padding: "6px 8px" }}>{prog}</td>
-                      <td style={{ padding: "6px 8px" }}>{pill}</td>
                       <td style={{ padding: "6px 8px" }}><button onClick={() => removeItem(it.id)} title="Remove" style={{ background: "#3a1a1a", border: "none", borderRadius: 7, color: "#fca5a5", cursor: "pointer", width: 28, height: 28 }}>×</button></td>
                     </>
                   ) : (
@@ -961,8 +979,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
                       <td style={{ padding: "8px 10px", color: C.text }}>{it.name}</td>
                       <td style={{ padding: "8px 10px", fontWeight: 700, color: C.text }}>{Math.round(it.quantity)}</td>
                       <td style={{ padding: "8px 10px", color: C.text3 }}>{it.unit}</td>
-                      {canMark && <td style={{ padding: "8px 10px" }}>{prog}</td>}
-                      <td style={{ padding: "8px 10px" }}>{pill}</td>
+                      <td style={{ padding: "8px 10px" }}>{canMark ? prog : pill}</td>
                     </>
                   )}
                 </tr>
@@ -1013,6 +1030,18 @@ function OrderDetail({ orderId, user, onUpdated }) {
         <AdvanceConfirmModal order={order} to={FORWARD_STAGE[order.stage]} user={user}
           onConfirm={async () => { await doMove(FORWARD_STAGE[order.stage]); setConfirmAdv(false); }}
           onClose={() => setConfirmAdv(false)} />
+      )}
+
+      {isLead && (
+        <div style={{ marginTop: 22, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, marginBottom: 8 }}>Lead actions</div>
+          <input placeholder="Reason / note (optional)" value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text, marginBottom: 10 }} />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn variant="soft" size="sm" onClick={() => setFlag({ on_hold: !order.on_hold, reason: reason || undefined })} disabled={busy}>{order.on_hold ? "Release hold" : "Put on hold"}</Btn>
+            <Btn variant="soft" size="sm" onClick={() => setFlag({ waiting_stock: !order.waiting_stock })} disabled={busy}>{order.waiting_stock ? "Clear waiting stock" : "Flag waiting stock"}</Btn>
+            {order.stage === "packing" && <Btn variant="danger" size="sm" onClick={() => doMove("production", reason || "Sent back for rework")} disabled={busy}>Send back to production</Btn>}
+          </div>
+        </div>
       )}
 
       {canMove && (
@@ -1158,40 +1187,122 @@ function Dashboard() {
   );
 }
 
+// ─── Per-order breakdown report ──────────────────────────────────────────────
+function OrdersReport({ period }) {
+  const [data, setData] = useState(null);
+  const [open, setOpen] = useState({});
+  useEffect(() => { setData(null); api("GET", `/reports/orders?period=${period}`).then((d) => setData(d.orders || [])).catch(() => setData([])); }, [period]);
+  const fmtDur = (h) => h == null ? "—" : h >= 48 ? `${Math.round(h / 24)}d` : `${h}h`;
+  function exportCsv() {
+    const rows = [["Invoice", "Customer", "Stage", "SKUs done", "SKUs total", "% done", "Days in stage", "Cycle (h)", "Due", "Status", "PIC"]];
+    for (const o of data) rows.push([o.invoice_number, o.customer_name || "", (STAGE_LABELS[o.stage] || {}).label || o.stage, o.done_count, o.item_count, o.pct, o.days_in_stage, o.cycle_hours, o.required_delivery_date, o.delivered ? (o.on_time ? "Delivered on-time" : "Delivered late") : (o.late ? "Late" : "In progress"), o.pic_name || ""]);
+    downloadCsv(`orders-report-${period}.csv`, rows);
+  }
+  if (!data) return <Loading label="Loading orders…" />;
+  if (data.length === 0) return <Empty label="No orders for this period." />;
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <span style={{ fontSize: 13, color: C.text3 }}>{data.length} orders · click a row for stage timeline & SKU breakdown</span>
+        <Btn variant="soft" size="sm" onClick={exportCsv}>Export orders CSV</Btn>
+      </div>
+      <Card style={{ padding: 0, overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Stage", "Progress", "Days in stage", "Cycle", "Due", "Status"].map((h) => <th key={h} style={{ textAlign: "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {data.flatMap((o) => {
+              const cfg = STAGE_LABELS[o.stage] || { label: o.stage, color: C.text3 };
+              const isOpen = open[o.id];
+              const statusPill = o.delivered
+                ? <Pill color={o.on_time ? C.ready : C.danger}>{o.on_time ? "On-time" : "Late"}</Pill>
+                : o.late ? <Pill color={C.danger}>Late</Pill> : <Pill color={C.text2}>In progress</Pill>;
+              const rows = [
+                <tr key={o.id} onClick={() => setOpen((p) => ({ ...p, [o.id]: !p[o.id] }))} style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}>
+                  <td style={{ padding: "9px 14px", fontFamily: MONO, color: C.text }}>{o.invoice_number}</td>
+                  <td style={{ padding: "9px 14px", color: C.text2 }}>{o.customer_name || "—"}</td>
+                  <td style={{ padding: "9px 14px" }}><Pill color={cfg.color}>{cfg.label}</Pill></td>
+                  <td style={{ padding: "9px 14px", minWidth: 130 }}>
+                    <div style={{ fontSize: 12, color: C.text2, marginBottom: 3 }}>{o.done_count}/{o.item_count} SKUs · {o.pct}%</div>
+                    <div style={{ height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}><div style={{ height: "100%", width: `${o.pct}%`, background: o.pct >= 100 ? C.ready : C.accent }} /></div>
+                  </td>
+                  <td style={{ padding: "9px 14px", color: C.text2 }}>{o.days_in_stage}d</td>
+                  <td style={{ padding: "9px 14px", color: C.text2 }}>{fmtDur(o.cycle_hours)}</td>
+                  <td style={{ padding: "9px 14px", color: countdown(o.required_delivery_date).tone }}>{fmtDay(o.required_delivery_date)}</td>
+                  <td style={{ padding: "9px 14px" }}>{statusPill}</td>
+                </tr>,
+              ];
+              if (isOpen) rows.push(
+                <tr key={o.id + "-d"} style={{ background: C.bg2, borderBottom: `1px solid ${C.border}` }}>
+                  <td colSpan={8} style={{ padding: "12px 18px" }}>
+                    <div style={{ display: "flex", gap: 28, flexWrap: "wrap" }}>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: C.text3, marginBottom: 6, letterSpacing: 0.4 }}>STAGE TIME</div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {BOARD_STAGES.map((s) => <Pill key={s} color={STAGES[s].color}>{STAGES[s].label}: {fmtDur(o.stage_hours[s])}</Pill>)}
+                          {o.stage_hours.delivered != null && <Pill color={C.text3}>Delivered: {fmtDur(o.stage_hours.delivered)}</Pill>}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: C.text3, marginBottom: 6, letterSpacing: 0.4 }}>SKU STATUS</div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <Pill color={C.ready}>Done: {o.done_count}</Pill>
+                          <Pill color={C.packing}>Making: {o.in_progress_count}</Pill>
+                          <Pill color={C.text3}>To do: {o.not_started_count}</Pill>
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: C.text3, marginBottom: 6, letterSpacing: 0.4 }}>PIC</div>
+                        <div style={{ fontSize: 13, color: C.text2 }}>{o.pic_name || "Unassigned"}</div>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              );
+              return rows;
+            })}
+          </tbody>
+        </table>
+      </Card>
+    </div>
+  );
+}
+
 // ─── Reports ─────────────────────────────────────────────────────────────────
-function Reports() {
-  const [tab, setTab] = useState("production");
+function Reports({ user }) {
+  const tabsForRole = user.role === "production_lead" ? ["production", "packing"]
+    : user.role === "delivery_team" ? ["delivery"]
+    : ["production", "packing", "delivery", "orders"];
+  const [tab, setTab] = useState(tabsForRole[0]);
   const [period, setPeriod] = useState("weekly");
   const [d, setD] = useState({});
-  useEffect(() => { api("GET", `/reports/${tab}?period=${period}`).then(setD).catch(() => setD({})); }, [tab, period]);
+  useEffect(() => { if (tab === "orders") return; api("GET", `/reports/${tab}?period=${period}`).then(setD).catch(() => setD({})); }, [tab, period]);
   const metricDefs = {
     production: (d) => [["Orders Completed", d.completed], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["Avg Production", d.avg_production_hours ? d.avg_production_hours + "h" : "—"], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"]],
     packing: (d) => [["Orders Packed", d.packed], ["Avg Pack Time", d.avg_pack_minutes ? d.avg_pack_minutes + "min" : "—"], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"]],
     delivery: (d) => [["Total Deliveries", d.total_deliveries], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["On-Time Count", d.on_time_count]],
   };
-  const metrics = { [tab]: metricDefs[tab](d) };
+  const metrics = tab === "orders" ? {} : { [tab]: metricDefs[tab](d) };
   const trend = d.daily_trend || [];
   const maxT = Math.max(...trend.map((t) => t.count), 1);
   async function exportAll() {
-    const [prod, pack, del] = await Promise.all([
-      api("GET", `/reports/production?period=${period}`).catch(() => ({})),
-      api("GET", `/reports/packing?period=${period}`).catch(() => ({})),
-      api("GET", `/reports/delivery?period=${period}`).catch(() => ({})),
-    ]);
+    const meta = { production: "Production", packing: "Packing", delivery: "Delivery" };
+    const fetched = await Promise.all(tabsForRole.filter((key) => metricDefs[key]).map((key) =>
+      api("GET", `/reports/${key}?period=${period}`).then((dd) => [key, dd]).catch(() => [key, {}])
+    ));
     const rows = [["Wawasan Candle — Reports"], ["Period", period], []];
-    for (const [name, key, dd] of [["Production", "production", prod], ["Packing", "packing", pack], ["Delivery", "delivery", del]]) {
-      rows.push([name], ["Metric", "Value"], ...metricDefs[key](dd).map(([k, v]) => [k, v == null ? "" : v]));
-      if ((dd.by_delivery_man || []).length) rows.push([], ["Driver", "Deliveries", "On time"], ...dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
+    for (const [key, dd] of fetched) {
+      rows.push([meta[key]], ["Metric", "Value"], ...metricDefs[key](dd).map(([k, v]) => [k, v == null ? "" : v]));
+      if ((dd.by_delivery_man || []).length) rows.push([], ["Deliverer", "Deliveries", "On time"], ...dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
       if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
       rows.push([]);
     }
-    downloadCsv(`reports-all-${period}.csv`, rows);
+    downloadCsv(`reports-${period}.csv`, rows);
   }
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 18 }}>
         <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4 }}>
-          {["production", "packing", "delivery"].map((t) => <button key={t} onClick={() => setTab(t)} style={{ background: tab === t ? C.surface2 : "transparent", border: "none", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 13, fontWeight: tab === t ? 700 : 500, color: tab === t ? C.text : C.text2, textTransform: "capitalize" }}>{t}</button>)}
+          {tabsForRole.map((t) => <button key={t} onClick={() => setTab(t)} style={{ background: tab === t ? C.surface2 : "transparent", border: "none", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 13, fontWeight: tab === t ? 700 : 500, color: tab === t ? C.text : C.text2, textTransform: "capitalize" }}>{t}</button>)}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <select value={period} onChange={(e) => setPeriod(e.target.value)} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13 }}>
@@ -1202,10 +1313,13 @@ function Reports() {
           <Btn variant="soft" onClick={exportAll}>Export all</Btn>
         </div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 20 }}>
-        {(metrics[tab] || []).map(([label, value]) => <Card key={label}><div style={{ fontSize: 28, fontWeight: 800, color: C.accent }}>{value ?? "—"}</div><div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{label}</div></Card>)}
-      </div>
-      {trend.length > 0 && (
+      {tab === "orders" && <OrdersReport period={period} />}
+      {tab !== "orders" && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 20 }}>
+          {(metrics[tab] || []).map(([label, value]) => <Card key={label}><div style={{ fontSize: 28, fontWeight: 800, color: C.accent }}>{value ?? "—"}</div><div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{label}</div></Card>)}
+        </div>
+      )}
+      {tab !== "orders" && trend.length > 0 && (
         <Card>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 16 }}>Daily trend</h3>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 130 }}>
@@ -1223,7 +1337,7 @@ function Reports() {
         <Card style={{ marginTop: 18 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>By delivery person</h3>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead><tr>{["Driver", "Deliveries", "On-time"].map((h) => <th key={h} style={{ textAlign: "left", padding: "7px 8px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
+            <thead><tr>{["Deliverer", "Deliveries", "On-time"].map((h) => <th key={h} style={{ textAlign: "left", padding: "7px 8px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
             <tbody>
               {d.by_delivery_man.map((x) => (
                 <tr key={x.id} style={{ borderBottom: `1px solid ${C.border}` }}>
@@ -1244,27 +1358,26 @@ function Reports() {
 function Delivery({ user }) {
   const [list, setList] = useState(null);
   const [ready, setReady] = useState([]);
-  const [drivers, setDrivers] = useState([]);
+  const [deliverers, setDeliverers] = useState([]);
   const [completed, setCompleted] = useState([]);
   const [show, setShow] = useState(false);
   const [allCompleted, setAllCompleted] = useState(false);
   const [confirmDeliver, setConfirmDeliver] = useState(null);
-  const [form, setForm] = useState({ order_id: "", delivery_man_id: "", scheduled_date: "", address: "", notes: "" });
-  const canAssign = ["super_admin", "operations_controller"].includes(user.role);
+  const [form, setForm] = useState({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "" });
+  const [newDeliverer, setNewDeliverer] = useState({ name: "", phone: "" });
+  const canAssign = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
   const canDeliver = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
-  const isDriver = user.role === "delivery_team";
 
   async function load() {
     const d = await api("GET", "/delivery").catch(() => []);
     setList(d || []);
     const comp = await api("GET", "/orders?stage=delivered&limit=100").catch(() => ({ orders: [] }));
     setCompleted(comp.orders || []);
+    setDeliverers(await api("GET", "/delivery/deliverers").catch(() => []));
     if (canAssign) {
       const o = await api("GET", "/orders?stage=ready_for_delivery&limit=100").catch(() => ({ orders: [] }));
-      const u = await api("GET", "/users").catch(() => []);
       const taken = new Set((d || []).filter((x) => x.status !== "delivered" && x.status !== "failed").map((x) => x.order_id));
       setReady((o.orders || []).filter((x) => !taken.has(x.id)));
-      setDrivers((u || []).filter((x) => x.is_active && x.role === "delivery_team"));
     }
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
@@ -1273,20 +1386,24 @@ function Delivery({ user }) {
     if (!form.order_id) { alert("Pick an order to schedule."); return; }
     try {
       await api("POST", "/delivery", form);
-      setShow(false); setForm({ order_id: "", delivery_man_id: "", scheduled_date: "", address: "", notes: "" });
+      setShow(false); setForm({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "" });
       load();
     } catch (e) { alert(e.message); }
   }
   async function markDelivered(id) { try { await api("POST", `/delivery/${id}/deliver`, {}); setConfirmDeliver(null); load(); } catch (e) { alert(e.message); } }
   function scheduleFor(orderId) { setForm((f) => ({ ...f, order_id: orderId })); setShow(true); }
+  async function addDeliverer() {
+    if (!newDeliverer.name.trim()) return;
+    try { await api("POST", "/delivery/deliverers", newDeliverer); setNewDeliverer({ name: "", phone: "" }); load(); } catch (e) { alert(e.message); }
+  }
+  async function toggleDeliverer(dl) { try { await api("PATCH", `/delivery/deliverers/${dl.id}`, { is_active: !dl.is_active }); load(); } catch (e) { alert(e.message); } }
 
   if (!list) return <Loading />;
   // Ready-for-Delivery keeps the board's green; Pending is amber to stay visually
   // distinct from it. in_transit blue, delivered grey, failed red.
   const tone = { pending: C.packing, in_transit: C.order, delivered: C.text3, failed: C.danger };
   const statusLabel = { pending: "Pending", in_transit: "In transit", delivered: "Delivered", failed: "Failed" };
-  let active = list.filter((x) => x.status !== "delivered");
-  if (isDriver) active = active.filter((x) => x.delivery_man_id === user.id);
+  const active = list.filter((x) => x.status !== "delivered");
   const delByOrder = {};
   for (const dv of list) delByOrder[dv.order_id] = dv;
   const shownCompleted = allCompleted ? completed : completed.slice(0, 3);
@@ -1317,12 +1434,12 @@ function Delivery({ user }) {
       )}
 
       <div>
-        <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>{isDriver ? "My deliveries" : "Pending"} · {active.length}</h3>
+        <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Pending · {active.length}</h3>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Address", "Driver", "Scheduled", "Due", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Address", "Deliverer", "Scheduled", "Due", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
-              {active.length === 0 && <tr><td colSpan={8}><Empty label={isDriver ? "No deliveries assigned to you yet." : "Nothing pending. Schedule a Ready-for-Delivery order above."} /></td></tr>}
+              {active.length === 0 && <tr><td colSpan={8}><Empty label="Nothing pending. Schedule a Ready-for-Delivery order above." /></td></tr>}
               {active.map((dv) => (
                 <tr key={dv.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                   <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{dv.invoice_number}</td>
@@ -1344,7 +1461,7 @@ function Delivery({ user }) {
         <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Completed orders · {completed.length}</h3>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Driver", "Delivered", "Due"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Deliverer", "Delivered", "Due"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
               {completed.length === 0 && <tr><td colSpan={5}><Empty label="No completed orders yet." /></td></tr>}
               {shownCompleted.map((o) => {
@@ -1365,11 +1482,38 @@ function Delivery({ user }) {
         {completed.length > 3 && <div style={{ marginTop: 10 }}><Btn variant="ghost" size="sm" onClick={() => setAllCompleted((v) => !v)}>{allCompleted ? "Show less ▲" : `Show all ${completed.length} ▼`}</Btn></div>}
       </div>
 
+      {canAssign && (
+        <div>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Deliverers · {deliverers.length}</h3>
+          <Card style={{ padding: 0, overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+              <thead><tr style={{ background: C.bg2 }}>{["Name", "Phone", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {deliverers.length === 0 && <tr><td colSpan={4}><Empty label="No deliverers yet. Add your drivers below." /></td></tr>}
+                {deliverers.map((dl) => (
+                  <tr key={dl.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <td style={{ padding: "11px 16px", color: C.text }}>{dl.name}</td>
+                    <td style={{ padding: "11px 16px", color: C.text2 }}>{dl.phone || "—"}</td>
+                    <td style={{ padding: "11px 16px" }}><Pill color={dl.is_active ? C.ready : C.danger}>{dl.is_active ? "Active" : "Disabled"}</Pill></td>
+                    <td style={{ padding: "11px 16px" }}><Btn size="sm" variant="ghost" onClick={() => toggleDeliverer(dl)}>{dl.is_active ? "Disable" : "Enable"}</Btn></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <input placeholder="Deliverer name" value={newDeliverer.name} onChange={(e) => setNewDeliverer((p) => ({ ...p, name: e.target.value }))} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5 }} />
+            <input placeholder="Phone (optional)" value={newDeliverer.phone} onChange={(e) => setNewDeliverer((p) => ({ ...p, phone: e.target.value }))} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5 }} />
+            <Btn size="sm" onClick={addDeliverer} disabled={!newDeliverer.name.trim()}><Icon name="plus" size={14} /> Add deliverer</Btn>
+          </div>
+        </div>
+      )}
+
       <Modal open={show} onClose={() => setShow(false)} title="Schedule delivery">
         <Field label="Order (ready for delivery)" value={form.order_id} onChange={(v) => setForm((f) => ({ ...f, order_id: v }))}
           options={[{ value: "", label: "Select order…" }, ...ready.map((o) => ({ value: o.id, label: `${o.invoice_number} — ${o.customer_name}` }))]} />
-        <Field label="Driver" value={form.delivery_man_id} onChange={(v) => setForm((f) => ({ ...f, delivery_man_id: v }))}
-          options={[{ value: "", label: drivers.length ? "Unassigned" : "No delivery-team users yet" }, ...drivers.map((d) => ({ value: d.id, label: d.name }))]} />
+        <Field label="Deliverer" value={form.deliverer_id} onChange={(v) => setForm((f) => ({ ...f, deliverer_id: v }))}
+          options={[{ value: "", label: deliverers.filter((d) => d.is_active).length ? "Unassigned" : "No deliverers yet — add one below" }, ...deliverers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name }))]} />
         <Field label="Scheduled date" type="date" value={form.scheduled_date} onChange={(v) => setForm((f) => ({ ...f, scheduled_date: v }))} />
         <Field label="Delivery address" value={form.address} onChange={(v) => setForm((f) => ({ ...f, address: v }))} placeholder="Street, city, postcode…" />
         <Field label="Notes" value={form.notes} onChange={(v) => setForm((f) => ({ ...f, notes: v }))} placeholder="Optional…" />
@@ -1385,7 +1529,7 @@ function Delivery({ user }) {
             <div style={{ fontSize: 14, marginBottom: 8 }}><span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{confirmDeliver.invoice_number}</span> <span style={{ color: C.text2 }}>· {confirmDeliver.customer_name}</span></div>
             <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.8, marginBottom: 12 }}>
               {confirmDeliver.address && <div><span style={{ color: C.text3 }}>Address: </span>{confirmDeliver.address}</div>}
-              <div><span style={{ color: C.text3 }}>Driver: </span>{confirmDeliver.delivery_man_name || "Unassigned"}</div>
+              <div><span style={{ color: C.text3 }}>Deliverer: </span>{confirmDeliver.delivery_man_name || "Unassigned"}</div>
               <div><span style={{ color: C.text3 }}>Scheduled: </span>{confirmDeliver.scheduled_date ? fmtDay(confirmDeliver.scheduled_date) : "—"}</div>
             </div>
             <div style={{ fontSize: 12.5, color: C.text3, marginBottom: 16 }}>This marks the order delivered and moves it out of Pending. This can't be undone.</div>
@@ -1716,40 +1860,7 @@ function NotificationsPanel({ onClose, onChanged }) {
   );
 }
 
-// ─── Change password (self-service) ─────────────────────────────────────────
-function ChangePasswordModal({ onClose }) {
-  const [cur, setCur] = useState("");
-  const [nw, setNw] = useState("");
-  const [nw2, setNw2] = useState("");
-  const [err, setErr] = useState("");
-  const [ok, setOk] = useState(false);
-  const [busy, setBusy] = useState(false);
-  async function submit() {
-    setErr("");
-    if (nw.length < 8) { setErr("New password must be at least 8 characters."); return; }
-    if (nw !== nw2) { setErr("New passwords don't match."); return; }
-    setBusy(true);
-    try { await api("POST", "/auth/change-password", { currentPassword: cur, newPassword: nw }); setOk(true); setTimeout(onClose, 1200); }
-    catch (e) { setErr(e.message); setBusy(false); }
-  }
-  return (
-    <Modal open onClose={onClose} title="Change password" width={420}>
-      {ok ? <div style={{ color: C.ready, fontSize: 14 }}>Password changed ✓</div> : (
-        <form autoComplete="off" onSubmit={(e) => e.preventDefault()}>
-          {/* Chrome ignores autoComplete=off; these off-screen decoys give it throwaway
-              targets so it stops filling the saved login into the page's search box. */}
-          <input type="text" name="username" autoComplete="username" tabIndex={-1} aria-hidden="true" style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }} />
-          <input type="password" name="password" autoComplete="new-password" tabIndex={-1} aria-hidden="true" style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }} />
-          <Field label="Current password" type="password" name="cur-pw-field" autoComplete="off" value={cur} onChange={setCur} />
-          <Field label="New password" type="password" name="new-pw-field" autoComplete="new-password" value={nw} onChange={setNw} />
-          <Field label="Confirm new password" type="password" name="confirm-pw-field" autoComplete="new-password" value={nw2} onChange={setNw2} />
-          {err && <p style={{ color: "#fca5a5", fontSize: 13, margin: "-4px 0 10px" }}>{err}</p>}
-          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 }}><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn onClick={submit} disabled={busy}>{busy ? "Saving…" : "Change password"}</Btn></div>
-        </form>
-      )}
-    </Modal>
-  );
-}
+// Self-service change-password removed — Boss/Ops/Admin set passwords in User Management.
 
 // ─── Login ─────────────────────────────────────────────────────────────────────
 function LoginPage({ onLogin }) {
@@ -1792,7 +1903,6 @@ export default function App() {
   const [showCreate, setShowCreate] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
   const [unread, setUnread] = useState(0);
-  const [showChangePw, setShowChangePw] = useState(false);
   const [boardKey, setBoardKey] = useState(0);
   const [boardCount, setBoardCount] = useState(null);
 
@@ -1812,7 +1922,7 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     const allowed = NAV.filter((n) => !n.roles || n.roles.includes(user.role)).map((n) => n.id);
-    if (page !== "floor" && !allowed.includes(page)) setPage("board");
+    if (page !== "floor" && !allowed.includes(page)) setPage(allowed[0] || "board");
   }, [user, page]);
 
   function logout() { api("POST", "/auth/logout").catch(() => {}); _token = ""; localStorage.removeItem("oms_token"); setPage("board"); setUser(null); }
@@ -1848,8 +1958,7 @@ export default function App() {
             );
           })}
         </nav>
-        <button onClick={() => setShowChangePw(true)} style={{ display: "flex", alignItems: "center", gap: 10, margin: "10px 16px 0", padding: "10px 12px", background: "transparent", border: "none", color: C.text3, cursor: "pointer", fontSize: 13.5 }}><Icon name="settings" size={16} color={C.text3} /> Change password</button>
-        <button onClick={logout} style={{ display: "flex", alignItems: "center", gap: 10, margin: "2px 16px 18px", padding: "10px 12px", background: "transparent", border: "none", color: C.text3, cursor: "pointer", fontSize: 13.5 }}><Icon name="logout" size={17} color={C.text3} /> Log out</button>
+        <button onClick={logout} style={{ display: "flex", alignItems: "center", gap: 10, margin: "10px 16px 18px", padding: "10px 12px", background: "transparent", border: "none", color: C.text3, cursor: "pointer", fontSize: 13.5 }}><Icon name="logout" size={17} color={C.text3} /> Log out</button>
       </aside>
 
       {/* Main */}
@@ -1890,7 +1999,7 @@ export default function App() {
           {page === "board" && <OrderBoard user={user} search={search} weekOnly={weekOnly} refreshKey={boardKey} onOpenOrder={(o) => setSelectedOrder(o.id)} onCount={setBoardCount} />}
           {page === "dashboard" && <Dashboard />}
           {page === "delivery" && <Delivery user={user} />}
-          {page === "reports" && <Reports />}
+          {page === "reports" && <Reports user={user} />}
           {page === "remarks" && <Remarks user={user} />}
           {page === "audit" && <Audit />}
           {page === "users" && <Users user={user} />}
@@ -1899,7 +2008,6 @@ export default function App() {
       </div>
 
       {showNotifs && <NotificationsPanel onClose={() => setShowNotifs(false)} onChanged={() => setUnread(0)} />}
-      {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
 
       <Modal open={!!selectedOrder} onClose={() => setSelectedOrder(null)} title="Order detail" width={640}>
         {selectedOrder && <OrderDetail orderId={selectedOrder} user={user} onUpdated={bumpBoard} />}
