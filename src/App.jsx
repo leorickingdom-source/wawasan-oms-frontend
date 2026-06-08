@@ -159,7 +159,7 @@ function StatusPicker({ value, onChange, disabled }) {
         const cfg = ITEM_STATUS[s], active = value === s;
         return (
           <button key={s} type="button" disabled={disabled} onClick={() => !disabled && onChange(s)}
-            style={{ cursor: disabled ? "default" : "pointer", border: `1px solid ${active ? cfg.color + "88" : C.border2}`, background: active ? cfg.color + "22" : C.surface2, color: active ? cfg.color : C.text3, borderRadius: 7, padding: "4px 9px", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+            style={{ cursor: disabled ? "default" : "pointer", border: `1px solid ${active ? cfg.color + "88" : C.border2}`, background: active ? cfg.color + "22" : C.surface2, color: active ? cfg.color : C.text3, borderRadius: 7, padding: "7px 12px", fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap" }}>
             {cfg.short}
           </button>
         );
@@ -222,6 +222,37 @@ function printPickingSlip(order) {
     } catch (e) { alert("Could not open the print dialog: " + e.message); try { iframe.remove(); } catch (_) {} }
   }, 350);
 }
+function printRouteList(deliveries) {
+  const rows = (deliveries || []).map((d, i) =>
+    `<tr><td class="n">${i + 1}</td><td class="m">${escHtml(d.invoice_number)}</td><td>${escHtml(d.customer_name || "")}</td><td>${escHtml(d.address || "—")}</td><td>${escHtml(d.delivery_man_name || "—")}</td><td class="m">${escHtml(d.tracking_no || "—")}</td><td class="chk">&#9744;</td></tr>`
+  ).join("");
+  const html = (`<!doctype html><html><head><meta charset="utf-8"><title>Delivery Route List</title>
+<style>
+  *{box-sizing:border-box} body{font:13px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#111;margin:28px}
+  h1{font-size:21px;margin:0 0 2px} .sub{color:#666;margin-bottom:16px}
+  table{width:100%;border-collapse:collapse;margin-top:6px} th,td{padding:8px 9px;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}
+  th{font-size:11px;text-transform:uppercase;color:#888} .m{font-family:ui-monospace,Consolas,monospace;color:#555} .n{color:#888;width:26px} .chk{width:30px;text-align:center;font-size:17px}
+  @media print{body{margin:12mm}}
+</style></head><body>
+  <h1>Delivery Route List</h1><div class="sub">Wawasan Candle — ${escHtml(new Date().toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "short", year: "numeric" }))} · ${(deliveries || []).length} stops</div>
+  <table><thead><tr><th>#</th><th>Invoice</th><th>Customer</th><th>Address</th><th>Courier</th><th>Tracking</th><th>Done</th></tr></thead>
+  <tbody>${rows || '<tr><td colspan="7">No deliveries scheduled.</td></tr>'}</tbody></table>
+  <p style="margin-top:22px;color:#888;font-size:12px">Printed ${escHtml(new Date().toLocaleString())}</p>
+</body></html>`);
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+  document.body.appendChild(iframe);
+  const doc = iframe.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+  setTimeout(() => {
+    try {
+      const w = iframe.contentWindow;
+      w.onafterprint = () => { try { iframe.remove(); } catch (e) {} };
+      w.focus(); w.print();
+      setTimeout(() => { try { iframe.remove(); } catch (e) {} }, 60000);
+    } catch (e) { alert("Could not open the print dialog: " + e.message); try { iframe.remove(); } catch (_) {} }
+  }, 350);
+}
 
 // ─── Icons ───────────────────────────────────────────────────────────────────
 const ICONS = {
@@ -247,6 +278,7 @@ const ICONS = {
   check: '<path d="M20 6.5 9.5 17 4.5 12"/>',
   alert: '<path d="M10.3 3.9 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4.5M12 17h.01"/>',
   chevron: '<path d="M6 9.5 12 15l6-5.5"/>',
+  menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
 };
 function Icon({ name, size = 18, color = "currentColor", strokeWidth = 1.9, style }) {
   const filled = name === "dots";
@@ -303,7 +335,7 @@ function Btn({ children, onClick, variant = "primary", size = "md", disabled, st
     </button>
   );
 }
-function IconBtn({ icon, onClick, title, color = C.text2, bg = C.surface2, border = C.border2, size = 34 }) {
+function IconBtn({ icon, onClick, title, color = C.text2, bg = C.surface2, border = C.border2, size = 40 }) {
   return (
     <button title={title} onClick={onClick} style={{ width: size, height: size, display: "grid", placeItems: "center", borderRadius: 8, border: `1px solid ${border}`, background: bg, color, cursor: "pointer" }}>
       <Icon name={icon} size={16} color={color} />
@@ -377,7 +409,7 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
           {dtag && <Pill color={dtag.color}>{dtag.label}</Pill>}
           {waiting && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
           {onHold && <Pill color={C.hold}>On hold</Pill>}
-          {order.skip_production && <Pill color={C.accent} bg="transparent">skip-prod</Pill>}
+          {order.skip_production && <Pill color={C.accent} bg="transparent">No production</Pill>}
         </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "7px 0 4px", fontSize: 12.5 }}>
@@ -388,6 +420,7 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
       <div style={{ fontSize: 13, color: showName ? C.text : imp.color, fontWeight: showName ? 500 : 700, marginBottom: 3 }}>{showName ? order.customer_name : imp.label}</div>
       <div style={{ fontSize: 12, color: C.text3, marginBottom: 5 }}>
         {order.item_count} {order.item_count === 1 ? "line" : "lines"}
+        {order.expiry_date && <span> · Exp {fmtDay(order.expiry_date)}</span>}
       </div>
       {(order.stage === "production" || order.stage === "packing") && order.item_count > 0 && (() => {
         const done = order.made_count || 0, total = order.item_count || 0;
@@ -471,7 +504,7 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
     </Modal>
   );
 }
-function OrderBoard({ user, search, weekOnly, onOpenOrder, refreshKey, onCount }) {
+function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refreshKey, onCount }) {
   const [board, setBoard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -498,8 +531,13 @@ function OrderBoard({ user, search, weekOnly, onOpenOrder, refreshKey, onCount }
   }
   const filt = (arr) => {
     const q = search.trim().toLowerCase();
-    if (!q) return arr;
-    return arr.filter((o) => o.invoice_number.toLowerCase().includes(q) || (o.customer_name || "").toLowerCase().includes(q));
+    let out = arr;
+    if (q) out = out.filter((o) => o.invoice_number.toLowerCase().includes(q) || (o.customer_name || "").toLowerCase().includes(q));
+    if (statusFilter === "urgent") out = out.filter((o) => o.priority === "urgent");
+    else if (statusFilter === "late") out = out.filter((o) => (daysUntil(o.required_delivery_date) ?? 0) < 0);
+    else if (statusFilter === "on_hold") out = out.filter((o) => o.on_hold);
+    else if (statusFilter === "waiting_stock") out = out.filter((o) => o.waiting_stock);
+    return out;
   };
 
   if (loading && !board) return <Loading label="Loading board…" />;
@@ -507,7 +545,7 @@ function OrderBoard({ user, search, weekOnly, onOpenOrder, refreshKey, onCount }
   return (
     <div>
       {err && <div style={{ marginBottom: 14, color: "#fca5a5", fontSize: 13 }}>⚠ {err}</div>}
-      <div style={{ display: "grid", gridTemplateColumns: stages.length >= 3 ? `repeat(${stages.length}, minmax(230px, 1fr))` : `repeat(${stages.length}, minmax(280px, 440px))`, gap: 16, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: stages.length >= 3 ? `repeat(auto-fit, minmax(min(100%, 250px), 1fr))` : `repeat(${stages.length}, minmax(280px, 440px))`, gap: 16, alignItems: "start" }}>
         {stages.map((s) => {
           const cfg = STAGES[s];
           const orders = filt((board && board[s]) || []);
@@ -837,7 +875,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
         {order.importance && order.importance !== "standard" && <Pill color={impCfg(order.importance).color}>{impCfg(order.importance).label}</Pill>}
         {order.waiting_stock && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
         {order.on_hold && <Pill color={C.hold}>On hold</Pill>}
-        {order.skip_production && <Pill color={C.accent} bg="transparent">skip-prod</Pill>}
+        {order.skip_production && <Pill color={C.accent} bg="transparent">No production</Pill>}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <span style={{ fontSize: 13, color: C.text3 }}>{order.created_by_name ? `Created by ${order.created_by_name}` : ""} {order.order_date ? `· ${fmtDay(order.order_date)}` : ""}</span>
@@ -869,7 +907,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
             <LV label="Delivery" v={<span style={{ color: countdown(order.required_delivery_date).tone }}>{fmtDay(order.required_delivery_date)} · {countdown(order.required_delivery_date).text}</span>} />
             <LV label="Expiry" v={order.expiry_date ? fmtDay(order.expiry_date) : "—"} />
             <LV label="PIC" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />
-            <LV label="Source" v={order.source === "sql_account" ? "SQL Account" : "Manual"} />
+            <LV label="Source" v={order.source === "sql_account" ? "Auto-imported" : "Manual entry"} />
             {order.customer_name != null && delivery && delivery.address && <LV label="Delivery address" v={delivery.address} />}
           </div>
           <div style={{ marginTop: 18 }}>
@@ -1080,7 +1118,7 @@ function LV({ label, v }) {
 
 // ─── Create order ──────────────────────────────────────────────────────────────
 function CreateOrderForm({ onCreated, onClose }) {
-  const [f, setF] = useState({ invoice_number: "", customer_name: "", customer_contact: "", required_delivery_date: "", priority: "normal", importance: "standard", skip_production: false, notes: "" });
+  const [f, setF] = useState({ invoice_number: "", customer_name: "", customer_contact: "", required_delivery_date: "", expiry_date: "", priority: "normal", importance: "standard", skip_production: false, notes: "" });
   const [items, setItems] = useState([{ sku: "", name: "", quantity: 1, unit: "pcs" }]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -1103,6 +1141,7 @@ function CreateOrderForm({ onCreated, onClose }) {
         <Field label="Customer Name" value={f.customer_name} onChange={(v) => set("customer_name", v)} required />
         <Field label="Contact" value={f.customer_contact} onChange={(v) => set("customer_contact", v)} placeholder="01X-XXXXXXX" />
         <Field label="Required Delivery Date" type="date" value={f.required_delivery_date} onChange={(v) => set("required_delivery_date", v)} required />
+        <Field label="Expiry Date" type="date" value={f.expiry_date} onChange={(v) => set("expiry_date", v)} />
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.text2, marginTop: 26 }}>
           <input type="checkbox" checked={f.skip_production} onChange={(e) => set("skip_production", e.target.checked)} /> Skip production (→ packing)
         </label>
@@ -1129,7 +1168,7 @@ function CreateOrderForm({ onCreated, onClose }) {
 }
 
 // ─── Dashboard ─────────────────────────────────────────────────────────────────
-function Dashboard() {
+function Dashboard({ onOpenOrder }) {
   const [d, setD] = useState(null);
   useEffect(() => { api("GET", "/reports/dashboard").then(setD).catch(() => setD({ _error: true })); }, []);
   if (!d) return <Loading />;
@@ -1164,7 +1203,7 @@ function Dashboard() {
           <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 14 }}>Upcoming deliveries (7 days)</h3>
           {(d.upcoming_deliveries || []).length === 0 && <Empty label="None scheduled." />}
           {(d.upcoming_deliveries || []).map((o) => (
-            <div key={o.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${C.border}`, fontSize: 13 }}>
+            <div key={o.id} onClick={() => onOpenOrder && onOpenOrder(o.id)} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${C.border}`, fontSize: 13, cursor: onOpenOrder ? "pointer" : "default" }}>
               <span><span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{o.invoice_number}</span> <span style={{ color: C.text3 }}>{o.customer_name}</span></span>
               <span style={{ color: countdown(o.required_delivery_date).tone }}>{fmtDay(o.required_delivery_date)} · {countdown(o.required_delivery_date).text}</span>
             </div>
@@ -1175,7 +1214,7 @@ function Dashboard() {
         <Card style={{ borderColor: C.danger + "55", background: "#1f1310" }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: C.danger, marginBottom: 10 }}>⚠ Overdue orders</h3>
           {d.overdue_orders.map((o) => (
-            <div key={o.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0" }}>
+            <div key={o.id} onClick={() => onOpenOrder && onOpenOrder(o.id)} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "4px 0", cursor: onOpenOrder ? "pointer" : "default" }}>
               <span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{o.invoice_number}</span>
               <span style={{ color: C.text3 }}>{o.customer_name}</span>
               <span style={{ color: C.danger }}>{fmtDay(o.required_delivery_date)}</span>
@@ -1206,7 +1245,7 @@ function OrdersReport({ period }) {
         <span style={{ fontSize: 13, color: C.text3 }}>{data.length} orders · click a row for stage timeline & SKU breakdown</span>
         <Btn variant="soft" size="sm" onClick={exportCsv}>Export orders CSV</Btn>
       </div>
-      <Card style={{ padding: 0, overflow: "hidden" }}>
+      <Card style={{ padding: 0, overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Stage", "Progress", "Days in stage", "Cycle", "Due", "Status"].map((h) => <th key={h} style={{ textAlign: "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
           <tbody>
@@ -1413,7 +1452,7 @@ function Delivery({ user }) {
       {canAssign && (
         <div>
           <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Ready for Delivery · {ready.length}</h3>
-          <Card style={{ padding: 0, overflow: "hidden" }}>
+          <Card style={{ padding: 0, overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
               <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Due", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
               <tbody>
@@ -1434,8 +1473,11 @@ function Delivery({ user }) {
       )}
 
       <div>
-        <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Pending · {active.length}</h3>
-        <Card style={{ padding: 0, overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Pending · {active.length}</h3>
+          {active.length > 0 && <Btn variant="soft" size="sm" onClick={() => printRouteList(active)}>Print route list</Btn>}
+        </div>
+        <Card style={{ padding: 0, overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
             <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Address", "Courier", "Tracking", "Scheduled", "Due", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
@@ -1460,7 +1502,7 @@ function Delivery({ user }) {
 
       <div>
         <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Completed orders · {completed.length}</h3>
-        <Card style={{ padding: 0, overflow: "hidden" }}>
+        <Card style={{ padding: 0, overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
             <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Courier", "Delivered", "Due"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
@@ -1486,7 +1528,7 @@ function Delivery({ user }) {
       {canAssign && (
         <div>
           <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Couriers · {deliverers.length}</h3>
-          <Card style={{ padding: 0, overflow: "hidden" }}>
+          <Card style={{ padding: 0, overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
               <thead><tr style={{ background: C.bg2 }}>{["Name", "Phone", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
               <tbody>
@@ -1648,6 +1690,8 @@ function Audit() {
   const [period, setPeriod] = useState("all"); // all | weekly | monthly | custom
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [userF, setUserF] = useState("");
+  const [actionF, setActionF] = useState("");
 
   const ymd = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
   useEffect(() => {
@@ -1662,9 +1706,12 @@ function Audit() {
     api("GET", `/reports/audit?${p.toString()}`).then(setD).catch(() => setD({ logs: [] }));
   }, [period, from, to]);
 
-  const logs = d && d.logs ? d.logs : [];
+  const allLogsData = d && d.logs ? d.logs : [];
+  const userOpts = [...new Set(allLogsData.map((l) => l.user_name).filter(Boolean))].sort();
+  const actionOpts = [...new Set(allLogsData.map((l) => l.action).filter(Boolean))].sort();
+  const logs = allLogsData.filter((l) => (!userF || l.user_name === userF) && (!actionF || l.action === actionF));
   const shownLogs = allLogs ? logs : logs.slice(0, 3);
-  const total = d && d.total != null ? d.total : logs.length;
+  const total = (userF || actionF) ? logs.length : (d && d.total != null ? d.total : logs.length);
   const tabBtn = (id, label) => (
     <button key={id} onClick={() => setPeriod(id)} style={{ background: period === id ? C.surface2 : "transparent", border: "none", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontSize: 13, fontWeight: period === id ? 700 : 500, color: period === id ? C.text : C.text2 }}>{label}</button>
   );
@@ -1676,6 +1723,14 @@ function Audit() {
         <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4 }}>
           {tabBtn("all", "All")}{tabBtn("weekly", "This week")}{tabBtn("monthly", "This month")}{tabBtn("custom", "Custom")}
         </div>
+        <select value={userF} onChange={(e) => setUserF(e.target.value)} title="Filter by user" style={{ padding: "7px 10px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, color: C.text, fontSize: 13 }}>
+          <option value="" style={{ background: C.bg2 }}>All users</option>
+          {userOpts.map((u) => <option key={u} value={u} style={{ background: C.bg2 }}>{u}</option>)}
+        </select>
+        <select value={actionF} onChange={(e) => setActionF(e.target.value)} title="Filter by action" style={{ padding: "7px 10px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, color: C.text, fontSize: 13 }}>
+          <option value="" style={{ background: C.bg2 }}>All actions</option>
+          {actionOpts.map((a) => <option key={a} value={a} style={{ background: C.bg2 }}>{a}</option>)}
+        </select>
         {period === "custom" && (
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={dateInp} />
@@ -1687,7 +1742,7 @@ function Audit() {
       </div>
       {!d ? <Loading /> : (
         <>
-          <Card style={{ padding: 0, overflow: "hidden" }}>
+          <Card style={{ padding: 0, overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead><tr style={{ background: C.bg2 }}>{["When", "User", "Action", "Details", "Invoice"].map((h) => <th key={h} style={{ textAlign: "left", padding: "11px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
               <tbody>
@@ -1764,7 +1819,7 @@ function Users({ user }) {
         <span style={{ fontSize: 12.5, color: C.text3 }}>{filtered.length} of {list.length}</span>
         <Btn onClick={() => setShow(true)} style={{ marginLeft: "auto" }}><Icon name="plus" size={15} /> Add user</Btn>
       </div>
-      <Card style={{ padding: 0, overflow: "hidden" }}>
+      <Card style={{ padding: 0, overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
           <thead><tr style={{ background: C.bg2 }}>{["User", "Email", "Role", "Status", "Actions"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
           <tbody>
@@ -1895,6 +1950,17 @@ function LoginPage({ onLogin }) {
   );
 }
 
+// ─── Responsive ────────────────────────────────────────────────────────────────
+function useViewport() {
+  const [w, setW] = useState(typeof window !== "undefined" ? window.innerWidth : 1200);
+  useEffect(() => {
+    const on = () => setW(window.innerWidth);
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  return w;
+}
+
 // ─── App shell ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [user, setUser] = useState(null);
@@ -1908,6 +1974,10 @@ export default function App() {
   const [unread, setUnread] = useState(0);
   const [boardKey, setBoardKey] = useState(0);
   const [boardCount, setBoardCount] = useState(null);
+  const vw = useViewport();
+  const isMobile = vw < 820;
+  const [navOpen, setNavOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("");
 
   useEffect(() => {
     const t = localStorage.getItem("oms_token");
@@ -1942,8 +2012,10 @@ export default function App() {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg }}>
+      {/* Mobile sidebar backdrop */}
+      {isMobile && navOpen && <div onClick={() => setNavOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.55)", zIndex: 1250 }} />}
       {/* Sidebar */}
-      <aside style={{ width: 248, background: C.bg2, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh" }}>
+      <aside style={{ width: 248, background: C.bg2, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", ...(isMobile ? { position: "fixed", top: 0, left: 0, height: "100vh", zIndex: 1300, transform: navOpen ? "translateX(0)" : "translateX(-110%)", transition: "transform .22s ease", boxShadow: navOpen ? "0 0 50px rgba(0,0,0,.6)" : "none" } : { position: "sticky", top: 0, height: "100vh" }) }}>
         <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "20px 20px 18px" }}>
           <Logo size={38} />
           <div><div style={{ fontSize: 15, fontWeight: 800, color: C.text, letterSpacing: 0.4 }}>WAWASAN</div><div style={{ fontSize: 10.5, fontWeight: 600, color: C.text3, letterSpacing: 1.5 }}>CANDLE</div></div>
@@ -1953,7 +2025,7 @@ export default function App() {
           {nav.map((n) => {
             const active = page === n.id;
             return (
-              <button key={n.id} onClick={() => setPage(n.id)} style={{ display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 9, border: "none", cursor: "pointer", background: active ? C.accent + "1c" : "transparent", color: active ? C.accent : C.text2, fontSize: 13.5, fontWeight: active ? 700 : 500, textAlign: "left", borderLeft: active ? `2px solid ${C.accent}` : "2px solid transparent" }}>
+              <button key={n.id} onClick={() => { setPage(n.id); setNavOpen(false); }} style={{ display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 9, border: "none", cursor: "pointer", background: active ? C.accent + "1c" : "transparent", color: active ? C.accent : C.text2, fontSize: 13.5, fontWeight: active ? 700 : 500, textAlign: "left", borderLeft: active ? `2px solid ${C.accent}` : "2px solid transparent" }}>
                 <Icon name={n.icon} size={18} color={active ? C.accent : C.text3} />
                 <span style={{ flex: 1 }}>{n.label}</span>
                 {n.id === "board" && boardCount != null && <span style={{ background: active ? C.accent + "33" : C.surface2, color: active ? C.accent : C.text3, borderRadius: 6, padding: "0 7px", fontSize: 12, fontWeight: 700 }}>{boardCount}</span>}
@@ -1966,7 +2038,8 @@ export default function App() {
 
       {/* Main */}
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        <header style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 26px", borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, background: C.bg + "ee", backdropFilter: "blur(6px)", zIndex: 100 }}>
+        <header style={{ display: "flex", alignItems: "center", gap: 16, rowGap: 10, flexWrap: "wrap", padding: isMobile ? "12px 16px" : "16px 26px", borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, background: C.bg + "ee", backdropFilter: "blur(6px)", zIndex: 100 }}>
+          {isMobile && <button onClick={() => setNavOpen(true)} title="Menu" style={{ width: 40, height: 40, display: "grid", placeItems: "center", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, cursor: "pointer", color: C.text2, flexShrink: 0 }}><Icon name="menu" size={20} color={C.text2} /></button>}
           <div style={{ minWidth: 0 }}>
             <h1 style={{ fontSize: 19, fontWeight: 800, color: C.text }}>{title}</h1>
             {subtitle && <div style={{ fontSize: 12.5, color: C.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{subtitle}</div>}
@@ -1991,16 +2064,23 @@ export default function App() {
         </header>
 
         {page === "board" && (
-          <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 26px 0" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", padding: isMobile ? "12px 14px 0" : "12px 26px 0" }}>
             <button onClick={() => setWeekOnly((w) => !w)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: weekOnly ? C.accent + "1c" : C.surface, border: `1px solid ${weekOnly ? C.accent + "55" : C.border2}`, borderRadius: 9, color: weekOnly ? C.accent : C.text2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
               <Icon name="calendar" size={15} color={weekOnly ? C.accent : C.text3} /> This week only
             </button>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} title="Filter by status" style={{ padding: "8px 12px", background: statusFilter ? C.accent + "1c" : C.surface, border: `1px solid ${statusFilter ? C.accent + "55" : C.border2}`, borderRadius: 9, color: statusFilter ? C.accent : C.text2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+              <option value="" style={{ background: C.bg2, color: C.text }}>All statuses</option>
+              <option value="urgent" style={{ background: C.bg2, color: C.text }}>Urgent only</option>
+              <option value="late" style={{ background: C.bg2, color: C.text }}>Late only</option>
+              <option value="on_hold" style={{ background: C.bg2, color: C.text }}>On hold</option>
+              <option value="waiting_stock" style={{ background: C.bg2, color: C.text }}>Waiting stock</option>
+            </select>
           </div>
         )}
 
-        <main style={{ flex: 1, padding: "20px 26px 40px", overflowX: "auto" }}>
-          {page === "board" && <OrderBoard user={user} search={search} weekOnly={weekOnly} refreshKey={boardKey} onOpenOrder={(o) => setSelectedOrder(o.id)} onCount={setBoardCount} />}
-          {page === "dashboard" && <Dashboard />}
+        <main style={{ flex: 1, padding: isMobile ? "16px 14px 32px" : "20px 26px 40px", overflowX: "auto" }}>
+          {page === "board" && <OrderBoard user={user} search={search} weekOnly={weekOnly} statusFilter={statusFilter} refreshKey={boardKey} onOpenOrder={(o) => setSelectedOrder(o.id)} onCount={setBoardCount} />}
+          {page === "dashboard" && <Dashboard onOpenOrder={(id) => setSelectedOrder(id)} />}
           {page === "delivery" && <Delivery user={user} />}
           {page === "reports" && <Reports user={user} />}
           {page === "remarks" && <Remarks user={user} />}
