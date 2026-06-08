@@ -859,6 +859,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
     catch (e) { alert(e.message); }
   }
 
+  const narrow = useViewport() < 640;
   if (!order) return <Loading />;
   if (order._error) return <div style={{ color: "#fca5a5" }}>⚠ {order._error}</div>;
   const cfg = STAGE_LABELS[order.stage] || { label: order.stage, color: C.text3 };
@@ -890,7 +891,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
 
       {tab === "details" && (
         <div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: 14 }}>
             {order.customer_name != null && <LV label="Customer" v={order.customer_name} />}
             {order.customer_name != null && <LV label="Contact" v={order.customer_contact || "—"} />}
             <LV label="Priority" v={
@@ -906,7 +907,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
             <LV label="Order date" v={order.order_date ? fmtDay(order.order_date) : "—"} />
             <LV label="Delivery" v={<span style={{ color: countdown(order.required_delivery_date).tone }}>{fmtDay(order.required_delivery_date)} · {countdown(order.required_delivery_date).text}</span>} />
             <LV label="Expiry" v={order.expiry_date ? fmtDay(order.expiry_date) : "—"} />
-            <LV label="PIC" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />
+            <LV label="Person in charge" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />
             <LV label="Source" v={order.source === "sql_account" ? "Auto-imported" : "Manual entry"} />
             {order.customer_name != null && delivery && delivery.address && <LV label="Delivery address" v={delivery.address} />}
           </div>
@@ -1086,7 +1087,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
         <div style={{ marginTop: 22, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, marginBottom: 8 }}>Stage actions</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12.5, color: C.text2, minWidth: 28 }}>PIC</span>
+            <span style={{ fontSize: 12.5, color: C.text2, minWidth: 28 }}>In charge</span>
             <select value={order.pic_id || ""} onChange={(e) => assignPic(e.target.value)} style={{ flex: 1, minWidth: 180, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }}>
               <option value="" style={{ background: C.bg2 }}>Unassigned</option>
               {order.pic_id && !picUsers.some((u) => u.id === order.pic_id) && <option value={order.pic_id} style={{ background: C.bg2 }}>{order.pic_name || "Current PIC"}</option>}
@@ -1123,6 +1124,7 @@ function CreateOrderForm({ onCreated, onClose }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const narrow = useViewport() < 640;
 
   async function submit() {
     if (!f.invoice_number || !f.customer_name || !f.required_delivery_date) { setErr("Invoice, customer and delivery date are required."); return; }
@@ -1134,7 +1136,7 @@ function CreateOrderForm({ onCreated, onClose }) {
 
   return (
     <div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: 10 }}>
         <Field label="Invoice Number" value={f.invoice_number} onChange={(v) => set("invoice_number", v)} required placeholder="INV-26-0001" />
         <Field label="Priority" value={f.priority} onChange={(v) => set("priority", v)} options={[{ value: "normal", label: "Normal" }, { value: "urgent", label: "Urgent" }]} />
         <Field label="Importance" value={f.importance} onChange={(v) => set("importance", v)} options={IMPORTANCE_OPTS} />
@@ -1149,7 +1151,7 @@ function CreateOrderForm({ onCreated, onClose }) {
       <Field label="Notes" value={f.notes} onChange={(v) => set("notes", v)} placeholder="Optional…" />
       <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, margin: "6px 0 8px" }}>Order Items</div>
       {items.map((it, i) => (
-        <div key={i} style={{ display: "grid", gridTemplateColumns: "110px 1fr 70px 64px 32px", gap: 6, marginBottom: 6 }}>
+        <div key={i} style={{ display: "grid", gridTemplateColumns: narrow ? "1fr 1fr" : "110px 1fr 70px 64px 32px", gap: 6, marginBottom: 6 }}>
           <input placeholder="SKU" value={it.sku} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, sku: e.target.value } : x))} style={inp} />
           <input placeholder="Product" value={it.name} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} style={inp} />
           <input type="number" min="1" value={it.quantity} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, quantity: +e.target.value } : x))} style={inp} />
@@ -1171,6 +1173,7 @@ function CreateOrderForm({ onCreated, onClose }) {
 function Dashboard({ onOpenOrder }) {
   const [d, setD] = useState(null);
   useEffect(() => { api("GET", "/reports/dashboard").then(setD).catch(() => setD({ _error: true })); }, []);
+  const narrow = useViewport() < 640;
   if (!d) return <Loading />;
   if (d._error) return <Empty label="Could not load dashboard." />;
   const counts = Object.fromEntries((d.stage_counts || []).map((s) => [s.stage, s.count]));
@@ -1186,7 +1189,7 @@ function Dashboard({ onOpenOrder }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px,1fr))", gap: 14 }}>
         {metrics.map((m) => <Card key={m.label}><div style={{ fontSize: 30, fontWeight: 800, color: m.color }}>{m.value ?? 0}</div><div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{m.label}</div></Card>)}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: 18 }}>
         <Card>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 14 }}>Orders by stage</h3>
           {BOARD_STAGES.map((s) => {
@@ -1896,7 +1899,7 @@ function NotificationsPanel({ onClose, onChanged }) {
   useEffect(() => { api("GET", "/notifications").then((d) => setItems(d.notifications || [])).catch(() => setItems([])); }, []);
   async function markAll() { await api("PATCH", "/notifications/read-all").catch(() => {}); setItems((a) => a.map((i) => ({ ...i, is_read: true }))); onChanged && onChanged(); }
   return (
-    <div style={{ position: "fixed", top: 64, right: 20, width: 360, background: C.bg2, border: `1px solid ${C.border2}`, borderRadius: 13, boxShadow: "0 18px 50px rgba(0,0,0,.5)", zIndex: 600, overflow: "hidden" }}>
+    <div style={{ position: "fixed", top: 64, right: 20, width: "min(360px, 92vw)", background: C.bg2, border: `1px solid ${C.border2}`, borderRadius: 13, boxShadow: "0 18px 50px rgba(0,0,0,.5)", zIndex: 600, overflow: "hidden" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 16px", borderBottom: `1px solid ${C.border}` }}>
         <span style={{ fontWeight: 700, fontSize: 14, color: C.text }}>Notifications</span>
         <div style={{ display: "flex", gap: 12 }}>
@@ -1943,6 +1946,7 @@ function LoginPage({ onLogin }) {
         </div>
         <Field label="Email" type="email" name="email" autoComplete="username" value={email} onChange={setEmail} required placeholder="you@wawasancandle.com" />
         <Field label="Password" type="password" name="current-password" autoComplete="current-password" value={password} onChange={setPassword} required />
+        <p style={{ fontSize: 12, color: C.text3, margin: "-2px 0 14px" }}>Forgot your password? Ask your manager (Boss or Ops) to reset it for you.</p>
         {err && <p style={{ color: "#fca5a5", fontSize: 13, margin: "-4px 0 12px" }}>{err}</p>}
         <Btn type="submit" onClick={() => {}} disabled={busy} style={{ width: "100%", justifyContent: "center" }}>{busy ? "Signing in…" : "Sign in"}</Btn>
       </form>
