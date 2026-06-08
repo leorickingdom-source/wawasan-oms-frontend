@@ -1292,7 +1292,7 @@ function Reports({ user }) {
     const rows = [["Wawasan Candle — Reports"], ["Period", period], []];
     for (const [key, dd] of fetched) {
       rows.push([meta[key]], ["Metric", "Value"], ...metricDefs[key](dd).map(([k, v]) => [k, v == null ? "" : v]));
-      if ((dd.by_delivery_man || []).length) rows.push([], ["Deliverer", "Deliveries", "On time"], ...dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
+      if ((dd.by_delivery_man || []).length) rows.push([], ["Courier", "Deliveries", "On time"], ...dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
       if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
       rows.push([]);
     }
@@ -1335,9 +1335,9 @@ function Reports({ user }) {
       )}
       {tab === "delivery" && (d.by_delivery_man || []).length > 0 && (
         <Card style={{ marginTop: 18 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>By delivery person</h3>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>By courier</h3>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead><tr>{["Deliverer", "Deliveries", "On-time"].map((h) => <th key={h} style={{ textAlign: "left", padding: "7px 8px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
+            <thead><tr>{["Courier", "Deliveries", "On-time"].map((h) => <th key={h} style={{ textAlign: "left", padding: "7px 8px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
             <tbody>
               {d.by_delivery_man.map((x) => (
                 <tr key={x.id} style={{ borderBottom: `1px solid ${C.border}` }}>
@@ -1363,7 +1363,7 @@ function Delivery({ user }) {
   const [show, setShow] = useState(false);
   const [allCompleted, setAllCompleted] = useState(false);
   const [confirmDeliver, setConfirmDeliver] = useState(null);
-  const [form, setForm] = useState({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "" });
+  const [form, setForm] = useState({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "", tracking_no: "" });
   const [newDeliverer, setNewDeliverer] = useState({ name: "", phone: "" });
   const canAssign = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
   const canDeliver = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
@@ -1386,7 +1386,7 @@ function Delivery({ user }) {
     if (!form.order_id) { alert("Pick an order to schedule."); return; }
     try {
       await api("POST", "/delivery", form);
-      setShow(false); setForm({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "" });
+      setShow(false); setForm({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "", tracking_no: "" });
       load();
     } catch (e) { alert(e.message); }
   }
@@ -1437,15 +1437,16 @@ function Delivery({ user }) {
         <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Pending · {active.length}</h3>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Address", "Deliverer", "Scheduled", "Due", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Address", "Courier", "Tracking", "Scheduled", "Due", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
-              {active.length === 0 && <tr><td colSpan={8}><Empty label="Nothing pending. Schedule a Ready-for-Delivery order above." /></td></tr>}
+              {active.length === 0 && <tr><td colSpan={9}><Empty label="Nothing pending. Schedule a Ready-for-Delivery order above." /></td></tr>}
               {active.map((dv) => (
                 <tr key={dv.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                   <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{dv.invoice_number}</td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.customer_name}</td>
                   <td style={{ padding: "11px 16px", color: dv.address ? C.text2 : C.text3 }}>{dv.address || "—"}</td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.delivery_man_name || "—"}</td>
+                  <td style={{ padding: "11px 16px", fontFamily: MONO, color: dv.tracking_no ? C.text2 : C.text3 }}>{dv.tracking_no || "—"}</td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"}</td>
                   <td style={{ padding: "11px 16px", color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</td>
                   <td style={{ padding: "11px 16px" }}><Pill color={tone[dv.status] || C.text3}>{statusLabel[dv.status] || dv.status}</Pill></td>
@@ -1461,7 +1462,7 @@ function Delivery({ user }) {
         <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Completed orders · {completed.length}</h3>
         <Card style={{ padding: 0, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Deliverer", "Delivered", "Due"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Courier", "Delivered", "Due"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
               {completed.length === 0 && <tr><td colSpan={5}><Empty label="No completed orders yet." /></td></tr>}
               {shownCompleted.map((o) => {
@@ -1484,12 +1485,12 @@ function Delivery({ user }) {
 
       {canAssign && (
         <div>
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Deliverers · {deliverers.length}</h3>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Couriers · {deliverers.length}</h3>
           <Card style={{ padding: 0, overflow: "hidden" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
               <thead><tr style={{ background: C.bg2 }}>{["Name", "Phone", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
               <tbody>
-                {deliverers.length === 0 && <tr><td colSpan={4}><Empty label="No deliverers yet. Add your drivers below." /></td></tr>}
+                {deliverers.length === 0 && <tr><td colSpan={4}><Empty label="No couriers yet. Add couriers below." /></td></tr>}
                 {deliverers.map((dl) => (
                   <tr key={dl.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                     <td style={{ padding: "11px 16px", color: C.text }}>{dl.name}</td>
@@ -1502,9 +1503,9 @@ function Delivery({ user }) {
             </table>
           </Card>
           <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <input placeholder="Deliverer name" value={newDeliverer.name} onChange={(e) => setNewDeliverer((p) => ({ ...p, name: e.target.value }))} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5 }} />
+            <input placeholder="Courier name (e.g. J&T, SPX)" value={newDeliverer.name} onChange={(e) => setNewDeliverer((p) => ({ ...p, name: e.target.value }))} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5 }} />
             <input placeholder="Phone (optional)" value={newDeliverer.phone} onChange={(e) => setNewDeliverer((p) => ({ ...p, phone: e.target.value }))} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5 }} />
-            <Btn size="sm" onClick={addDeliverer} disabled={!newDeliverer.name.trim()}><Icon name="plus" size={14} /> Add deliverer</Btn>
+            <Btn size="sm" onClick={addDeliverer} disabled={!newDeliverer.name.trim()}><Icon name="plus" size={14} /> Add courier</Btn>
           </div>
         </div>
       )}
@@ -1512,8 +1513,9 @@ function Delivery({ user }) {
       <Modal open={show} onClose={() => setShow(false)} title="Schedule delivery">
         <Field label="Order (ready for delivery)" value={form.order_id} onChange={(v) => setForm((f) => ({ ...f, order_id: v }))}
           options={[{ value: "", label: "Select order…" }, ...ready.map((o) => ({ value: o.id, label: `${o.invoice_number} — ${o.customer_name}` }))]} />
-        <Field label="Deliverer" value={form.deliverer_id} onChange={(v) => setForm((f) => ({ ...f, deliverer_id: v }))}
-          options={[{ value: "", label: deliverers.filter((d) => d.is_active).length ? "Unassigned" : "No deliverers yet — add one below" }, ...deliverers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name }))]} />
+        <Field label="Courier" value={form.deliverer_id} onChange={(v) => setForm((f) => ({ ...f, deliverer_id: v }))}
+          options={[{ value: "", label: deliverers.filter((d) => d.is_active).length ? "Unassigned" : "No couriers yet — add one below" }, ...deliverers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name }))]} />
+        <Field label="Tracking number" value={form.tracking_no} onChange={(v) => setForm((f) => ({ ...f, tracking_no: v }))} placeholder="Courier tracking no (optional)" />
         <Field label="Scheduled date" type="date" value={form.scheduled_date} onChange={(v) => setForm((f) => ({ ...f, scheduled_date: v }))} />
         <Field label="Delivery address" value={form.address} onChange={(v) => setForm((f) => ({ ...f, address: v }))} placeholder="Street, city, postcode…" />
         <Field label="Notes" value={form.notes} onChange={(v) => setForm((f) => ({ ...f, notes: v }))} placeholder="Optional…" />
@@ -1529,7 +1531,8 @@ function Delivery({ user }) {
             <div style={{ fontSize: 14, marginBottom: 8 }}><span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{confirmDeliver.invoice_number}</span> <span style={{ color: C.text2 }}>· {confirmDeliver.customer_name}</span></div>
             <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.8, marginBottom: 12 }}>
               {confirmDeliver.address && <div><span style={{ color: C.text3 }}>Address: </span>{confirmDeliver.address}</div>}
-              <div><span style={{ color: C.text3 }}>Deliverer: </span>{confirmDeliver.delivery_man_name || "Unassigned"}</div>
+              <div><span style={{ color: C.text3 }}>Courier: </span>{confirmDeliver.delivery_man_name || "Unassigned"}</div>
+              {confirmDeliver.tracking_no && <div><span style={{ color: C.text3 }}>Tracking: </span>{confirmDeliver.tracking_no}</div>}
               <div><span style={{ color: C.text3 }}>Scheduled: </span>{confirmDeliver.scheduled_date ? fmtDay(confirmDeliver.scheduled_date) : "—"}</div>
             </div>
             <div style={{ fontSize: 12.5, color: C.text3, marginBottom: 16 }}>This marks the order delivered and moves it out of Pending. This can't be undone.</div>
