@@ -1625,27 +1625,105 @@ function Reports({ user }) {
       const data = await fetchReportData();
       // jspdf-autotable's default export can arrive as the fn or as { default: fn } depending on the bundler.
       const autoTable = typeof autoTableImport === "function" ? autoTableImport : (autoTableImport && autoTableImport.default);
-      if (typeof autoTable !== "function") throw new Error("table plugin did not load");
       // jsPDF's built-in fonts are WinAnsi — swap dashes/arrows so they don't render as boxes.
       const ascii = (v) => String(v == null ? "" : v).replace(/[—–−]/g, "-").replace(/→/g, "->");
-      const doc = new jsPDF();
-      let y = 18;
-      doc.setFontSize(16); doc.setTextColor(20); doc.text("Wawasan Candle - Reports", 14, y); y += 7;
-      doc.setFontSize(10); doc.setTextColor(120); doc.text(`Range: ${ascii(rangeLabel)}`, 14, y); y += 8;
-      const section = (title, head, body, fill) => {
-        if (!body.length) return;
-        if (y > 250) { doc.addPage(); y = 18; }
-        doc.setFontSize(12); doc.setTextColor(20); doc.text(ascii(title), 14, y);
-        autoTable(doc, { startY: y + 3, head: [head], body: body.map((r) => r.map(ascii)), theme: "striped", headStyles: { fillColor: fill || [249, 115, 22] }, margin: { left: 14, right: 14 } });
-        y = (doc.lastAutoTable && doc.lastAutoTable.finalY != null ? doc.lastAutoTable.finalY : y + 8 + body.length * 8) + 7;
+      // Mirror the web theme (C tokens) as RGB so the PDF looks like the Reports page.
+      const G = {
+        accent: [249, 115, 22], green: [52, 211, 153], red: [239, 68, 68], amber: [234, 179, 8],
+        bg: [22, 19, 15], surface: [28, 24, 19], surface2: [36, 31, 24], border: [44, 38, 32],
+        text: [237, 231, 223], text2: [176, 167, 156], text3: [130, 122, 112],
       };
+      const tone = (label) => { const l = String(label).toLowerCase(); return l.includes("on-time") ? G.green : (l.includes("rework") || l.includes("failed")) ? G.red : l.includes("pending") ? G.amber : G.accent; };
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      const PW = 210, PH = 297, M = 14, CW = PW - M * 2;
+      let y = M;
+      const paintBg = () => { doc.setFillColor(...G.bg); doc.rect(0, 0, PW, PH, "F"); };
+      const newPage = () => { doc.addPage(); paintBg(); y = M; };
+      const need = (h) => { if (y + h > PH - M) newPage(); };
+      paintBg();
+      doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(...G.text);
+      doc.text("Wawasan Candle - Reports", M, y + 5);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(...G.text3);
+      doc.text(`Department performance  -  ${ascii(rangeLabel)}`, M, y + 11);
+      y += 20;
+
+      const heading = (t) => {
+        need(12);
+        doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.setTextColor(...G.text);
+        doc.text(ascii(t), M, y + 3);
+        doc.setDrawColor(...G.border); doc.setLineWidth(0.3); doc.line(M, y + 5.5, M + CW, y + 5.5);
+        y += 11;
+      };
+      const kpiCards = (pairs) => {
+        const per = 4, gap = 4, cw = (CW - gap * (per - 1)) / per, ch = 22;
+        for (let i = 0; i < pairs.length; i++) {
+          const col = i % per;
+          if (col === 0) need(ch + 4);
+          const x = M + col * (cw + gap);
+          const [label, value] = pairs[i]; const tc = tone(label);
+          doc.setFillColor(...G.surface); doc.roundedRect(x, y, cw, ch, 1.5, 1.5, "F");
+          doc.setFillColor(...tc); doc.rect(x, y, cw, 1.6, "F");
+          doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(...tc);
+          doc.text(ascii(value == null || value === "" ? "-" : value), x + 4, y + 12);
+          doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...G.text3);
+          doc.text(ascii(label), x + 4, y + 18, { maxWidth: cw - 8 });
+          if (col === per - 1 || i === pairs.length - 1) y += ch + 5;
+        }
+      };
+      const trendChart = (trend, kind, col) => {
+        if (!trend || !trend.length) return;
+        const h = 50; need(h + 6);
+        doc.setFillColor(...G.surface); doc.roundedRect(M, y, CW, h, 1.5, 1.5, "F");
+        doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...G.text2);
+        doc.text("Daily trend", M + 4, y + 6);
+        const plotX = M + 6, plotW = CW - 12, plotTop = y + 10, plotH = h - 20, baseY = plotTop + plotH;
+        const maxV = Math.max(...trend.map((t) => t.count), 1), n = trend.length;
+        doc.setDrawColor(...G.border); doc.setLineWidth(0.2); doc.line(plotX, baseY, plotX + plotW, baseY);
+        doc.setFontSize(6); doc.setTextColor(...G.text3);
+        const step = Math.max(1, Math.ceil(n / 8));
+        if (kind === "line") {
+          doc.setDrawColor(...col); doc.setLineWidth(0.7); let prev = null;
+          for (let i = 0; i < n; i++) {
+            const cx = plotX + (n === 1 ? plotW / 2 : (plotW * i) / (n - 1)), cy = baseY - (trend[i].count / maxV) * plotH;
+            if (prev) doc.line(prev.x, prev.y, cx, cy); prev = { x: cx, y: cy };
+          }
+          doc.setFillColor(...col);
+          for (let i = 0; i < n; i++) {
+            const cx = plotX + (n === 1 ? plotW / 2 : (plotW * i) / (n - 1)), cy = baseY - (trend[i].count / maxV) * plotH;
+            doc.circle(cx, cy, 0.8, "F");
+            if (i % step === 0) doc.text(ascii(String(trend[i].date).slice(5)), cx, baseY + 4, { align: "center" });
+          }
+        } else {
+          const slot = plotW / n, bw = Math.min(slot * 0.62, 9); doc.setFillColor(...col);
+          for (let i = 0; i < n; i++) {
+            const bh = (trend[i].count / maxV) * plotH, bx = plotX + slot * i + (slot - bw) / 2;
+            doc.rect(bx, baseY - bh, bw, Math.max(bh, 0.4), "F");
+            if (i % step === 0) doc.text(ascii(String(trend[i].date).slice(5)), bx + bw / 2, baseY + 4, { align: "center" });
+          }
+        }
+        y += h + 6;
+      };
+      const darkTable = (head, body) => {
+        if (!body.length || typeof autoTable !== "function") return;
+        need(16);
+        autoTable(doc, {
+          startY: y, head: [head], body: body.map((r) => r.map(ascii)), theme: "grid", margin: { left: M, right: M },
+          styles: { fillColor: G.surface, textColor: G.text2, lineColor: G.border, lineWidth: 0.1, fontSize: 8 },
+          headStyles: { fillColor: G.surface2, textColor: G.text, fontStyle: "bold" },
+          alternateRowStyles: { fillColor: G.bg },
+        });
+        y = (doc.lastAutoTable && doc.lastAutoTable.finalY != null ? doc.lastAutoTable.finalY : y + 8 + body.length * 7) + 6;
+      };
+
       for (const key of tabsForRole.filter((k) => metricDefs[k])) {
         const dd = data[key] || {};
-        section(META[key], ["Metric", "Value"], kpiRows(key, dd));
-        if ((dd.by_delivery_man || []).length) section(`${META[key]} - couriers`, ["Courier", "Deliveries", "On time"], dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]), [120, 120, 120]);
+        heading(META[key]);
+        kpiCards(metricDefs[key](dd));
+        trendChart(dd.daily_trend, key === "delivery" ? "line" : "bar", key === "delivery" ? G.green : G.accent);
+        if ((dd.by_delivery_man || []).length) darkTable(["Courier", "Deliveries", "On time"], dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
       }
-      if (data._staff && data._staff.length) section("Staff productivity", ["Name", "Role", "Done", "Items", "Reworks"], data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks]));
-      if (data._pics && data._pics.length) section("Person in charge", ["Name", "Role", "Open", "Overdue", "On hold", "Completed"], data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed]));
+      if (data._staff && data._staff.length) { heading("Staff productivity"); darkTable(["Name", "Role", "Done", "Items", "Reworks"], data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks])); }
+      if (data._pics && data._pics.length) { heading("Person in charge"); darkTable(["Name", "Role", "Open", "Overdue", "On hold", "Completed"], data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed])); }
       doc.save(`reports-${fileTag}.pdf`);
     } catch (e) {
       alert(`PDF export failed: ${e && e.message ? e.message : e}`);
