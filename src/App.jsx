@@ -119,7 +119,7 @@ function deliveryTag(o) {
 const NAV = [
   { id: "board", label: "Order Board", icon: "board", roles: BOARD_ROLES },
   { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "operations_controller"] },
-  { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "operations_controller", "delivery_team"] },
+  { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "operations_controller", "delivery_team", "admin"] },
   { id: "floor", label: "Floor Display", icon: "display" }, // every role; rendered as a distinct launch button, not a workspace tab
   { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "operations_controller", "production_lead"] },
   { id: "messages", label: "Messages", icon: "message", roles: ["super_admin", "operations_controller"] },
@@ -2013,8 +2013,8 @@ function Delivery({ user, onOpenOrder }) {
   const [editOther, setEditOther] = useState("");
   const [showCouriers, setShowCouriers] = useState(false);
   const [q, setQ] = useState("");
-  const canAssign = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
-  const canDeliver = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
+  const canAssign = ["super_admin", "operations_controller", "delivery_team", "admin"].includes(user.role);
+  const canDeliver = ["super_admin", "operations_controller", "delivery_team", "admin"].includes(user.role);
   const stacked = useViewport() < 1100; // phones + tablets (incl. iPad portrait) → cards, not a wide table
 
   async function load() {
