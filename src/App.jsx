@@ -56,7 +56,7 @@ function canAdvanceStage(role, stage) {
   if (stage === "packing" && role === "packing_staff") return true;
   return false;
 }
-// Whether a role may record SKU progress on an order sitting in a given stage —
+// Whether a role may record STK progress on an order sitting in a given stage —
 // mirrors the backend gate so staff don't see buttons that would only error.
 // Managers anytime; staff only on the stage they own.
 function canMarkStage(role, stage) {
@@ -244,7 +244,7 @@ function printPickingSlip(order) {
     <div><b>Priority</b>${order.priority === "urgent" ? "URGENT" : "Normal"}</div>
   </div>
   ${order.notes ? `<div class="notes"><b>Notes / PO</b>${escHtml(order.notes)}</div>` : ""}
-  <table><thead><tr><th>SKU</th><th>Product</th><th style="text-align:right">Qty</th><th>Unit</th><th>Picked</th></tr></thead>
+  <table><thead><tr><th>STK</th><th>Product</th><th style="text-align:right">Qty</th><th>Unit</th><th>Picked</th></tr></thead>
   <tbody>${rows || '<tr><td colspan="5">No items.</td></tr>'}</tbody></table>
   <div class="sign"><div><div class="sl"></div><div class="lbl">Picked by</div></div><div><div class="sl"></div><div class="lbl">Checked by</div></div><div><div class="sl"></div><div class="lbl">Date</div></div></div>
   <p style="margin-top:22px;color:#888;font-size:12px">Printed ${escHtml(new Date().toLocaleString())}</p>
@@ -486,7 +486,7 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
         return (
           <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: full ? C.ready : C.accent, marginBottom: 4 }}>
-              {full ? "All SKUs done ✓" : `${done}/${total} SKUs done`}
+              {full ? "All STKs done ✓" : `${done}/${total} STKs done`}
             </div>
             <div style={{ height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}>
               <div style={{ height: "100%", width: `${p}%`, background: full ? C.ready : C.accent }} />
@@ -552,7 +552,7 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
         </div>
       )}
       {order.stage === "production" && items.length > 0 && !allMade && (
-        <div style={{ fontSize: 12.5, color: C.packing, marginBottom: 12 }}>⚠ Not all SKUs are marked made yet — confirm only if production is actually complete.</div>
+        <div style={{ fontSize: 12.5, color: C.packing, marginBottom: 12 }}>⚠ Not all STKs are marked made yet — confirm only if production is actually complete.</div>
       )}
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
@@ -750,7 +750,7 @@ function FloorDisplay({ onExit }) {
           <Icon name="calendar" size={15} color={weekOnly ? C.accent : C.text3} /> This week
         </button>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
-          <span style={{ fontFamily: MONO, fontSize: 38, fontWeight: 700, color: C.text, letterSpacing: 2 }}>{clock}</span>
+          <span style={{ fontFamily: MONO, fontSize: 64, fontWeight: 700, color: C.text, letterSpacing: 2 }}>{clock}</span>
         </div>
       </div>
 
@@ -782,13 +782,13 @@ function FloorDisplay({ onExit }) {
                         <div style={{ fontSize: 12.5, color: cd.tone, marginTop: 3 }}>
                           <span style={{ color: C.text2 }}>{fmtDay(o.required_delivery_date)}</span> · {cd.text}
                         </div>
-                        <div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{o.item_count} {o.item_count === 1 ? "line" : "lines"}</div>
+                        <div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{o.item_count} {o.item_count === 1 ? "product" : "products"}</div>
                         {(o.stage === "production" || o.stage === "packing") && o.item_count > 0 && (() => {
                           const done = o.made_count || 0, total = o.item_count || 0, full = total > 0 && done >= total;
                           const p = total > 0 ? Math.round((done / total) * 100) : 0;
                           return (
                             <div style={{ marginTop: 5 }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: full ? C.green : C.accent2, marginBottom: 3 }}>{full ? "All done ✓" : `${done}/${total} SKUs · ${p}%`}</div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: full ? C.green : C.accent2, marginBottom: 3 }}>{full ? "All done ✓" : `${done}/${total} STKs · ${p}%`}</div>
                               <div style={{ height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: full ? C.green : C.accent }} /></div>
                             </div>
                           );
@@ -823,12 +823,23 @@ function FloorDisplay({ onExit }) {
                 const its = detail.items || [];
                 const total = its.length;
                 const done = its.filter((it) => itemStatusKey(it) === "done").length;
+                const making = its.filter((it) => itemStatusKey(it) === "in_progress").length;
+                const todo = total - done - making;
+                const units = its.reduce((s, it) => s + Math.round(Number(it.quantity) || 0), 0);
                 const p = total > 0 ? Math.round((done / total) * 100) : 0;
+                const chip = (label, n, color) => (
+                  <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, background: color + "1f", border: `1px solid ${color}55`, color, borderRadius: 9, padding: "6px 11px", fontSize: 20, fontWeight: 800 }}>{n}<span style={{ fontSize: 11, fontWeight: 700, opacity: 0.85, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span></span>
+                );
                 return (
                   <div style={{ marginBottom: 12 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 5 }}>
-                      <span style={{ color: C.text2 }}>{done}/{total} SKUs done</span>
-                      <span style={{ color: p >= 100 ? C.green : C.accent2, fontWeight: 800 }}>{p}%</span>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13.5, marginBottom: 8 }}>
+                      <span style={{ color: C.text2 }}>{total} products · {units} units</span>
+                      <span style={{ color: p >= 100 ? C.green : C.accent2, fontWeight: 800 }}>{p}% done</span>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                      {chip("To do", todo, C.accent)}
+                      {chip("Making", making, C.packing)}
+                      {chip("Done", done, C.green)}
                     </div>
                     <div style={{ height: 7, background: C.surface2, borderRadius: 5, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: p >= 100 ? C.green : C.accent, transition: "width .3s" }} /></div>
                   </div>
@@ -846,8 +857,12 @@ function FloorDisplay({ onExit }) {
                         <div style={{ fontFamily: MONO, fontSize: 12.5, color: C.text3, letterSpacing: 0.5 }}>{it.sku}</div>
                         <div style={{ fontSize: 19, fontWeight: 600, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
                       </div>
-                      <div style={{ textAlign: "right", flexShrink: 0 }}>
-                        <span style={{ fontSize: 20, fontWeight: 800, color: dot, lineHeight: 1, textTransform: "uppercase", letterSpacing: 0.5 }}>{st.label}</span>
+                      <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 18 }}>
+                        <div style={{ textAlign: "right", minWidth: 64 }}>
+                          <span style={{ fontSize: 24, fontWeight: 800, color: C.text, lineHeight: 1 }}>{Math.round(it.quantity)}</span>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: C.text3 }}> {it.unit || "pcs"}</span>
+                        </div>
+                        <span style={{ fontSize: 16, fontWeight: 800, color: dot, textTransform: "uppercase", letterSpacing: 0.5, minWidth: 84, textAlign: "right" }}>{st.label}</span>
                       </div>
                     </div>
                     );
@@ -1088,19 +1103,19 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
         const total = items.length;
         const doneLines = items.filter((it) => itemStatusKey(it) === "done").length;
         const pct = total > 0 ? Math.round((doneLines / total) * 100) : 0;
-        const head = ["SKU", "Product", "Qty", "Unit", "Status"];
+        const head = ["STK", "Product", "Qty", "Unit", "Status"];
         return (
         <div>
           {roleCanMark && !canMark && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 9, padding: "9px 12px", fontSize: 12.5, color: C.text2, marginBottom: 14 }}>
               <span aria-hidden>🔒</span>
-              <span>This order is in <b style={{ color: cfg.color }}>{cfg.label}</b> — SKU status is locked to that stage. Ops or the boss can change it here.</span>
+              <span>This order is in <b style={{ color: cfg.color }}>{cfg.label}</b> — STK status is locked to that stage. Ops or the boss can change it here.</span>
             </div>
           )}
           {items.length > 0 && (
             <div style={{ marginBottom: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: C.text2, marginBottom: 6 }}>
-                <span>{doneLines}/{total} SKUs done</span>
+                <span>{doneLines}/{total} STKs done</span>
                 <span style={{ color: pct >= 100 ? C.ready : C.accent, fontWeight: 700 }}>{pct}%</span>
               </div>
               <div style={{ height: 6, background: C.surface2, borderRadius: 4, overflow: "hidden" }}>
@@ -1149,7 +1164,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
           </table>
           )}
           {canMove && items.length > 0 && (
-            <div style={{ marginTop: 10, fontSize: 11.5, color: C.text3 }}>Line items are locked to match the invoice — only an item's status can change. To correct a SKU or quantity, fix it in SQL Account.</div>
+            <div style={{ marginTop: 10, fontSize: 11.5, color: C.text3 }}>Line items are locked to match the invoice — only an item's status can change. To correct a STK or quantity, fix it in SQL Account.</div>
           )}
         </div>
         );
@@ -1273,7 +1288,7 @@ function CreateOrderForm({ onCreated, onClose }) {
       <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, margin: "6px 0 8px" }}>Order Items</div>
       {items.map((it, i) => (
         <div key={i} style={{ display: "grid", gridTemplateColumns: narrow ? "1fr 1fr" : "110px 1fr 70px 64px 32px", gap: 6, marginBottom: 6 }}>
-          <input placeholder="SKU" value={it.sku} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, sku: e.target.value } : x))} style={inp} />
+          <input placeholder="STK" value={it.sku} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, sku: e.target.value } : x))} style={inp} />
           <input placeholder="Product" value={it.name} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} style={inp} />
           <input type="number" min="1" value={it.quantity} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, quantity: +e.target.value } : x))} style={inp} />
           <input placeholder="unit" value={it.unit} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, unit: e.target.value } : x))} style={inp} />
@@ -1357,7 +1372,7 @@ function OrdersReport({ period, from, to }) {
   useEffect(() => { setData(null); api("GET", `/reports/orders?${reportQuery(period, from, to)}`).then((d) => setData(d.orders || [])).catch(() => setData([])); }, [period, from, to]);
   const fmtDur = (h) => h == null ? "—" : h >= 48 ? `${Math.round(h / 24)}d` : `${h}h`;
   function exportCsv() {
-    const rows = [["Invoice", "Customer", "Stage", "SKUs done", "SKUs total", "% done", "Days in stage", "Cycle (h)", "Due", "Status", "PIC"]];
+    const rows = [["Invoice", "Customer", "Stage", "STKs done", "STKs total", "% done", "Days in stage", "Cycle (h)", "Due", "Status", "PIC"]];
     for (const o of data) rows.push([o.invoice_number, o.customer_name || "", (STAGE_LABELS[o.stage] || {}).label || o.stage, o.done_count, o.item_count, o.pct, o.days_in_stage, o.cycle_hours, o.required_delivery_date, o.delivered ? (o.on_time ? "Delivered on-time" : "Delivered late") : (o.late ? "Late" : "In progress"), o.pic_name || ""]);
     const cust = Object.values(data.reduce((m, o) => { const k = o.customer_name || "—"; const r = m[k] || (m[k] = { name: k, orders: 0, delivered: 0, on_time: 0, late: 0 }); r.orders++; if (o.delivered) { r.delivered++; if (o.on_time) r.on_time++; } if (o.late) r.late++; return m; }, {})).sort((a, b) => b.orders - a.orders);
     rows.push([], ["By customer", "Orders", "Delivered", "On-time", "Late"], ...cust.map((c) => [c.name, c.orders, c.delivered, c.on_time, c.late]));
@@ -1378,7 +1393,7 @@ function OrdersReport({ period, from, to }) {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-        <span style={{ fontSize: 13, color: C.text3 }}>{data.length} orders · click a row for stage timeline & SKU breakdown</span>
+        <span style={{ fontSize: 13, color: C.text3 }}>{data.length} orders · click a row for stage timeline & STK breakdown</span>
         <Btn variant="soft" size="sm" onClick={exportCsv}>Export orders CSV</Btn>
       </div>
       <Card style={{ padding: 0, overflowX: "auto" }}>
@@ -1397,7 +1412,7 @@ function OrdersReport({ period, from, to }) {
                   <td style={{ padding: "9px 14px", color: C.text2 }}>{o.customer_name || "—"}</td>
                   <td style={{ padding: "9px 14px" }}><Pill color={cfg.color}>{cfg.label}</Pill></td>
                   <td style={{ padding: "9px 14px", minWidth: 130 }}>
-                    <div style={{ fontSize: 12, color: C.text2, marginBottom: 3 }}>{o.done_count}/{o.item_count} SKUs · {o.pct}%</div>
+                    <div style={{ fontSize: 12, color: C.text2, marginBottom: 3 }}>{o.done_count}/{o.item_count} STKs · {o.pct}%</div>
                     <div style={{ height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}><div style={{ height: "100%", width: `${o.pct}%`, background: o.pct >= 100 ? C.ready : C.accent }} /></div>
                   </td>
                   <td style={{ padding: "9px 14px", color: C.text2 }}>{o.days_in_stage}d</td>
@@ -1418,7 +1433,7 @@ function OrdersReport({ period, from, to }) {
                         </div>
                       </div>
                       <div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: C.text3, marginBottom: 6, letterSpacing: 0.4 }}>SKU STATUS</div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: C.text3, marginBottom: 6, letterSpacing: 0.4 }}>STK STATUS</div>
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                           <Pill color={C.ready}>Done: {o.done_count}</Pill>
                           <Pill color={C.packing}>Making: {o.in_progress_count}</Pill>
@@ -1626,7 +1641,7 @@ function Reports({ user }) {
   }, [q]);
 
   const metricDefs = {
-    production: (d) => [["Orders Completed", d.completed], ["SKUs Made", d.units_made], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["Avg Production", d.avg_production_hours ? d.avg_production_hours + "h" : "—"], ["Reworks", d.rework_count], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"], ["In Production Now", d.in_stage]],
+    production: (d) => [["Orders Completed", d.completed], ["STKs Made", d.units_made], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["Avg Production", d.avg_production_hours ? d.avg_production_hours + "h" : "—"], ["Reworks", d.rework_count], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"], ["In Production Now", d.in_stage]],
     packing: (d) => [["Orders Packed", d.packed], ["Avg Pack Time", d.avg_pack_minutes ? d.avg_pack_minutes + "min" : "—"], ["Reworks", d.rework_count], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"], ["In Packing Now", d.in_stage]],
     delivery: (d) => [["Total Deliveries", d.total_deliveries], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["On-Time Count", d.on_time_count], ["Avg Turnaround", d.avg_turnaround_hours != null ? (Number(d.avg_turnaround_hours) >= 48 ? Math.round(Number(d.avg_turnaround_hours) / 24) + "d" : d.avg_turnaround_hours + "h") : "—"], ["Pending Now", d.pending_count], ["Failed", d.failed_count]],
   };
