@@ -56,6 +56,16 @@ function canAdvanceStage(role, stage) {
   if (stage === "packing" && role === "packing_staff") return true;
   return false;
 }
+// Whether a role may record SKU progress on an order sitting in a given stage —
+// mirrors the backend gate so staff don't see buttons that would only error.
+// Managers anytime; staff only on the stage they own.
+function canMarkStage(role, stage) {
+  if (role === "super_admin" || role === "operations_controller") return true;
+  if (role === "production_lead") return stage === "production" || stage === "packing";
+  if (role === "production_staff") return stage === "production";
+  if (role === "packing_staff") return stage === "packing";
+  return false;
+}
 // Which board columns a role may see. Roles below production lead see only their own.
 function visibleStages(role) {
   if (role === "production_staff") return ["production"];
@@ -171,7 +181,16 @@ function StatusPicker({ value, onChange, disabled, big }) {
         const cfg = ITEM_STATUS[s], active = value === s;
         return (
           <button key={s} type="button" disabled={disabled} onClick={() => !disabled && onChange(s)}
-            style={{ flex: big ? 1 : undefined, cursor: disabled ? "default" : "pointer", border: `1px solid ${active ? cfg.color + "88" : C.border2}`, background: active ? cfg.color + "22" : C.surface2, color: active ? cfg.color : C.text3, borderRadius: big ? 9 : 7, padding: big ? "13px 8px" : "7px 12px", fontSize: big ? 14.5 : 12.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+            title={active ? `Selected: ${cfg.label}` : `Set ${cfg.label}`}
+            style={{ flex: big ? 1 : undefined, cursor: disabled ? "default" : "pointer",
+              border: `1.5px solid ${active ? cfg.color : C.border2}`,
+              background: active ? cfg.color : C.surface2,
+              color: active ? C.bg : C.text3,
+              boxShadow: active ? `0 0 0 2px ${cfg.color}44` : "none",
+              borderRadius: big ? 9 : 7, padding: big ? "13px 8px" : "7px 12px",
+              fontSize: big ? 14.5 : 12.5, fontWeight: active ? 800 : 600, whiteSpace: "nowrap",
+              display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, transition: "all .12s" }}>
+            {active && <span aria-hidden style={{ fontWeight: 900 }}>✓</span>}
             {cfg.short}
           </button>
         );
@@ -485,7 +504,7 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
   const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { api("GET", `/orders/${order.id}`).then(setDetail).catch(() => setDetail({ items: [] })); }, [order.id]);
-  const canMark = user && ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff"].includes(user.role);
+  const canMark = user && canMarkStage(user.role, order.stage);
   async function setStatus(it, status) {
     if (status === itemStatusKey(it)) return;
     try { await api("PATCH", `/orders/${order.id}/items/${it.id}`, { status }); const d = await api("GET", `/orders/${order.id}`).catch(() => null); if (d) setDetail(d); }
@@ -671,6 +690,8 @@ function FloorDisplay({ onExit }) {
   }
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [weekOnly]);
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
+  // Press Esc to leave the full-screen floor view (the on-screen Exit is easy to miss on a wall TV).
+  useEffect(() => { const onKey = (e) => { if (e.key === "Escape") onExit(); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [onExit]);
 
   const pool = useMemo(() => {
     if (!board) return [];
@@ -729,7 +750,7 @@ function FloorDisplay({ onExit }) {
         </button>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
           <span style={{ fontFamily: MONO, fontSize: 38, fontWeight: 700, color: C.text, letterSpacing: 2 }}>{clock}</span>
-          <Btn variant="soft" onClick={onExit}><Icon name="x" size={15} /> Exit</Btn>
+          <Btn variant="primary" onClick={onExit} style={{ padding: "12px 22px", fontSize: 16, fontWeight: 800 }}><Icon name="x" size={18} /> Exit (Esc)</Btn>
         </div>
       </div>
 
@@ -865,7 +886,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
   const [uploading, setUploading] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const canMove = ["super_admin", "operations_controller"].includes(user.role);
-  const canMark = ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff"].includes(user.role);
+  const roleCanMark = ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff"].includes(user.role);
   const isLead = user.role === "production_lead";
   const isFloor = ["production_staff", "packing_staff"].includes(user.role); // pure floor worker — keep their view minimal
   const isDispatch = user.role === "delivery_team"; // delivery coordinator — keep their view delivery-focused
@@ -943,6 +964,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
   if (!order) return <Loading />;
   if (order._error) return <div style={{ color: "#fca5a5" }}>⚠ {order._error}</div>;
   const cfg = STAGE_LABELS[order.stage] || { label: order.stage, color: C.text3 };
+  const canMark = roleCanMark && canMarkStage(user.role, order.stage);
   const tabs = isFloor ? ["items", "details"] : isDispatch ? ["details", "items"] : ["details", "items", "timeline", "attachments"];
   const picRoles = STAGE_PIC_ROLES[order.stage];
   const picUsers = picRoles ? users.filter((u) => picRoles.includes(u.role)) : users;
@@ -1067,6 +1089,12 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
         const head = ["SKU", "Product", "Qty", "Unit", "Status"];
         return (
         <div>
+          {roleCanMark && !canMark && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 9, padding: "9px 12px", fontSize: 12.5, color: C.text2, marginBottom: 14 }}>
+              <span aria-hidden>🔒</span>
+              <span>This order is in <b style={{ color: cfg.color }}>{cfg.label}</b> — SKU status is locked to that stage. Ops or the boss can change it here.</span>
+            </div>
+          )}
           {items.length > 0 && (
             <div style={{ marginBottom: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: C.text2, marginBottom: 6 }}>
@@ -2407,9 +2435,20 @@ function Audit() {
   const logs = allLogsData.filter((l) => (!userF || l.user_name === userF) && (!actionF || l.action === actionF));
   const shownLogs = allLogs ? logs : logs.slice(0, 3);
   const total = (userF || actionF) ? logs.length : (d && d.total != null ? d.total : logs.length);
-  function exportCsv() {
+  async function exportCsv() {
+    // Pull the full matching range (not just the 200 shown) so the export is a complete record.
+    let f = "", t = "";
+    if (period === "weekly") { const x = new Date(); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); f = ymd(x); }
+    else if (period === "monthly") { const x = new Date(); f = ymd(new Date(x.getFullYear(), x.getMonth(), 1)); }
+    else if (period === "custom") { f = from; t = to; }
+    const p = new URLSearchParams({ limit: "100000" });
+    if (f) p.set("from", f);
+    if (t) p.set("to", `${t} 23:59:59`);
+    let full = logs;
+    try { const r = await api("GET", `/reports/audit?${p.toString()}`); if (r && r.logs) full = r.logs; } catch (e) { /* fall back to the loaded rows */ }
+    full = full.filter((l) => (!userF || l.user_name === userF) && (!actionF || l.action === actionF));
     const rows = [["When", "User", "Action", "Details", "Invoice"]];
-    for (const l of logs) rows.push([new Date(l.created_at).toLocaleString(), l.user_name, l.action, l.details, l.invoice_number || ""]);
+    for (const l of full) rows.push([new Date(l.created_at).toLocaleString(), l.user_name, l.action, l.details, l.invoice_number || ""]);
     downloadCsv(`audit-${period}.csv`, rows);
   }
   const tabBtn = (id, label) => (
