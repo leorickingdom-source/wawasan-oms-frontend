@@ -1432,6 +1432,10 @@ function Delivery({ user }) {
   const [form, setForm] = useState({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "", tracking_no: "" });
   const [newDeliverer, setNewDeliverer] = useState({ name: "", phone: "" });
   const [otherCourier, setOtherCourier] = useState("");
+  const [editDelivery, setEditDelivery] = useState(null);
+  const [editForm, setEditForm] = useState({ deliverer_id: "", scheduled_date: "", address: "", notes: "", tracking_no: "" });
+  const [editOther, setEditOther] = useState("");
+  const [showCouriers, setShowCouriers] = useState(false);
   const canAssign = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
   const canDeliver = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
 
@@ -1470,6 +1474,27 @@ function Delivery({ user }) {
     try { await api("POST", "/delivery/deliverers", newDeliverer); setNewDeliverer({ name: "", phone: "" }); load(); } catch (e) { alert(e.message); }
   }
   async function toggleDeliverer(dl) { try { await api("PATCH", `/delivery/deliverers/${dl.id}`, { is_active: !dl.is_active }); load(); } catch (e) { alert(e.message); } }
+  function openEdit(dv) {
+    setEditForm({ deliverer_id: dv.deliverer_id || "", scheduled_date: dv.scheduled_date || "", address: dv.address || "", notes: dv.notes || "", tracking_no: dv.tracking_no || "" });
+    setEditOther(""); setEditDelivery(dv);
+  }
+  async function saveEdit() {
+    try {
+      let payload = editForm;
+      if (editForm.deliverer_id === "__other__") {
+        if (!editOther.trim()) { alert("Type the other courier's name, or pick one from the list."); return; }
+        const dl = await api("POST", "/delivery/deliverers", { name: editOther.trim() });
+        payload = { ...editForm, deliverer_id: dl.id };
+      }
+      await api("PATCH", `/delivery/${editDelivery.id}`, payload);
+      setEditDelivery(null); setEditOther(""); load();
+    } catch (e) { alert(e.message); }
+  }
+  async function cancelDelivery() {
+    if (!confirm("Cancel this delivery? The order goes back to Ready for Delivery so it can be re-scheduled.")) return;
+    try { await api("PATCH", `/delivery/${editDelivery.id}`, { status: "failed" }); setEditDelivery(null); load(); }
+    catch (e) { alert(e.message); }
+  }
 
   if (!list) return <Loading />;
   // Ready-for-Delivery keeps the board's green; Pending is amber to stay visually
@@ -1526,7 +1551,12 @@ function Delivery({ user }) {
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"}</td>
                   <td style={{ padding: "11px 16px", color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</td>
                   <td style={{ padding: "11px 16px" }}><Pill color={tone[dv.status] || C.text3}>{statusLabel[dv.status] || dv.status}</Pill></td>
-                  <td style={{ padding: "11px 16px" }}>{canDeliver && <Btn size="sm" variant="success" onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}</td>
+                  <td style={{ padding: "11px 16px" }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {canAssign && <Btn size="sm" variant="soft" onClick={() => openEdit(dv)}>Edit</Btn>}
+                      {canDeliver && <Btn size="sm" variant="success" onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1561,28 +1591,36 @@ function Delivery({ user }) {
 
       {canAssign && (
         <div>
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Couriers · {deliverers.length}</h3>
-          <Card style={{ padding: 0, overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-              <thead><tr style={{ background: C.bg2 }}>{["Name", "Phone", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
-              <tbody>
-                {deliverers.length === 0 && <tr><td colSpan={4}><Empty label="No couriers yet. Add couriers below." /></td></tr>}
-                {deliverers.map((dl) => (
-                  <tr key={dl.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <td style={{ padding: "11px 16px", color: C.text }}>{dl.name}</td>
-                    <td style={{ padding: "11px 16px", color: C.text2 }}>{dl.phone || "—"}</td>
-                    <td style={{ padding: "11px 16px" }}><Pill color={dl.is_active ? C.ready : C.danger}>{dl.is_active ? "Active" : "Disabled"}</Pill></td>
-                    <td style={{ padding: "11px 16px" }}><Btn size="sm" variant="ghost" onClick={() => toggleDeliverer(dl)}>{dl.is_active ? "Disable" : "Enable"}</Btn></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-          <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <input placeholder="Courier name (e.g. J&T, SPX)" value={newDeliverer.name} onChange={(e) => setNewDeliverer((p) => ({ ...p, name: e.target.value }))} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5 }} />
-            <input placeholder="Phone (optional)" value={newDeliverer.phone} onChange={(e) => setNewDeliverer((p) => ({ ...p, phone: e.target.value }))} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5 }} />
-            <Btn size="sm" onClick={addDeliverer} disabled={!newDeliverer.name.trim()}><Icon name="plus" size={14} /> Add courier</Btn>
-          </div>
+          <button onClick={() => setShowCouriers((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Manage couriers · {deliverers.length}</h3>
+            <span style={{ color: C.text3, fontSize: 13 }}>{showCouriers ? "▲" : "▼"}</span>
+          </button>
+          {!showCouriers && <div style={{ fontSize: 12.5, color: C.text3, marginTop: 4 }}>Tip: you can just type a courier when scheduling — it's saved here automatically. Open this only to disable or rename one.</div>}
+          {showCouriers && (
+            <>
+              <Card style={{ padding: 0, overflowX: "auto", marginTop: 12 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+                  <thead><tr style={{ background: C.bg2 }}>{["Name", "Phone", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {deliverers.length === 0 && <tr><td colSpan={4}><Empty label="No couriers yet. Type one when scheduling, or add below." /></td></tr>}
+                    {deliverers.map((dl) => (
+                      <tr key={dl.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                        <td style={{ padding: "11px 16px", color: C.text }}>{dl.name}</td>
+                        <td style={{ padding: "11px 16px", color: C.text2 }}>{dl.phone || "—"}</td>
+                        <td style={{ padding: "11px 16px" }}><Pill color={dl.is_active ? C.ready : C.danger}>{dl.is_active ? "Active" : "Disabled"}</Pill></td>
+                        <td style={{ padding: "11px 16px" }}><Btn size="sm" variant="ghost" onClick={() => toggleDeliverer(dl)}>{dl.is_active ? "Disable" : "Enable"}</Btn></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <input placeholder="Courier name (e.g. J&T, SPX)" value={newDeliverer.name} onChange={(e) => setNewDeliverer((p) => ({ ...p, name: e.target.value }))} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5 }} />
+                <input placeholder="Phone (optional)" value={newDeliverer.phone} onChange={(e) => setNewDeliverer((p) => ({ ...p, phone: e.target.value }))} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5 }} />
+                <Btn size="sm" onClick={addDeliverer} disabled={!newDeliverer.name.trim()}><Icon name="plus" size={14} /> Add courier</Btn>
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -1618,6 +1656,30 @@ function Delivery({ user }) {
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <Btn variant="ghost" onClick={() => setConfirmDeliver(null)}>Cancel</Btn>
               <Btn variant="success" onClick={() => markDelivered(confirmDeliver.id)}><Icon name="check" size={15} /> Confirm delivered</Btn>
+            </div>
+          </>
+        )}
+      </Modal>
+
+      <Modal open={!!editDelivery} onClose={() => setEditDelivery(null)} title="Update delivery">
+        {editDelivery && (
+          <>
+            <div style={{ fontSize: 14, marginBottom: 12 }}><span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{editDelivery.invoice_number}</span> <span style={{ color: C.text2 }}>· {editDelivery.customer_name}</span></div>
+            <Field label="Courier" value={editForm.deliverer_id} onChange={(v) => setEditForm((f) => ({ ...f, deliverer_id: v }))}
+              options={[{ value: "", label: "Unassigned" }, ...deliverers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name })), { value: "__other__", label: "+ Other courier (not in the list)" }]} />
+            {editForm.deliverer_id === "__other__" && (
+              <Field label="Other courier name" value={editOther} onChange={setEditOther} placeholder="e.g. Lalamove, GDex, own driver…" required />
+            )}
+            <Field label="Tracking number" value={editForm.tracking_no} onChange={(v) => setEditForm((f) => ({ ...f, tracking_no: v }))} placeholder="Courier tracking no (optional)" />
+            <Field label="Scheduled date" type="date" value={editForm.scheduled_date} onChange={(v) => setEditForm((f) => ({ ...f, scheduled_date: v }))} />
+            <Field label="Delivery address" value={editForm.address} onChange={(v) => setEditForm((f) => ({ ...f, address: v }))} placeholder="Street, city, postcode…" />
+            <Field label="Notes" value={editForm.notes} onChange={(v) => setEditForm((f) => ({ ...f, notes: v }))} placeholder="Optional…" />
+            <div style={{ display: "flex", gap: 10, justifyContent: "space-between", marginTop: 8, flexWrap: "wrap" }}>
+              <Btn variant="danger" onClick={cancelDelivery}>Cancel this delivery</Btn>
+              <div style={{ display: "flex", gap: 10 }}>
+                <Btn variant="ghost" onClick={() => setEditDelivery(null)}>Close</Btn>
+                <Btn onClick={saveEdit}>Save changes</Btn>
+              </div>
             </div>
           </>
         )}
