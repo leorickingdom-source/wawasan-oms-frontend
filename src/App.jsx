@@ -1616,6 +1616,7 @@ const MSG_STATUS = {
 function Messages({ user }) {
   const [d, setD] = useState(null);
   const [busy, setBusy] = useState("");
+  const [confirmSend, setConfirmSend] = useState(false);
   const narrow = useViewport() < 760;
   async function load() { try { setD(await api("GET", "/whatsapp/queue")); } catch (e) { setD({ _error: e.message }); } }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
@@ -1626,6 +1627,7 @@ function Messages({ user }) {
   if (!d) return <Loading label="Loading messages…" />;
   if (d._error) return <div style={{ color: "#fca5a5" }}>⚠ {d._error}</div>;
   const counts = Object.fromEntries((d.counts || []).map((c) => [c.status, c.c]));
+  const queued = counts.queued || 0;
   const live = d.provider === "wwebjs";
   const fmtWhen = (s) => s ? new Date(s).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
   return (
@@ -1637,7 +1639,8 @@ function Messages({ user }) {
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Btn variant="soft" size="sm" disabled={!!busy} onClick={() => act("enqueue", "/whatsapp/enqueue")}>{busy === "enqueue" ? "Queuing…" : "Queue customer messages"}</Btn>
           <Btn variant="soft" size="sm" disabled={!!busy} onClick={() => act("brief", "/whatsapp/morning-brief")}>{busy === "brief" ? "…" : "Morning brief"}</Btn>
-          <Btn size="sm" disabled={!!busy} onClick={() => act("drip", "/whatsapp/drip?force=1&max=50")}>{busy === "drip" ? "Sending…" : "Send queued →"}</Btn>
+          {queued > 0 && <Btn variant="danger" size="sm" disabled={!!busy} onClick={async () => { if (window.confirm(`Cancel ${queued} queued message${queued === 1 ? "" : "s"}? They will NOT be sent.`)) await act("cancel", "/whatsapp/cancel"); }}>{busy === "cancel" ? "Cancelling…" : "Cancel queued"}</Btn>}
+          <Btn size="sm" disabled={!!busy || queued === 0} onClick={() => setConfirmSend(true)}>{busy === "drip" ? "Sending…" : `Send ${queued} queued →`}</Btn>
         </div>
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
@@ -1681,6 +1684,20 @@ function Messages({ user }) {
         </Card>
         )}
       <p style={{ fontSize: 12, color: C.text3, marginTop: 12 }}>Customer updates queue automatically as orders move. {live ? "Sending live via WhatsApp." : "Test mode: recorded here, not sent. Connect the WhatsApp worker to send for real."}</p>
+      <Modal open={confirmSend} onClose={() => setConfirmSend(false)} title="Send queued messages?" width={460}>
+        {live ? (
+          <div>
+            <p style={{ color: C.text, fontSize: 14, lineHeight: 1.6 }}>This sends <b>{Math.min(queued, 5)}</b> of {queued} real WhatsApp message{queued === 1 ? "" : "s"} to customers now (capped at 5 per click). <b style={{ color: C.danger }}>Sent messages cannot be recalled.</b></p>
+            <p style={{ color: C.text3, fontSize: 12.5 }}>Normally you don't need this — the worker sends queued messages slowly on its own.</p>
+          </div>
+        ) : (
+          <p style={{ color: C.text2, fontSize: 14, lineHeight: 1.6 }}>This “sends” <b>{queued}</b> message{queued === 1 ? "" : "s"}. You're in <b>test mode</b>, so nothing goes to WhatsApp — they're only recorded here.</p>
+        )}
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 14 }}>
+          <Btn variant="ghost" onClick={() => setConfirmSend(false)}>Cancel</Btn>
+          <Btn variant={live ? "danger" : "primary"} disabled={!!busy} onClick={async () => { setConfirmSend(false); await act("drip", live ? "/whatsapp/drip?max=5" : "/whatsapp/drip?force=1&max=50"); }}>{live ? `Send ${Math.min(queued, 5)} now` : "Send (test)"}</Btn>
+        </div>
+      </Modal>
     </div>
   );
 }
