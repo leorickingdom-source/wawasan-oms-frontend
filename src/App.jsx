@@ -107,7 +107,7 @@ const NAV = [
   { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "operations_controller"] },
   { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "operations_controller", "delivery_team"] },
   { id: "floor", label: "Floor Display", icon: "display", roles: NON_ADMIN_ROLES },
-  { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "operations_controller"] },
+  { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "operations_controller", "production_lead"] },
   { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead"] },
   { id: "audit", label: "Audit Trail", icon: "audit", roles: ["super_admin", "admin"] },
   { id: "users", label: "User Management", icon: "users", roles: ["super_admin", "admin", "operations_controller"] },
@@ -1400,7 +1400,7 @@ function PicReport({ period }) {
 
 // ─── Reports ─────────────────────────────────────────────────────────────────
 function Reports({ user }) {
-  const tabsForRole = user.role === "production_lead" ? ["production", "packing"]
+  const tabsForRole = user.role === "production_lead" ? ["production", "packing", "staff", "pic"]
     : user.role === "delivery_team" ? ["delivery"]
     : ["production", "packing", "delivery", "orders", "staff", "pic"];
   const CUSTOM = ["orders", "staff", "pic"]; // tabs with their own table component (no metric cards/trend)
