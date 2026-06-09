@@ -1002,8 +1002,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
         const total = items.length;
         const doneLines = items.filter((it) => itemStatusKey(it) === "done").length;
         const pct = total > 0 ? Math.round((doneLines / total) * 100) : 0;
-        const head = canMove ? ["SKU", "Product", "Qty", "Unit", "Status", ""]
-          : ["SKU", "Product", "Qty", "Unit", "Status"];
+        const head = ["SKU", "Product", "Qty", "Unit", "Status"];
         return (
         <div>
           {items.length > 0 && (
@@ -1027,36 +1026,17 @@ function OrderDetail({ orderId, user, onUpdated }) {
                 const pill = <span style={{ display: "inline-block", padding: "3px 9px", borderRadius: 20, fontSize: 11.5, fontWeight: 700, color: st.color, background: st.color + "1f", border: `1px solid ${st.color}44` }}>{st.label}</span>;
                 return (
                 <tr key={it.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                  {canMove ? (
-                    <>
-                      <td style={{ padding: "6px 8px" }}><input defaultValue={it.sku} onBlur={(e) => e.target.value !== it.sku && updateItem(it.id, { sku: e.target.value })} style={cellInput(110)} /></td>
-                      <td style={{ padding: "6px 8px" }}><input defaultValue={it.name} onBlur={(e) => e.target.value !== it.name && updateItem(it.id, { name: e.target.value })} style={cellInput()} /></td>
-                      <td style={{ padding: "6px 8px" }}><input type="number" min="0" defaultValue={Math.round(it.quantity)} onBlur={(e) => +e.target.value !== Math.round(it.quantity) && updateItem(it.id, { quantity: +e.target.value })} style={cellInput(70)} /></td>
-                      <td style={{ padding: "6px 8px" }}><input defaultValue={it.unit} onBlur={(e) => e.target.value !== it.unit && updateItem(it.id, { unit: e.target.value })} style={cellInput(64)} /></td>
-                      <td style={{ padding: "6px 8px" }}>{prog}</td>
-                      <td style={{ padding: "6px 8px" }}><button onClick={() => removeItem(it.id)} title="Remove" style={{ background: "#3a1a1a", border: "none", borderRadius: 7, color: "#fca5a5", cursor: "pointer", width: 28, height: 28 }}>×</button></td>
-                    </>
-                  ) : (
-                    <>
-                      <td style={{ padding: "8px 10px", fontFamily: MONO, color: C.text2 }}>{it.sku}</td>
-                      <td style={{ padding: "8px 10px", color: C.text }}>{it.name}</td>
-                      <td style={{ padding: "8px 10px", fontWeight: 700, color: C.text }}>{Math.round(it.quantity)}</td>
-                      <td style={{ padding: "8px 10px", color: C.text3 }}>{it.unit}</td>
-                      <td style={{ padding: "8px 10px" }}>{canMark ? prog : pill}</td>
-                    </>
-                  )}
+                  <td style={{ padding: "8px 10px", fontFamily: MONO, color: C.text2 }}>{it.sku}</td>
+                  <td style={{ padding: "8px 10px", color: C.text }}>{it.name}</td>
+                  <td style={{ padding: "8px 10px", fontWeight: 700, color: C.text }}>{Math.round(it.quantity)}</td>
+                  <td style={{ padding: "8px 10px", color: C.text3 }}>{it.unit}</td>
+                  <td style={{ padding: "8px 10px" }}>{canMark ? prog : pill}</td>
                 </tr>
               );})}
             </tbody>
           </table>
-          {canMove && (
-            <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
-              <input placeholder="SKU" value={newItem.sku} onChange={(e) => setNewItem((p) => ({ ...p, sku: e.target.value }))} style={cellInput(100)} />
-              <input placeholder="Product" value={newItem.name} onChange={(e) => setNewItem((p) => ({ ...p, name: e.target.value }))} style={cellInput(170)} />
-              <input type="number" min="1" placeholder="Qty" value={newItem.quantity} onChange={(e) => setNewItem((p) => ({ ...p, quantity: e.target.value }))} style={cellInput(64)} />
-              <input placeholder="unit" value={newItem.unit} onChange={(e) => setNewItem((p) => ({ ...p, unit: e.target.value }))} style={cellInput(60)} />
-              <Btn size="sm" variant="soft" onClick={addItem} disabled={!newItem.name.trim()}>+ Add item</Btn>
-            </div>
+          {canMove && items.length > 0 && (
+            <div style={{ marginTop: 10, fontSize: 11.5, color: C.text3 }}>Line items are locked to match the invoice — only an item's status can change. To correct a SKU or quantity, fix it in SQL Account.</div>
           )}
         </div>
         );
