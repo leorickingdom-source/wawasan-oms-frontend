@@ -125,7 +125,7 @@ const NAV = [
   { id: "messages", label: "Messages", icon: "message", roles: ["super_admin", "operations_controller"] },
   { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead"] },
   { id: "audit", label: "Audit Trail", icon: "audit", roles: ["super_admin", "admin"] },
-  { id: "users", label: "User Management", icon: "users", roles: ["super_admin", "admin", "operations_controller"] },
+  { id: "users", label: "User Management", icon: "users", roles: ["super_admin", "admin"] },
   { id: "settings", label: "System Settings", icon: "settings", roles: ["super_admin", "admin"] },
 ];
 const PAGE_META = {
@@ -1259,10 +1259,15 @@ function CreateOrderForm({ onCreated, onClose }) {
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   const narrow = useViewport() < 640;
   useEffect(() => { api("GET", "/settings/holidays").then((d) => setHolidays(d || [])).catch(() => setHolidays([])); }, []);
+  const [catalog, setCatalog] = useState([]);
+  useEffect(() => { api("GET", "/orders/skus").then((d) => setCatalog(d || [])).catch(() => setCatalog([])); }, []);
+  const bySku = {}, byName = {};
+  for (const c of catalog) { if (c.sku) bySku[c.sku] = c; if (c.name && !byName[c.name]) byName[c.name] = c; }
   const holidayHit = f.required_delivery_date ? holidays.find((h) => h.date === f.required_delivery_date) : null;
 
   async function submit() {
     if (!f.invoice_number || !f.customer_name || !f.required_delivery_date) { setErr("Invoice, customer and delivery date are required."); return; }
+    if (/^SI\d/i.test(f.invoice_number.trim())) { setErr("Invoice numbers starting with “SI” are reserved for SQL Account — use a manual code like INV-26-0001."); return; }
     setBusy(true); setErr("");
     try { await api("POST", "/orders", { ...f, items: items.filter((i) => i.name) }); onCreated && onCreated(); }
     catch (e) { setErr(e.message); } finally { setBusy(false); }
@@ -1283,13 +1288,16 @@ function CreateOrderForm({ onCreated, onClose }) {
           <input type="checkbox" checked={f.skip_production} onChange={(e) => set("skip_production", e.target.checked)} /> Skip production (→ packing)
         </label>
       </div>
+      <p style={{ fontSize: 11.5, color: C.text3, margin: "2px 0 8px" }}>Manual invoice no. — use a code like <b>INV-26-0001</b>. Codes starting with “SI” are reserved for SQL Account.</p>
       {holidayHit && <p style={{ color: C.packing, fontSize: 12.5, margin: "0 0 8px" }}>⚠ {fmtDay(f.required_delivery_date)} is a holiday: {holidayHit.name}. Delivery may not happen that day.</p>}
       <Field label="Notes" value={f.notes} onChange={(v) => set("notes", v)} placeholder="Optional…" />
-      <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, margin: "6px 0 8px" }}>Order Items</div>
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, margin: "6px 0 8px" }}>Order Items <span style={{ fontWeight: 400, color: C.text3 }}>· type a STK or product to autofill</span></div>
+      <datalist id="stk-codes">{catalog.map((c) => <option key={c.sku} value={c.sku}>{c.name}</option>)}</datalist>
+      <datalist id="stk-names">{catalog.map((c) => <option key={"n" + c.sku} value={c.name} />)}</datalist>
       {items.map((it, i) => (
         <div key={i} style={{ display: "grid", gridTemplateColumns: narrow ? "1fr 1fr" : "110px 1fr 70px 64px 32px", gap: 6, marginBottom: 6 }}>
-          <input placeholder="STK" value={it.sku} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, sku: e.target.value } : x))} style={inp} />
-          <input placeholder="Product" value={it.name} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} style={inp} />
+          <input placeholder="STK" list="stk-codes" value={it.sku} onChange={(e) => { const v = e.target.value; const hit = bySku[v]; setItems((a) => a.map((x, j) => j === i ? { ...x, sku: v, ...(hit ? { name: hit.name, unit: hit.unit || x.unit } : {}) } : x)); }} style={inp} />
+          <input placeholder="Product" list="stk-names" value={it.name} onChange={(e) => { const v = e.target.value; const hit = byName[v]; setItems((a) => a.map((x, j) => j === i ? { ...x, name: v, ...(hit ? { sku: hit.sku, unit: hit.unit || x.unit } : {}) } : x)); }} style={inp} />
           <input type="number" min="1" value={it.quantity} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, quantity: +e.target.value } : x))} style={inp} />
           <input placeholder="unit" value={it.unit} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, unit: e.target.value } : x))} style={inp} />
           <button onClick={() => setItems((a) => a.filter((_, j) => j !== i))} style={{ background: "#3a1a1a", border: "none", borderRadius: 8, color: "#fca5a5", cursor: "pointer" }}>×</button>
