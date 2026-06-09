@@ -101,7 +101,7 @@ const NAV = [
   { id: "floor", label: "Floor Display", icon: "display", roles: NON_ADMIN_ROLES },
   { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "operations_controller"] },
   { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "operations_controller", "delivery_team"] },
-  { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "operations_controller", "production_lead", "delivery_team"] },
+  { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "operations_controller"] },
   { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead"] },
   { id: "audit", label: "Audit Trail", icon: "audit", roles: ["super_admin", "admin"] },
   { id: "users", label: "User Management", icon: "users", roles: ["super_admin", "admin", "operations_controller"] },
