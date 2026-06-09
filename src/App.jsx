@@ -108,6 +108,7 @@ const NAV = [
   { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "operations_controller", "delivery_team"] },
   { id: "floor", label: "Floor Display", icon: "display", roles: NON_ADMIN_ROLES },
   { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "operations_controller", "production_lead"] },
+  { id: "messages", label: "Messages", icon: "message", roles: ["super_admin", "operations_controller"] },
   { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead"] },
   { id: "audit", label: "Audit Trail", icon: "audit", roles: ["super_admin", "admin"] },
   { id: "users", label: "User Management", icon: "users", roles: ["super_admin", "admin", "operations_controller"] },
@@ -118,6 +119,7 @@ const PAGE_META = {
   dashboard: ["Dashboard", "Operations overview"],
   delivery: ["Delivery", "Schedule and dispatch"],
   reports: ["Reports", "Department performance"],
+  messages: ["Messages", "WhatsApp customer updates & morning brief"],
   remarks: ["Production Remarks", "Weekly notes from the production lead"],
   audit: ["Audit Trail", "Every action, logged"],
   users: ["User Management", "Accounts, roles and access"],
@@ -1572,6 +1574,84 @@ function Reports({ user }) {
   );
 }
 
+// ─── Messages (WhatsApp queue) ──────────────────────────────────────────────────
+const MSG_KIND = { received: "Order received", out_for_delivery: "Out for delivery", delivered: "Delivered", morning_brief: "Morning brief", test: "Test" };
+const MSG_STATUS = {
+  queued: { label: "Queued", color: C.packing }, sending: { label: "Sending", color: C.order },
+  sent: { label: "Sent", color: C.ready }, failed: { label: "Failed", color: C.danger }, cancelled: { label: "Cancelled", color: C.text3 },
+};
+function Messages({ user }) {
+  const [d, setD] = useState(null);
+  const [busy, setBusy] = useState("");
+  const narrow = useViewport() < 760;
+  async function load() { try { setD(await api("GET", "/whatsapp/queue")); } catch (e) { setD({ _error: e.message }); } }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  async function act(label, path) {
+    setBusy(label);
+    try { await api("POST", path); await load(); } catch (e) { alert(e.message); } finally { setBusy(""); }
+  }
+  if (!d) return <Loading label="Loading messages…" />;
+  if (d._error) return <div style={{ color: "#fca5a5" }}>⚠ {d._error}</div>;
+  const counts = Object.fromEntries((d.counts || []).map((c) => [c.status, c.c]));
+  const live = d.provider === "wwebjs";
+  const fmtWhen = (s) => s ? new Date(s).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "6px 12px", borderRadius: 9, background: (live ? C.ready : C.packing) + "1c", border: `1px solid ${(live ? C.ready : C.packing)}55`, color: live ? C.ready : C.packing, fontSize: 12.5, fontWeight: 700 }}>
+          {live ? "● Live — sending to WhatsApp" : "● Test mode — messages logged, not sent"}
+        </span>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Btn variant="soft" size="sm" disabled={!!busy} onClick={() => act("enqueue", "/whatsapp/enqueue")}>{busy === "enqueue" ? "Queuing…" : "Queue customer messages"}</Btn>
+          <Btn variant="soft" size="sm" disabled={!!busy} onClick={() => act("brief", "/whatsapp/morning-brief")}>{busy === "brief" ? "…" : "Morning brief"}</Btn>
+          <Btn size="sm" disabled={!!busy} onClick={() => act("drip", "/whatsapp/drip?force=1&max=50")}>{busy === "drip" ? "Sending…" : "Send queued →"}</Btn>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
+        {["queued", "sending", "sent", "failed"].map((k) => (
+          <div key={k} style={{ flex: "1 1 120px", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 11, padding: "12px 14px" }}>
+            <div style={{ fontSize: 24, fontWeight: 800, color: MSG_STATUS[k].color }}>{counts[k] || 0}</div>
+            <div style={{ fontSize: 12, color: C.text3 }}>{MSG_STATUS[k].label}</div>
+          </div>
+        ))}
+      </div>
+      {(d.messages || []).length === 0 ? <Empty label="No messages yet. Tap “Queue customer messages”." /> :
+        narrow ? (
+          d.messages.map((m) => (
+            <StackCard key={m.id}
+              head={<>
+                <span style={{ fontWeight: 700, color: C.text, fontSize: 14 }}>{MSG_KIND[m.kind] || m.kind}</span>
+                <Pill color={(MSG_STATUS[m.status] || {}).color || C.text3}>{(MSG_STATUS[m.status] || {}).label || m.status}</Pill>
+              </>}
+              rows={[
+                ["To", <span style={{ fontFamily: MONO }}>{m.recipient || "—"}</span>],
+                ["When", fmtWhen(m.sent_at || m.created_at)],
+                ["Message", <span style={{ color: C.text2 }}>{m.preview}</span>],
+              ]} />
+          ))
+        ) : (
+        <Card style={{ padding: 0, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr style={{ background: C.bg2 }}>{["Type", "Status", "To", "Message", "When"].map((h) => <th key={h} style={{ textAlign: "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {d.messages.map((m) => (
+                <tr key={m.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "9px 14px", color: C.text, whiteSpace: "nowrap" }}>{MSG_KIND[m.kind] || m.kind}</td>
+                  <td style={{ padding: "9px 14px" }}><Pill color={(MSG_STATUS[m.status] || {}).color || C.text3}>{(MSG_STATUS[m.status] || {}).label || m.status}</Pill></td>
+                  <td style={{ padding: "9px 14px", fontFamily: MONO, color: C.text2, whiteSpace: "nowrap" }}>{m.recipient || "—"}</td>
+                  <td style={{ padding: "9px 14px", color: C.text2, maxWidth: 440 }}>{m.preview}</td>
+                  <td style={{ padding: "9px 14px", color: C.text3, whiteSpace: "nowrap" }}>{fmtWhen(m.sent_at || m.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+        )}
+      <p style={{ fontSize: 12, color: C.text3, marginTop: 12 }}>Customer updates queue automatically as orders move. {live ? "Sending live via WhatsApp." : "Test mode: recorded here, not sent. Connect the WhatsApp worker to send for real."}</p>
+    </div>
+  );
+}
+
 // ─── Delivery ──────────────────────────────────────────────────────────────────
 function Delivery({ user, onOpenOrder }) {
   const [list, setList] = useState(null);
@@ -2454,6 +2534,7 @@ export default function App() {
           {page === "dashboard" && <Dashboard onOpenOrder={(id) => setSelectedOrder(id)} />}
           {page === "delivery" && <Delivery user={user} onOpenOrder={(id) => setSelectedOrder(id)} />}
           {page === "reports" && <Reports user={user} />}
+          {page === "messages" && <Messages user={user} />}
           {page === "remarks" && <Remarks user={user} />}
           {page === "audit" && <Audit />}
           {page === "users" && <Users user={user} />}
