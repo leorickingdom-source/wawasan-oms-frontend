@@ -1431,6 +1431,7 @@ function Delivery({ user }) {
   const [confirmDeliver, setConfirmDeliver] = useState(null);
   const [form, setForm] = useState({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "", tracking_no: "" });
   const [newDeliverer, setNewDeliverer] = useState({ name: "", phone: "" });
+  const [otherCourier, setOtherCourier] = useState("");
   const canAssign = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
   const canDeliver = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
 
@@ -1451,8 +1452,14 @@ function Delivery({ user }) {
   async function assign() {
     if (!form.order_id) { alert("Pick an order to schedule."); return; }
     try {
-      await api("POST", "/delivery", form);
-      setShow(false); setForm({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "", tracking_no: "" });
+      let payload = form;
+      if (form.deliverer_id === "__other__") {
+        if (!otherCourier.trim()) { alert("Type the other courier's name, or pick one from the list."); return; }
+        const dl = await api("POST", "/delivery/deliverers", { name: otherCourier.trim() });
+        payload = { ...form, deliverer_id: dl.id };
+      }
+      await api("POST", "/delivery", payload);
+      setShow(false); setForm({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "", tracking_no: "" }); setOtherCourier("");
       load();
     } catch (e) { alert(e.message); }
   }
@@ -1583,7 +1590,10 @@ function Delivery({ user }) {
         <Field label="Order (ready for delivery)" value={form.order_id} onChange={(v) => setForm((f) => ({ ...f, order_id: v }))}
           options={[{ value: "", label: "Select order…" }, ...ready.map((o) => ({ value: o.id, label: `${o.invoice_number} — ${o.customer_name}` }))]} />
         <Field label="Courier" value={form.deliverer_id} onChange={(v) => setForm((f) => ({ ...f, deliverer_id: v }))}
-          options={[{ value: "", label: deliverers.filter((d) => d.is_active).length ? "Unassigned" : "No couriers yet — add one below" }, ...deliverers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name }))]} />
+          options={[{ value: "", label: deliverers.filter((d) => d.is_active).length ? "Unassigned" : "No couriers yet — add one below" }, ...deliverers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name })), { value: "__other__", label: "+ Other courier (not in the list)" }]} />
+        {form.deliverer_id === "__other__" && (
+          <Field label="Other courier name" value={otherCourier} onChange={setOtherCourier} placeholder="e.g. Lalamove, GDex, own driver…" required />
+        )}
         <Field label="Tracking number" value={form.tracking_no} onChange={(v) => setForm((f) => ({ ...f, tracking_no: v }))} placeholder="Courier tracking no (optional)" />
         <Field label="Scheduled date" type="date" value={form.scheduled_date} onChange={(v) => setForm((f) => ({ ...f, scheduled_date: v }))} />
         <Field label="Delivery address" value={form.address} onChange={(v) => setForm((f) => ({ ...f, address: v }))} placeholder="Street, city, postcode…" />
