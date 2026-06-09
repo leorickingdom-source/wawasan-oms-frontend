@@ -70,11 +70,11 @@ const ROLE_LABELS = {
 };
 // Every role except the system-only Admin — for nav pages Admin shouldn't see.
 const NON_ADMIN_ROLES = ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff", "delivery_team"];
-// The Order Board kanban and Floor Display are for the production-floor roles.
-// The Delivery Coordinator works only the Delivery workspace; on the board they
-// would see a single, non-actionable "Ready for Delivery" column that just
-// duplicates that workspace. Hiding board + floor for them removes the overlap
-// and lands them straight in Delivery (their only nav item).
+// The Order Board kanban is for the production-floor roles. The Delivery
+// Coordinator works the Delivery workspace; on the board they would only see a
+// single, non-actionable "Ready for Delivery" column that duplicates it, so they
+// are excluded from the board and land in Delivery. (Floor Display stays for
+// them — listed just below Delivery in the nav.)
 const BOARD_ROLES = NON_ADMIN_ROLES.filter((r) => r !== "delivery_team");
 
 // Customer importance tiers — mirrors the backend `importance` column (low → high).
@@ -104,9 +104,9 @@ function deliveryTag(o) {
 
 const NAV = [
   { id: "board", label: "Order Board", icon: "board", roles: BOARD_ROLES },
-  { id: "floor", label: "Floor Display", icon: "display", roles: BOARD_ROLES },
   { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "operations_controller"] },
   { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "operations_controller", "delivery_team"] },
+  { id: "floor", label: "Floor Display", icon: "display", roles: NON_ADMIN_ROLES },
   { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "operations_controller"] },
   { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead"] },
   { id: "audit", label: "Audit Trail", icon: "audit", roles: ["super_admin", "admin"] },
@@ -1411,7 +1411,7 @@ function Reports({ user }) {
 }
 
 // ─── Delivery ──────────────────────────────────────────────────────────────────
-function Delivery({ user }) {
+function Delivery({ user, onOpenOrder }) {
   const [list, setList] = useState(null);
   const [ready, setReady] = useState([]);
   const [deliverers, setDeliverers] = useState([]);
@@ -1520,14 +1520,15 @@ function Delivery({ user }) {
           <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Ready for Delivery · {fReady.length}</h3>
           <Card style={{ padding: 0, overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-              <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Due", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+              <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Due", "Expiry", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
               <tbody>
-                {fReady.length === 0 && <tr><td colSpan={5}><Empty label={noMatch || "No orders waiting to be scheduled."} /></td></tr>}
+                {fReady.length === 0 && <tr><td colSpan={6}><Empty label={noMatch || "No orders waiting to be scheduled."} /></td></tr>}
                 {fReady.map((o) => (
                   <tr key={o.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{o.invoice_number}</td>
+                    <td style={{ padding: "11px 16px", fontFamily: MONO }}><button onClick={() => onOpenOrder && onOpenOrder(o.id)} title="Open order details" style={{ background: "none", border: 0, padding: 0, fontFamily: MONO, fontSize: "inherit", color: C.accent, cursor: "pointer", textAlign: "left" }}>{o.invoice_number}</button></td>
                     <td style={{ padding: "11px 16px", color: C.text2 }}>{o.customer_name}</td>
                     <td style={{ padding: "11px 16px", color: countdown(o.required_delivery_date).tone }}>{fmtDay(o.required_delivery_date)}</td>
+                    <td style={{ padding: "11px 16px", color: o.expiry_date ? C.text2 : C.text3 }}>{o.expiry_date ? fmtDay(o.expiry_date) : "—"}</td>
                     <td style={{ padding: "11px 16px" }}><Pill color={C.ready}>Ready for Delivery</Pill></td>
                     <td style={{ padding: "11px 16px" }}><Btn size="sm" onClick={() => scheduleFor(o.id)}>Schedule →</Btn></td>
                   </tr>
@@ -1550,7 +1551,7 @@ function Delivery({ user }) {
               {fActive.length === 0 && <tr><td colSpan={9}><Empty label={noMatch || "Nothing pending. Schedule a Ready-for-Delivery order above."} /></td></tr>}
               {fActive.map((dv) => (
                 <tr key={dv.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                  <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{dv.invoice_number}</td>
+                  <td style={{ padding: "11px 16px", fontFamily: MONO }}><button onClick={() => onOpenOrder && onOpenOrder(dv.order_id)} title="Open order details" style={{ background: "none", border: 0, padding: 0, fontFamily: MONO, fontSize: "inherit", color: C.accent, cursor: "pointer", textAlign: "left" }}>{dv.invoice_number}</button></td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.customer_name}</td>
                   <td style={{ padding: "11px 16px", color: dv.address ? C.text2 : C.text3 }}>{dv.address || "—"}</td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.delivery_man_name || "—"}</td>
@@ -1582,7 +1583,7 @@ function Delivery({ user }) {
                 const dv = delByOrder[o.id];
                 return (
                   <tr key={o.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{o.invoice_number}</td>
+                    <td style={{ padding: "11px 16px", fontFamily: MONO }}><button onClick={() => onOpenOrder && onOpenOrder(o.id)} title="Open order details" style={{ background: "none", border: 0, padding: 0, fontFamily: MONO, fontSize: "inherit", color: C.accent, cursor: "pointer", textAlign: "left" }}>{o.invoice_number}</button></td>
                     <td style={{ padding: "11px 16px", color: C.text2 }}>{o.customer_name}</td>
                     <td style={{ padding: "11px 16px", color: C.text2 }}>{dv && dv.delivery_man_name ? dv.delivery_man_name : "—"}</td>
                     <td style={{ padding: "11px 16px", color: C.ready }}>{dv && dv.delivered_at ? fmtDateTime(dv.delivered_at) : "Delivered"}</td>
@@ -2230,7 +2231,7 @@ export default function App() {
         <main style={{ flex: 1, padding: isMobile ? "16px 14px 32px" : "20px 26px 40px", overflowX: "auto" }}>
           {page === "board" && <OrderBoard user={user} search={search} weekOnly={weekOnly} statusFilter={statusFilter} refreshKey={boardKey} onOpenOrder={(o) => setSelectedOrder(o.id)} onCount={setBoardCount} />}
           {page === "dashboard" && <Dashboard onOpenOrder={(id) => setSelectedOrder(id)} />}
-          {page === "delivery" && <Delivery user={user} />}
+          {page === "delivery" && <Delivery user={user} onOpenOrder={(id) => setSelectedOrder(id)} />}
           {page === "reports" && <Reports user={user} />}
           {page === "remarks" && <Remarks user={user} />}
           {page === "audit" && <Audit />}
