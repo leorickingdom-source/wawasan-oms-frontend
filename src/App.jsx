@@ -1127,8 +1127,11 @@ function CreateOrderForm({ onCreated, onClose }) {
   const [items, setItems] = useState([{ sku: "", name: "", quantity: 1, unit: "pcs" }]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [holidays, setHolidays] = useState([]);
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   const narrow = useViewport() < 640;
+  useEffect(() => { api("GET", "/settings/holidays").then((d) => setHolidays(d || [])).catch(() => setHolidays([])); }, []);
+  const holidayHit = f.required_delivery_date ? holidays.find((h) => h.date === f.required_delivery_date) : null;
 
   async function submit() {
     if (!f.invoice_number || !f.customer_name || !f.required_delivery_date) { setErr("Invoice, customer and delivery date are required."); return; }
@@ -1152,6 +1155,7 @@ function CreateOrderForm({ onCreated, onClose }) {
           <input type="checkbox" checked={f.skip_production} onChange={(e) => set("skip_production", e.target.checked)} /> Skip production (→ packing)
         </label>
       </div>
+      {holidayHit && <p style={{ color: C.packing, fontSize: 12.5, margin: "0 0 8px" }}>⚠ {fmtDay(f.required_delivery_date)} is a holiday: {holidayHit.name}. Delivery may not happen that day.</p>}
       <Field label="Notes" value={f.notes} onChange={(v) => set("notes", v)} placeholder="Optional…" />
       <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, margin: "6px 0 8px" }}>Order Items</div>
       {items.map((it, i) => (
@@ -1942,18 +1946,33 @@ function Settings() {
   const [s, setS] = useState(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [holidays, setHolidays] = useState([]);
+  const [newHol, setNewHol] = useState({ date: "", name: "" });
 
   useEffect(() => { api("GET", "/settings").then(setS).catch(() => setS({})); }, []);
+  function loadHolidays() { api("GET", "/settings/holidays").then((d) => setHolidays(d || [])).catch(() => setHolidays([])); }
+  useEffect(() => { loadHolidays(); }, []);
   function setField(k, v) { setS((p) => ({ ...p, [k]: v })); setSaved(false); }
   async function save() {
     setBusy(true);
     try { await api("PUT", "/settings", { settings: { session_timeout_hours: s.session_timeout_hours } }); setSaved(true); }
     catch (e) { alert(e.message); } finally { setBusy(false); }
   }
+  async function addHoliday() {
+    if (!newHol.date || !newHol.name.trim()) return;
+    try { await api("POST", "/settings/holidays", { date: newHol.date, name: newHol.name.trim() }); setNewHol({ date: "", name: "" }); loadHolidays(); }
+    catch (e) { alert(e.message); }
+  }
+  async function removeHoliday(id) {
+    if (!confirm("Remove this holiday?")) return;
+    try { await api("DELETE", `/settings/holidays/${id}`); loadHolidays(); } catch (e) { alert(e.message); }
+  }
 
   if (!s) return <Loading />;
+  const inp = { padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5, colorScheme: "dark" };
+  const today0 = new Date(); today0.setHours(0, 0, 0, 0);
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 520 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 560 }}>
       <Card>
         <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 6 }}>Session</h3>
         <p style={{ fontSize: 12.5, color: C.text3, marginBottom: 14 }}>How long a sign-in stays valid before users must log in again. Applies to new logins.</p>
@@ -1963,6 +1982,33 @@ function Settings() {
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4 }}>
           <Btn onClick={save} disabled={busy}>{busy ? "Saving…" : "Save settings"}</Btn>
           {saved && <span style={{ color: C.ready, fontSize: 13 }}>Saved ✓</span>}
+        </div>
+      </Card>
+
+      <Card>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 6 }}>Holiday calendar</h3>
+        <p style={{ fontSize: 12.5, color: C.text3, marginBottom: 14 }}>Public holidays and factory off-days. When an order's delivery date lands on one, whoever creates the order is warned.</p>
+        {holidays.length === 0 && <Empty label="No holidays added yet." />}
+        {holidays.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            {holidays.map((h) => {
+              const d = parseDate(h.date);
+              const past = d && d < today0;
+              return (
+                <div key={h.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: `1px solid ${C.border}`, opacity: past ? 0.5 : 1 }}>
+                  <span style={{ fontFamily: MONO, fontSize: 13, color: C.text2, minWidth: 104 }}>{h.date}</span>
+                  <span style={{ flex: 1, fontSize: 13.5, color: C.text }}>{h.name}</span>
+                  {past && <span style={{ fontSize: 11, color: C.text3 }}>past</span>}
+                  <button onClick={() => removeHoliday(h.id)} title="Remove" style={{ background: "#3a1a1a", border: "none", borderRadius: 7, color: "#fca5a5", cursor: "pointer", width: 28, height: 28, flexShrink: 0 }}>×</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <input type="date" value={newHol.date} onChange={(e) => setNewHol((p) => ({ ...p, date: e.target.value }))} style={inp} />
+          <input placeholder="Holiday name (e.g. Hari Raya)" value={newHol.name} onChange={(e) => setNewHol((p) => ({ ...p, name: e.target.value }))} style={{ ...inp, flex: 1, minWidth: 160 }} />
+          <Btn size="sm" onClick={addHoliday} disabled={!newHol.date || !newHol.name.trim()}><Icon name="plus" size={14} /> Add</Btn>
         </div>
       </Card>
     </div>
