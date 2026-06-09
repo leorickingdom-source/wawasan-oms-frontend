@@ -528,7 +528,7 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
     </Modal>
   );
 }
-function OrderBoard({ user, search, weekOnly, statusFilter, mineOnly, onOpenOrder, refreshKey, onCount }) {
+function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refreshKey, onCount }) {
   const [board, setBoard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -562,7 +562,6 @@ function OrderBoard({ user, search, weekOnly, statusFilter, mineOnly, onOpenOrde
     const q = search.trim().toLowerCase();
     let out = arr;
     if (q) out = out.filter((o) => o.invoice_number.toLowerCase().includes(q) || (o.customer_name || "").toLowerCase().includes(q));
-    if (mineOnly) out = out.filter((o) => o.pic_id === user.id);
     if (statusFilter === "urgent") out = out.filter((o) => o.priority === "urgent");
     else if (statusFilter === "late") out = out.filter((o) => (daysUntil(o.required_delivery_date) ?? 0) < 0);
     else if (statusFilter === "on_hold") out = out.filter((o) => o.on_hold);
@@ -1473,6 +1472,26 @@ function PicReport({ period }) {
   );
 }
 
+// Small KPI card: colored by what the metric means (green = good, red = bad, amber = needs attention).
+function metricTone(label) {
+  const l = label.toLowerCase();
+  if (l.includes("on-time")) return C.ready;
+  if (l.includes("rework") || l.includes("failed")) return C.danger;
+  if (l.includes("pending")) return C.hold;
+  return C.accent;
+}
+function MetricCard({ label, value, tone }) {
+  return (
+    <Card style={{ padding: 0, overflow: "hidden" }}>
+      <div style={{ height: 3, background: tone }} />
+      <div style={{ padding: 16 }}>
+        <div style={{ fontSize: 28, fontWeight: 800, color: tone }}>{value ?? "—"}</div>
+        <div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{label}</div>
+      </div>
+    </Card>
+  );
+}
+
 // ─── Reports ─────────────────────────────────────────────────────────────────
 function Reports({ user }) {
   const tabsForRole = user.role === "production_lead" ? ["production", "packing", "staff", "pic"]
@@ -1480,6 +1499,15 @@ function Reports({ user }) {
     : ["production", "packing", "delivery", "orders", "staff", "pic"];
   const CUSTOM = ["orders", "staff", "pic"]; // tabs with their own table component (no metric cards/trend)
   const TAB_LABEL = { staff: "Staff", pic: "Person in charge" }; // friendlier than the capitalized id
+  const PERIOD_LABEL = { daily: "Today", weekly: "This week", monthly: "This month" };
+  const TAB_DESC = {
+    production: "Throughput, on-time rate and reworks in production",
+    packing: "Packing throughput and turnaround time",
+    delivery: "Deliveries completed, on-time rate and couriers",
+    orders: "Per-order progress, cycle time and customer rollup",
+    staff: "What each person finished this period",
+    pic: "Live workload per person in charge",
+  };
   const [tab, setTab] = useState(tabsForRole[0]);
   const [period, setPeriod] = useState("weekly");
   const [d, setD] = useState({});
@@ -1492,6 +1520,7 @@ function Reports({ user }) {
   const metrics = CUSTOM.includes(tab) ? {} : { [tab]: metricDefs[tab](d) };
   const trend = d.daily_trend || [];
   const maxT = Math.max(...trend.map((t) => t.count), 1);
+  const avgT = trend.length ? Math.round((trend.reduce((a, t) => a + t.count, 0) / trend.length) * 10) / 10 : 0;
   async function exportAll() {
     const meta = { production: "Production", packing: "Packing", delivery: "Delivery" };
     const fetched = await Promise.all(tabsForRole.filter((key) => metricDefs[key]).map((key) =>
@@ -1531,22 +1560,26 @@ function Reports({ user }) {
           <Btn variant="soft" onClick={exportAll}>Export all</Btn>
         </div>
       </div>
+      <div style={{ fontSize: 13, color: C.text3, margin: "0 0 16px" }}>{TAB_DESC[tab]} · {PERIOD_LABEL[period] || period}</div>
       {tab === "orders" && <OrdersReport period={period} />}
       {tab === "staff" && <StaffReport period={period} />}
       {tab === "pic" && <PicReport period={period} />}
       {!CUSTOM.includes(tab) && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 20 }}>
-          {(metrics[tab] || []).map(([label, value]) => <Card key={label}><div style={{ fontSize: 28, fontWeight: 800, color: C.accent }}>{value ?? "—"}</div><div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{label}</div></Card>)}
+          {(metrics[tab] || []).map(([label, value]) => <MetricCard key={label} label={label} value={value} tone={metricTone(label)} />)}
         </div>
       )}
       {!CUSTOM.includes(tab) && trend.length > 0 && (
         <Card>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 16 }}>Daily trend</h3>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text }}>Daily trend</h3>
+            <span style={{ fontSize: 12, color: C.text3 }}>Peak {maxT} · avg {avgT}</span>
+          </div>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 130 }}>
             {trend.map((t, i) => (
               <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: C.text2 }}>{t.count}</span>
-                <div style={{ width: "100%", maxWidth: 46, background: C.accent, borderRadius: "5px 5px 0 0", height: `${(t.count / maxT) * 90}px`, minHeight: 4, transition: "height .4s" }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: t.count === maxT ? C.accent : C.text2 }}>{t.count}</span>
+                <div style={{ width: "100%", maxWidth: 46, background: t.count === maxT ? C.accent : C.accent + "88", borderRadius: "5px 5px 0 0", height: `${(t.count / maxT) * 90}px`, minHeight: 4, transition: "height .4s" }} />
                 <span style={{ fontSize: 10.5, color: C.text3 }}>{String(t.date).slice(5)}</span>
               </div>
             ))}
@@ -2116,6 +2149,11 @@ function Audit() {
   const logs = allLogsData.filter((l) => (!userF || l.user_name === userF) && (!actionF || l.action === actionF));
   const shownLogs = allLogs ? logs : logs.slice(0, 3);
   const total = (userF || actionF) ? logs.length : (d && d.total != null ? d.total : logs.length);
+  function exportCsv() {
+    const rows = [["When", "User", "Action", "Details", "Invoice"]];
+    for (const l of logs) rows.push([new Date(l.created_at).toLocaleString(), l.user_name, l.action, l.details, l.invoice_number || ""]);
+    downloadCsv(`audit-${period}.csv`, rows);
+  }
   const tabBtn = (id, label) => (
     <button key={id} onClick={() => setPeriod(id)} style={{ background: period === id ? C.surface2 : "transparent", border: "none", borderRadius: 8, padding: "7px 14px", cursor: "pointer", fontSize: 13, fontWeight: period === id ? 700 : 500, color: period === id ? C.text : C.text2 }}>{label}</button>
   );
@@ -2143,6 +2181,7 @@ function Audit() {
           </div>
         )}
         {d && <span style={{ fontSize: 12.5, color: C.text3, marginLeft: "auto" }}>{total} {total === 1 ? "entry" : "entries"}</span>}
+        {d && logs.length > 0 && <Btn variant="soft" size="sm" onClick={exportCsv} style={{ marginLeft: 4 }}>Export CSV</Btn>}
       </div>
       {!d ? <Loading /> : (
         <>
@@ -2415,7 +2454,6 @@ export default function App() {
   const [page, setPage] = useState("board");
   const [search, setSearch] = useState("");
   const [weekOnly, setWeekOnly] = useState(false);
-  const [mineOnly, setMineOnly] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
@@ -2516,9 +2554,6 @@ export default function App() {
             <button onClick={() => setWeekOnly((w) => !w)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: weekOnly ? C.accent + "1c" : C.surface, border: `1px solid ${weekOnly ? C.accent + "55" : C.border2}`, borderRadius: 9, color: weekOnly ? C.accent : C.text2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
               <Icon name="calendar" size={15} color={weekOnly ? C.accent : C.text3} /> This week only
             </button>
-            <button onClick={() => setMineOnly((m) => !m)} title="Only orders I'm the person in charge of" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: mineOnly ? C.accent + "1c" : C.surface, border: `1px solid ${mineOnly ? C.accent + "55" : C.border2}`, borderRadius: 9, color: mineOnly ? C.accent : C.text2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-              <Icon name="users" size={15} color={mineOnly ? C.accent : C.text3} /> My orders
-            </button>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} title="Filter by status" style={{ padding: "8px 12px", background: statusFilter ? C.accent + "1c" : C.surface, border: `1px solid ${statusFilter ? C.accent + "55" : C.border2}`, borderRadius: 9, color: statusFilter ? C.accent : C.text2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
               <option value="" style={{ background: C.bg2, color: C.text }}>All statuses</option>
               <option value="urgent" style={{ background: C.bg2, color: C.text }}>Urgent only</option>
@@ -2530,7 +2565,7 @@ export default function App() {
         )}
 
         <main style={{ flex: 1, padding: isMobile ? "16px 14px 32px" : "20px 26px 40px", overflowX: "auto" }}>
-          {page === "board" && <OrderBoard user={user} search={search} weekOnly={weekOnly} statusFilter={statusFilter} mineOnly={mineOnly} refreshKey={boardKey} onOpenOrder={(o) => setSelectedOrder(o.id)} onCount={setBoardCount} />}
+          {page === "board" && <OrderBoard user={user} search={search} weekOnly={weekOnly} statusFilter={statusFilter} refreshKey={boardKey} onOpenOrder={(o) => setSelectedOrder(o.id)} onCount={setBoardCount} />}
           {page === "dashboard" && <Dashboard onOpenOrder={(id) => setSelectedOrder(id)} />}
           {page === "delivery" && <Delivery user={user} onOpenOrder={(id) => setSelectedOrder(id)} />}
           {page === "reports" && <Reports user={user} />}
