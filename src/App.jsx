@@ -724,6 +724,10 @@ function FloorDisplay({ onExit }) {
     <div style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 2000, display: "flex", flexDirection: "column", padding: 22 }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", marginBottom: 18 }}>
+        <Btn variant="primary" onClick={onExit} title="Exit full-screen (or press Esc)"
+          style={{ padding: "13px 24px", fontSize: 16, fontWeight: 800, opacity: chrome ? 1 : 0, pointerEvents: chrome ? "auto" : "none", transition: "opacity .45s" }}>
+          <Icon name="x" size={19} color="#231304" /> Exit (Esc)
+        </Btn>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <Logo size={46} />
           <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.5 }}>
@@ -747,10 +751,6 @@ function FloorDisplay({ onExit }) {
         </button>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
           <span style={{ fontFamily: MONO, fontSize: 38, fontWeight: 700, color: C.text, letterSpacing: 2 }}>{clock}</span>
-          <button onClick={onExit} title="Exit full-screen (or press Esc)"
-            style={{ display: "inline-flex", alignItems: "center", gap: 9, padding: "14px 28px", fontSize: 17, fontWeight: 900, background: "#fff", color: "#111", border: "none", borderRadius: 12, cursor: "pointer", boxShadow: "0 6px 22px rgba(0,0,0,.55)", opacity: chrome ? 1 : 0, pointerEvents: chrome ? "auto" : "none", transition: "opacity .45s" }}>
-            <Icon name="x" size={20} color="#111" /> Exit (Esc)
-          </button>
         </div>
       </div>
 
@@ -2805,6 +2805,14 @@ export default function App() {
           <Logo size={38} />
           <div><div style={{ fontSize: 15, fontWeight: 800, color: C.text, letterSpacing: 0.4 }}>WAWASAN</div><div style={{ fontSize: 10.5, fontWeight: 600, color: C.text3, letterSpacing: 1.5 }}>CANDLE</div></div>
         </div>
+        {nav.some((n) => n.id === "floor") && (
+          <button onClick={() => { setPage("floor"); setNavOpen(false); }} title="Open the full-screen production wall display"
+            style={{ display: "flex", alignItems: "center", gap: 11, margin: "0 12px 10px", padding: "11px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, cursor: "pointer", fontSize: 13.5, fontWeight: 600, textAlign: "left" }}>
+            <Icon name="display" size={18} color={C.accent} />
+            <span style={{ flex: 1 }}>Floor Display</span>
+            <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.6, color: C.text3, border: `1px solid ${C.border2}`, borderRadius: 5, padding: "1px 5px" }}>WALL</span>
+          </button>
+        )}
         <div style={{ fontSize: 10.5, fontWeight: 700, color: C.text3, letterSpacing: 1.5, padding: "6px 22px" }}>WORKSPACE</div>
         <nav style={{ display: "flex", flexDirection: "column", gap: 2, padding: "4px 12px", overflowY: "auto", flex: 1 }}>
           {nav.filter((n) => n.id !== "floor").map((n) => {
@@ -2819,14 +2827,6 @@ export default function App() {
             );
           })}
         </nav>
-        {nav.some((n) => n.id === "floor") && (
-          <button onClick={() => { setPage("floor"); setNavOpen(false); }} title="Open the full-screen production wall display"
-            style={{ display: "flex", alignItems: "center", gap: 11, margin: "8px 12px 2px", padding: "11px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text2, cursor: "pointer", fontSize: 13.5, fontWeight: 600, textAlign: "left" }}>
-            <Icon name="display" size={18} color={C.accent} />
-            <span style={{ flex: 1 }}>Floor Display</span>
-            <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.6, color: C.text3, border: `1px solid ${C.border2}`, borderRadius: 5, padding: "1px 5px" }}>WALL</span>
-          </button>
-        )}
         <button onClick={logout} style={{ display: "flex", alignItems: "center", gap: 10, margin: "10px 16px 18px", padding: "10px 12px", background: "transparent", border: "none", color: C.text3, cursor: "pointer", fontSize: 13.5 }}><Icon name="logout" size={17} color={C.text3} /> Log out</button>
       </aside>
 
