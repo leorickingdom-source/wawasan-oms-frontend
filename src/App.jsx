@@ -1875,6 +1875,7 @@ function Messages({ user }) {
         </span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Btn variant="soft" size="sm" disabled={!!busy} onClick={() => act("enqueue", "/whatsapp/enqueue")}>{busy === "enqueue" ? "Queuing…" : "Queue customer messages"}</Btn>
+          <Btn variant="soft" size="sm" disabled={!!busy} onClick={() => act("brief", "/whatsapp/morning-brief")}>{busy === "brief" ? "…" : "Morning brief"}</Btn>
           {queued > 0 && <Btn variant="danger" size="sm" disabled={!!busy} onClick={async () => { if (window.confirm(`Delete ${queued} queued message${queued === 1 ? "" : "s"}? They're removed from the list and not sent.`)) await act("cancel", "/whatsapp/cancel"); }}>{busy === "cancel" ? "Deleting…" : "Delete queued"}</Btn>}
           <Btn size="sm" disabled={!!busy || queued === 0} onClick={() => setConfirmSend(true)}>{busy === "drip" ? "Sending…" : `Send ${queued} queued →`}</Btn>
         </div>
