@@ -569,8 +569,8 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
           })}
         </div>
       )}
-      {order.stage === "production" && items.length > 0 && !allMade && (
-        <div style={{ fontSize: 12.5, color: C.packing, marginBottom: 12 }}>⚠ Not all STKs are marked made yet — confirm only if production is actually complete.</div>
+      {(order.stage === "production" || order.stage === "packing") && items.length > 0 && !allMade && (
+        <div style={{ fontSize: 12.5, color: C.packing, marginBottom: 12 }}>⚠ Not all STKs are marked done yet — confirm only if your stage is actually complete.</div>
       )}
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
@@ -1786,7 +1786,6 @@ function TrendChart({ data, kind = "bar", color = C.accent, label = "Count" }) {
 // ─── Reports ─────────────────────────────────────────────────────────────────
 function Reports({ user }) {
   const tabsForRole = user.role === "production_lead" ? ["production", "packing", "staff", "pic"]
-    : user.role === "delivery_team" ? ["delivery"]
     : ["production", "packing", "delivery", "orders", "staff", "pic"];
   const CUSTOM = ["orders", "staff", "pic"]; // tabs with their own table component (no metric cards/trend)
   const TAB_LABEL = { staff: "Staff", pic: "Person in charge" }; // friendlier than the capitalized id
@@ -2998,8 +2997,12 @@ export default function App() {
   if (page === "floor") return <FloorDisplay onExit={() => setPage("board")} />;
 
   const nav = NAV.filter((n) => !n.roles || n.roles.includes(user.role));
+  // Effective page for rendering: if the active page isn't allowed for this role
+  // (e.g. delivery_team's default "board"), fall back to their first nav item so a
+  // disallowed page never paints for a frame before the guard effect corrects state.
+  const view = page === "floor" || nav.some((n) => n.id === page) ? page : (nav[0] ? nav[0].id : "board");
   const canCreate = ["super_admin", "operations_controller"].includes(user.role);
-  const [title, subtitle] = PAGE_META[page] || ["", ""];
+  const [title, subtitle] = PAGE_META[view] || ["", ""];
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: C.bg }}>
@@ -3022,7 +3025,7 @@ export default function App() {
         <div style={{ fontSize: 10.5, fontWeight: 700, color: C.text3, letterSpacing: 1.5, padding: "6px 22px" }}>WORKSPACE</div>
         <nav style={{ display: "flex", flexDirection: "column", gap: 2, padding: "4px 12px", overflowY: "auto", flex: 1 }}>
           {nav.filter((n) => n.id !== "floor").map((n) => {
-            const active = page === n.id;
+            const active = view === n.id;
             return (
               <button key={n.id} onClick={() => { setPage(n.id); setNavOpen(false); }} style={{ display: "flex", alignItems: "center", gap: 11, padding: "10px 12px", borderRadius: 9, border: "none", cursor: "pointer", background: active ? C.accent + "1c" : "transparent", color: active ? C.accent : C.text2, fontSize: 13.5, fontWeight: active ? 700 : 500, textAlign: "left", borderLeft: active ? `2px solid ${C.accent}` : "2px solid transparent" }}>
                 <Icon name={n.icon} size={18} color={active ? C.accent : C.text3} />
@@ -3045,7 +3048,7 @@ export default function App() {
             {subtitle && <div style={{ fontSize: 12.5, color: C.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{subtitle}</div>}
           </div>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
-            {page === "board" && (
+            {view === "board" && (
               <div style={{ position: "relative", width: 260, maxWidth: "30vw" }}>
                 <span style={{ position: "absolute", left: 11, top: 9 }}><Icon name="search" size={15} color={C.text3} /></span>
                 <input type="search" name="board-search" autoComplete="off" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Invoice, customer…" style={{ width: "100%", padding: "8px 12px 8px 34px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5, outline: "none" }} />
@@ -3063,7 +3066,7 @@ export default function App() {
           </div>
         </header>
 
-        {page === "board" && (
+        {view === "board" && (
           <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", padding: isMobile ? "12px 14px 0" : "12px 26px 0" }}>
             <button onClick={() => setWeekOnly((w) => !w)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: weekOnly ? C.accent + "1c" : C.surface, border: `1px solid ${weekOnly ? C.accent + "55" : C.border2}`, borderRadius: 9, color: weekOnly ? C.accent : C.text2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
               <Icon name="calendar" size={15} color={weekOnly ? C.accent : C.text3} /> This week only
@@ -3079,15 +3082,15 @@ export default function App() {
         )}
 
         <main style={{ flex: 1, padding: isMobile ? "16px 14px 32px" : "20px 26px 40px", overflowX: "auto" }}>
-          {page === "board" && <OrderBoard user={user} search={search} weekOnly={weekOnly} statusFilter={statusFilter} refreshKey={boardKey} onOpenOrder={(o) => setSelectedOrder(o.id)} onCount={setBoardCount} />}
-          {page === "dashboard" && <Dashboard onOpenOrder={(id) => setSelectedOrder(id)} />}
-          {page === "delivery" && <Delivery user={user} onOpenOrder={(id) => setSelectedOrder(id)} />}
-          {page === "reports" && <Reports user={user} />}
-          {page === "messages" && <Messages user={user} />}
-          {page === "remarks" && <Remarks user={user} />}
-          {page === "audit" && <Audit />}
-          {page === "users" && <Users user={user} />}
-          {page === "settings" && <Settings />}
+          {view === "board" && <OrderBoard user={user} search={search} weekOnly={weekOnly} statusFilter={statusFilter} refreshKey={boardKey} onOpenOrder={(o) => setSelectedOrder(o.id)} onCount={setBoardCount} />}
+          {view === "dashboard" && <Dashboard onOpenOrder={(id) => setSelectedOrder(id)} />}
+          {view === "delivery" && <Delivery user={user} onOpenOrder={(id) => setSelectedOrder(id)} />}
+          {view === "reports" && <Reports user={user} />}
+          {view === "messages" && <Messages user={user} />}
+          {view === "remarks" && <Remarks user={user} />}
+          {view === "audit" && <Audit />}
+          {view === "users" && <Users user={user} />}
+          {view === "settings" && <Settings />}
         </main>
       </div>
 
