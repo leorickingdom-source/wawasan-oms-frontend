@@ -117,7 +117,7 @@ function deliveryTag(o) {
 }
 
 const NAV = [
-  { id: "board", label: "Order Board", icon: "board", roles: BOARD_ROLES },
+  { id: "board", label: "Order Board", icon: "board", roles: [...BOARD_ROLES, "admin"] },
   { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "operations_controller"] },
   { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "operations_controller", "delivery_team", "admin"] },
   { id: "floor", label: "Floor Display", icon: "display" }, // every role; rendered as a distinct launch button, not a workspace tab
@@ -566,6 +566,8 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [confirmAdv, setConfirmAdv] = useState(null);
+  const [dragId, setDragId] = useState(null); // drag-to-reorder the Production column
+  const canReorder = ["super_admin", "operations_controller", "admin", "production_lead"].includes(user.role);
   const [viewStage, setViewStageRaw] = useState(() => {
     const saved = (typeof localStorage !== "undefined" && localStorage.getItem("oms_board_stage")) || "all";
     return saved === "all" || visibleStages(user.role).includes(saved) ? saved : "all";
@@ -588,6 +590,19 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     const { order, to } = confirmAdv;
     try { await api("POST", `/orders/${order.id}/move`, { to_stage: to }); setConfirmAdv(null); load(); }
     catch (e) { alert(e.message); }
+  }
+  // Drag-to-reorder within the Production column. Persists a shared order for everyone.
+  async function reorderTo(targetId) {
+    if (!dragId || dragId === targetId || !board) { setDragId(null); return; }
+    const list = (board.production || []).map((o) => o.id);
+    const from = list.indexOf(dragId), to = list.indexOf(targetId);
+    if (from < 0 || to < 0) { setDragId(null); return; }
+    list.splice(to, 0, list.splice(from, 1)[0]);
+    const byId = Object.fromEntries((board.production || []).map((o) => [o.id, o]));
+    setBoard({ ...board, production: list.map((id) => byId[id]) }); // optimistic
+    setDragId(null);
+    try { await api("POST", "/orders/reorder", { stage: "production", ordered_ids: list }); }
+    catch (e) { alert(e.message); load(); }
   }
   const filt = (arr) => {
     const q = search.trim().toLowerCase();
@@ -638,7 +653,19 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
                 <span style={{ background: C.surface2, color: C.text2, borderRadius: 7, padding: "1px 9px", fontSize: 13, fontWeight: 700 }}>{orders.length}</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                {orders.map((o) => <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} />)}
+                {s === "production" && canReorder && orders.length > 1 && (
+                  <div style={{ fontSize: 11, color: C.text3, marginBottom: 2 }}>↕ Drag cards to set priority order</div>
+                )}
+                {orders.map((o) => (s === "production" && canReorder) ? (
+                  <div key={o.id} draggable
+                    onDragStart={() => setDragId(o.id)} onDragEnd={() => setDragId(null)}
+                    onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); reorderTo(o.id); }}
+                    style={{ cursor: "grab", opacity: dragId === o.id ? 0.5 : 1 }}>
+                    <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} />
+                  </div>
+                ) : (
+                  <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} />
+                ))}
                 {orders.length === 0 && <Empty label="No orders" />}
               </div>
             </div>
@@ -905,6 +932,8 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
   const isLead = user.role === "production_lead";
   const isFloor = ["production_staff", "packing_staff"].includes(user.role); // pure floor worker — keep their view minimal
   const isDispatch = user.role === "delivery_team"; // delivery coordinator — keep their view delivery-focused
+  const canAmend = ["super_admin", "admin"].includes(user.role); // may correct a placed line (qty / STK / unit)
+  const [editItem, setEditItem] = useState(null); // { id, sku, name, quantity, unit } while editing a line
   async function load() { try { const o = await api("GET", `/orders/${orderId}`); setOrder(o); setNotes(o.notes || ""); } catch (e) { setOrder({ _error: e.message }); } }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
   useEffect(() => { api("GET", `/delivery?order_id=${orderId}`).then((d) => setDelivery((d && d[0]) || null)).catch(() => setDelivery(null)); }, [orderId]);
@@ -958,6 +987,18 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
     if (!newItem.name.trim()) return;
     try { await api("POST", `/orders/${orderId}/items`, newItem); setNewItem({ sku: "", name: "", quantity: 1, unit: "pcs" }); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); }
+  }
+  function startAmend(it) { setEditItem({ id: it.id, sku: it.sku || "", name: it.name || "", quantity: Math.round(it.quantity) || 0, unit: it.unit || "pcs" }); }
+  async function saveAmend() {
+    const e = editItem; if (!e) return;
+    const patch = { sku: (e.sku || "").trim(), name: (e.name || "").trim(), quantity: Math.max(0, Math.round(Number(e.quantity) || 0)), unit: (e.unit || "pcs").trim() };
+    if (!patch.sku || !patch.name) { alert("STK and product name are both required."); return; }
+    const prev = order;
+    // Optimistic in-place update so the row doesn't jump; revert on error.
+    setOrder((o) => (o && o.items) ? { ...o, items: o.items.map((x) => x.id === e.id ? { ...x, ...patch } : x) } : o);
+    setEditItem(null);
+    try { await api("PATCH", `/orders/${orderId}/items/${e.id}`, patch); onUpdated && onUpdated(); }
+    catch (err) { alert(err.message); setOrder(prev); }
   }
   const cellInput = (w) => ({ padding: "6px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 7, fontSize: 13, color: C.text, width: w || "100%", boxSizing: "border-box" });
   async function saveNotes() {
@@ -1103,7 +1144,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
         const total = items.length;
         const doneLines = items.filter((it) => itemStatusKey(it) === "done").length;
         const pct = total > 0 ? Math.round((doneLines / total) * 100) : 0;
-        const head = ["STK", "Product", "Qty", "Unit", "Status"];
+        const head = canAmend ? ["STK", "Product", "Qty", "Unit", "Status", ""] : ["STK", "Product", "Qty", "Unit", "Status"];
         return (
         <div>
           {roleCanMark && !canMark && (
@@ -1128,6 +1169,19 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
               {items.length === 0 && <Empty label="No items." />}
               {items.map((it) => {
                 const st = itemStat(it);
+                if (canAmend && editItem && editItem.id === it.id) {
+                  return (
+                    <div key={it.id} style={{ border: `1px solid ${C.accent}55`, borderRadius: 10, padding: 12, marginBottom: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                      <input value={editItem.sku} onChange={(e) => setEditItem({ ...editItem, sku: e.target.value })} placeholder="STK" style={cellInput()} />
+                      <input value={editItem.name} onChange={(e) => setEditItem({ ...editItem, name: e.target.value })} placeholder="Product" style={cellInput()} />
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input type="number" min="0" value={editItem.quantity} onChange={(e) => setEditItem({ ...editItem, quantity: e.target.value })} placeholder="Qty" style={cellInput()} />
+                        <input value={editItem.unit} onChange={(e) => setEditItem({ ...editItem, unit: e.target.value })} placeholder="Unit" style={cellInput()} />
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}><Btn size="sm" onClick={saveAmend}>Save</Btn><Btn size="sm" variant="ghost" onClick={() => setEditItem(null)}>Cancel</Btn></div>
+                    </div>
+                  );
+                }
                 return (
                   <div key={it.id} style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, marginBottom: 10 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: canMark ? 10 : 0 }}>
@@ -1138,6 +1192,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
                       {!canMark && <span style={{ flexShrink: 0, alignSelf: "flex-start", display: "inline-block", padding: "3px 9px", borderRadius: 20, fontSize: 11.5, fontWeight: 700, color: st.color, background: st.color + "1f", border: `1px solid ${st.color}44` }}>{st.label}</span>}
                     </div>
                     {canMark && <StatusPicker value={st.k} onChange={(s) => setItemStatus(it, s)} big />}
+                    {canAmend && <div style={{ marginTop: canMark ? 10 : 8 }}><Btn size="sm" variant="ghost" onClick={() => startAmend(it)}>Edit line</Btn></div>}
                   </div>
                 );
               })}
@@ -1151,6 +1206,18 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
                 const st = itemStat(it);
                 const prog = <StatusPicker value={st.k} onChange={(s) => setItemStatus(it, s)} />;
                 const pill = <span style={{ display: "inline-block", padding: "3px 9px", borderRadius: 20, fontSize: 11.5, fontWeight: 700, color: st.color, background: st.color + "1f", border: `1px solid ${st.color}44` }}>{st.label}</span>;
+                if (canAmend && editItem && editItem.id === it.id) {
+                  return (
+                  <tr key={it.id} style={{ borderBottom: `1px solid ${C.border}`, background: C.surface2 }}>
+                    <td style={{ padding: "6px 10px" }}><input value={editItem.sku} onChange={(e) => setEditItem({ ...editItem, sku: e.target.value })} style={cellInput(95)} /></td>
+                    <td style={{ padding: "6px 10px" }}><input value={editItem.name} onChange={(e) => setEditItem({ ...editItem, name: e.target.value })} style={cellInput()} /></td>
+                    <td style={{ padding: "6px 10px" }}><input type="number" min="0" value={editItem.quantity} onChange={(e) => setEditItem({ ...editItem, quantity: e.target.value })} style={cellInput(70)} /></td>
+                    <td style={{ padding: "6px 10px" }}><input value={editItem.unit} onChange={(e) => setEditItem({ ...editItem, unit: e.target.value })} style={cellInput(70)} /></td>
+                    <td style={{ padding: "6px 10px" }}>{pill}</td>
+                    <td style={{ padding: "6px 10px", whiteSpace: "nowrap" }}><Btn size="sm" onClick={saveAmend}>Save</Btn> <Btn size="sm" variant="ghost" onClick={() => setEditItem(null)}>Cancel</Btn></td>
+                  </tr>
+                  );
+                }
                 return (
                 <tr key={it.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                   <td style={{ padding: "8px 10px", fontFamily: MONO, color: C.text2 }}>{it.sku}</td>
@@ -1158,12 +1225,16 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
                   <td style={{ padding: "8px 10px", fontWeight: 700, color: C.text }}>{Math.round(it.quantity)}</td>
                   <td style={{ padding: "8px 10px", color: C.text3 }}>{it.unit}</td>
                   <td style={{ padding: "8px 10px" }}>{canMark ? prog : pill}</td>
+                  {canAmend && <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}><Btn size="sm" variant="ghost" onClick={() => startAmend(it)}>Edit</Btn></td>}
                 </tr>
               );})}
             </tbody>
           </table>
           )}
-          {canMove && items.length > 0 && (
+          {items.length > 0 && canAmend && (
+            <div style={{ marginTop: 10, fontSize: 11.5, color: C.text3 }}>You can correct a line's STK, quantity or unit here. Adding or removing whole lines still happens in SQL Account.</div>
+          )}
+          {items.length > 0 && !canAmend && canMove && (
             <div style={{ marginTop: 10, fontSize: 11.5, color: C.text3 }}>Line items are locked to match the invoice — only an item's status can change. To correct a STK or quantity, fix it in SQL Account.</div>
           )}
         </div>
