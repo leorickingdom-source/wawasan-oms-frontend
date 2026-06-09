@@ -158,14 +158,14 @@ const ITEM_STATUS = {
 const ITEM_STATUS_ORDER = ["not_started", "in_progress", "done"];
 function itemStatusKey(it) { return it.status || (it.made ? "done" : "not_started"); }
 function itemStat(it) { return ITEM_STATUS[itemStatusKey(it)] || ITEM_STATUS.not_started; }
-function StatusPicker({ value, onChange, disabled }) {
+function StatusPicker({ value, onChange, disabled, big }) {
   return (
-    <div style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
+    <div style={{ display: big ? "flex" : "inline-flex", gap: big ? 8 : 4, flexWrap: "wrap", width: big ? "100%" : undefined }}>
       {ITEM_STATUS_ORDER.map((s) => {
         const cfg = ITEM_STATUS[s], active = value === s;
         return (
           <button key={s} type="button" disabled={disabled} onClick={() => !disabled && onChange(s)}
-            style={{ cursor: disabled ? "default" : "pointer", border: `1px solid ${active ? cfg.color + "88" : C.border2}`, background: active ? cfg.color + "22" : C.surface2, color: active ? cfg.color : C.text3, borderRadius: 7, padding: "7px 12px", fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap" }}>
+            style={{ flex: big ? 1 : undefined, cursor: disabled ? "default" : "pointer", border: `1px solid ${active ? cfg.color + "88" : C.border2}`, background: active ? cfg.color + "22" : C.surface2, color: active ? cfg.color : C.text3, borderRadius: big ? 9 : 7, padding: big ? "13px 8px" : "7px 12px", fontSize: big ? 14.5 : 12.5, fontWeight: 700, whiteSpace: "nowrap" }}>
             {cfg.short}
           </button>
         );
@@ -387,6 +387,22 @@ function Loading({ label = "Loading…" }) {
 }
 function Empty({ label }) {
   return <div style={{ padding: "28px 12px", textAlign: "center", color: C.text3, fontSize: 13 }}>{label}</div>;
+}
+// Stacked card for narrow screens — turns one wide table row into a labelled card
+// with full-width action buttons, so phones/tablets don't scroll sideways.
+function StackCard({ head, rows, actions }) {
+  return (
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, marginBottom: 10 }}>
+      {head && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>{head}</div>}
+      {rows.filter(Boolean).map(([l, v], i) => (
+        <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0", fontSize: 13.5, borderTop: `1px solid ${C.border}` }}>
+          <span style={{ color: C.text3, flexShrink: 0 }}>{l}</span>
+          <span style={{ color: C.text2, textAlign: "right", minWidth: 0, wordBreak: "break-word" }}>{v}</span>
+        </div>
+      ))}
+      {actions && <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>{actions}</div>}
+    </div>
+  );
 }
 
 // ─── Kanban card (board) ───────────────────────────────────────────────────────
@@ -809,7 +825,7 @@ function FloorDisplay({ onExit }) {
 function OrderDetail({ orderId, user, onUpdated }) {
   const [order, setOrder] = useState(null);
   const [delivery, setDelivery] = useState(null);
-  const [tab, setTab] = useState("details");
+  const [tab, setTab] = useState(["production_staff", "packing_staff"].includes(user.role) ? "items" : "details");
   const [moveStage, setMoveStage] = useState("");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -824,6 +840,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
   const canMove = ["super_admin", "operations_controller"].includes(user.role);
   const canMark = ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff"].includes(user.role);
   const isLead = user.role === "production_lead";
+  const isFloor = ["production_staff", "packing_staff"].includes(user.role); // pure floor worker — keep their view minimal
 
   async function load() { try { const o = await api("GET", `/orders/${orderId}`); setOrder(o); setNotes(o.notes || ""); } catch (e) { setOrder({ _error: e.message }); } }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
@@ -893,7 +910,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
   if (!order) return <Loading />;
   if (order._error) return <div style={{ color: "#fca5a5" }}>⚠ {order._error}</div>;
   const cfg = STAGE_LABELS[order.stage] || { label: order.stage, color: C.text3 };
-  const tabs = ["details", "items", "timeline", "attachments"];
+  const tabs = isFloor ? ["items", "details"] : ["details", "items", "timeline", "attachments"];
   const picRoles = STAGE_PIC_ROLES[order.stage];
   const picUsers = picRoles ? users.filter((u) => picRoles.includes(u.role)) : users;
 
@@ -1022,6 +1039,26 @@ function OrderDetail({ orderId, user, onUpdated }) {
               </div>
             </div>
           )}
+          {narrow ? (
+            <div>
+              {items.length === 0 && <Empty label="No items." />}
+              {items.map((it) => {
+                const st = itemStat(it);
+                return (
+                  <div key={it.id} style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, marginBottom: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: canMark ? 10 : 0 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ color: C.text, fontWeight: 600, fontSize: 14.5 }}>{it.name}</div>
+                        <div style={{ fontFamily: MONO, color: C.text3, fontSize: 12 }}>{it.sku} · {Math.round(it.quantity)} {it.unit}</div>
+                      </div>
+                      {!canMark && <span style={{ flexShrink: 0, alignSelf: "flex-start", display: "inline-block", padding: "3px 9px", borderRadius: 20, fontSize: 11.5, fontWeight: 700, color: st.color, background: st.color + "1f", border: `1px solid ${st.color}44` }}>{st.label}</span>}
+                    </div>
+                    {canMark && <StatusPicker value={st.k} onChange={(s) => setItemStatus(it, s)} big />}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead><tr>{head.map((h, i) => <th key={i} style={{ textAlign: "left", padding: "8px 10px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
             <tbody>
@@ -1041,6 +1078,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
               );})}
             </tbody>
           </table>
+          )}
           {canMove && items.length > 0 && (
             <div style={{ marginTop: 10, fontSize: 11.5, color: C.text3 }}>Line items are locked to match the invoice — only an item's status can change. To correct a SKU or quantity, fix it in SQL Account.</div>
           )}
@@ -1071,8 +1109,8 @@ function OrderDetail({ orderId, user, onUpdated }) {
 
       {!canMove && canAdvanceStage(user.role, order.stage) && !order.on_hold && (
         <div style={{ marginTop: 22, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
-          <Btn onClick={() => setConfirmAdv(true)} disabled={busy}>{ADVANCE_LABEL[order.stage] || "Mark complete"} →</Btn>
-          <p style={{ fontSize: 12, color: C.text3, marginTop: 8 }}>Marks your stage done and moves the order to the next stage.</p>
+          <Btn size="lg" style={{ width: "100%", justifyContent: "center" }} onClick={() => setConfirmAdv(true)} disabled={busy}>{ADVANCE_LABEL[order.stage] || "Mark complete"} →</Btn>
+          <p style={{ fontSize: 12, color: C.text3, marginTop: 8, textAlign: "center" }}>Marks your stage done and moves the order to the next stage.</p>
         </div>
       )}
       {confirmAdv && (
@@ -1518,6 +1556,7 @@ function Delivery({ user, onOpenOrder }) {
   const [q, setQ] = useState("");
   const canAssign = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
   const canDeliver = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
+  const stacked = useViewport() < 1100; // phones + tablets (incl. iPad portrait) → cards, not a wide table
 
   async function load() {
     const d = await api("GET", "/delivery").catch(() => []);
@@ -1607,6 +1646,23 @@ function Delivery({ user, onOpenOrder }) {
       {canAssign && (
         <div>
           <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Ready for Delivery · {fReady.length}</h3>
+          {stacked ? (
+            fReady.length === 0 ? <Empty label={noMatch || "No orders waiting to be scheduled."} />
+            : fReady.map((o) => (
+              <StackCard key={o.id}
+                head={<>
+                  <button onClick={() => onOpenOrder && onOpenOrder(o.id)} style={{ background: "none", border: 0, padding: 0, fontFamily: MONO, fontSize: 15, fontWeight: 700, color: C.accent, cursor: "pointer" }}>{o.invoice_number}</button>
+                  <Pill color={C.ready}>Ready</Pill>
+                </>}
+                rows={[
+                  ["Customer", o.customer_name || "—"],
+                  ["Due", <span style={{ color: countdown(o.required_delivery_date).tone }}>{fmtDay(o.required_delivery_date)}</span>],
+                  ["Expiry", o.expiry_date ? fmtDay(o.expiry_date) : "—"],
+                ]}
+                actions={<Btn size="lg" style={{ width: "100%", justifyContent: "center" }} onClick={() => scheduleFor(o.id)}>Schedule →</Btn>}
+              />
+            ))
+          ) : (
           <Card style={{ padding: 0, overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
               <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Due", "Expiry", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
@@ -1625,6 +1681,7 @@ function Delivery({ user, onOpenOrder }) {
               </tbody>
             </table>
           </Card>
+          )}
         </div>
       )}
 
@@ -1633,6 +1690,29 @@ function Delivery({ user, onOpenOrder }) {
           <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Pending · {fActive.length}</h3>
           {fActive.length > 0 && <Btn variant="soft" size="sm" onClick={() => printRouteList(fActive)}>Print route list</Btn>}
         </div>
+        {stacked ? (
+          fActive.length === 0 ? <Empty label={noMatch || "Nothing pending. Schedule a Ready-for-Delivery order above."} />
+          : fActive.map((dv) => (
+            <StackCard key={dv.id}
+              head={<>
+                <button onClick={() => onOpenOrder && onOpenOrder(dv.order_id)} style={{ background: "none", border: 0, padding: 0, fontFamily: MONO, fontSize: 15, fontWeight: 700, color: C.accent, cursor: "pointer" }}>{dv.invoice_number}</button>
+                <Pill color={tone[dv.status] || C.text3}>{statusLabel[dv.status] || dv.status}</Pill>
+              </>}
+              rows={[
+                ["Customer", dv.customer_name || "—"],
+                ["Address", dv.address || "—"],
+                ["Courier", dv.delivery_man_name || "—"],
+                ["Tracking", <span style={{ fontFamily: MONO }}>{dv.tracking_no || "—"}</span>],
+                ["Scheduled", dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"],
+                ["Due", <span style={{ color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</span>],
+              ]}
+              actions={<>
+                {canAssign && <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => openEdit(dv)}>Edit</Btn>}
+                {canDeliver && <Btn variant="success" style={{ flex: 2, justifyContent: "center" }} onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
+              </>}
+            />
+          ))
+        ) : (
         <Card style={{ padding: 0, overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
             <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Address", "Courier", "Tracking", "Scheduled", "Due", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
@@ -1659,10 +1739,31 @@ function Delivery({ user, onOpenOrder }) {
             </tbody>
           </table>
         </Card>
+        )}
       </div>
 
       <div>
         <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Completed orders · {fCompleted.length}</h3>
+        {stacked ? (
+          fCompleted.length === 0 ? <Empty label={noMatch || "No completed orders yet."} />
+          : shownCompleted.map((o) => {
+            const dv = delByOrder[o.id];
+            return (
+              <StackCard key={o.id}
+                head={<>
+                  <button onClick={() => onOpenOrder && onOpenOrder(o.id)} style={{ background: "none", border: 0, padding: 0, fontFamily: MONO, fontSize: 15, fontWeight: 700, color: C.accent, cursor: "pointer" }}>{o.invoice_number}</button>
+                  <Pill color={C.ready}>Delivered</Pill>
+                </>}
+                rows={[
+                  ["Customer", o.customer_name || "—"],
+                  ["Courier", dv && dv.delivery_man_name ? dv.delivery_man_name : "—"],
+                  ["Delivered", dv && dv.delivered_at ? fmtDateTime(dv.delivered_at) : "Delivered"],
+                  ["Due", fmtDay(o.required_delivery_date)],
+                ]}
+              />
+            );
+          })
+        ) : (
         <Card style={{ padding: 0, overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
             <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Courier", "Delivered", "Due"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
@@ -1683,6 +1784,7 @@ function Delivery({ user, onOpenOrder }) {
             </tbody>
           </table>
         </Card>
+        )}
         {fCompleted.length > 3 && <div style={{ marginTop: 10 }}><Btn variant="ghost" size="sm" onClick={() => setAllCompleted((v) => !v)}>{allCompleted ? "Show less ▲" : `Show all ${fCompleted.length} ▼`}</Btn></div>}
       </div>
 
