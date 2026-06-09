@@ -441,8 +441,9 @@ function StackCard({ head, rows, actions }) {
 }
 
 // ─── Kanban card (board) ───────────────────────────────────────────────────────
-function KanbanCard({ order, user, onOpen, onAdvance }) {
+function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown }) {
   const stage = STAGES[order.stage] || { color: C.text3 };
+  const rBtn = (dis) => ({ cursor: dis ? "default" : "pointer", opacity: dis ? 0.3 : 1, lineHeight: 1, fontSize: 10, padding: "2px 6px", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 5, color: C.text2 });
   const cd = countdown(order.required_delivery_date);
   const late = (daysUntil(order.required_delivery_date) ?? 0) < 0;
   const urgent = order.priority === "urgent";
@@ -500,7 +501,13 @@ function KanbanCard({ order, user, onOpen, onAdvance }) {
             ? <><Avatar name={order.pic_name} color={order.pic_color} size={23} /><span style={{ fontSize: 12.5, color: C.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{order.pic_name}</span></>
             : <span style={{ fontSize: 12, color: C.text3 }}>Unassigned</span>}
         </div>
-        <div style={{ display: "flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={(e) => e.stopPropagation()}>
+          {(onReorderUp || onReorderDown) && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2, marginRight: 1 }} title="Move priority up / down">
+              <button onClick={() => onReorderUp && onReorderUp()} disabled={!onReorderUp} style={rBtn(!onReorderUp)} aria-label="Move up">▲</button>
+              <button onClick={() => onReorderDown && onReorderDown()} disabled={!onReorderDown} style={rBtn(!onReorderDown)} aria-label="Move down">▼</button>
+            </div>
+          )}
           {canAdvanceStage(user.role, order.stage) && !order.on_hold && <IconBtn icon="arrowRight" onClick={() => onAdvance(order, next)} title={(user.role === "super_admin" || user.role === "operations_controller") ? `Advance to ${(STAGE_LABELS[next] || {}).label || next}` : (ADVANCE_LABEL[order.stage] || "Advance")} color={C.ready} bg="#13301f" border="#1f5036" />}
           <IconBtn icon="dots" onClick={() => onOpen(order)} title="Details & actions" />
         </div>
@@ -567,6 +574,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
   const [err, setErr] = useState("");
   const [confirmAdv, setConfirmAdv] = useState(null);
   const [dragId, setDragId] = useState(null); // drag-to-reorder the Production column
+  const [dragOverId, setDragOverId] = useState(null); // current drop target (shows a drop line)
   const canReorder = ["super_admin", "operations_controller", "admin", "production_lead"].includes(user.role);
   const [viewStage, setViewStageRaw] = useState(() => {
     const saved = (typeof localStorage !== "undefined" && localStorage.getItem("oms_board_stage")) || "all";
@@ -603,6 +611,21 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     setDragId(null);
     try { await api("POST", "/orders/reorder", { stage: "production", ordered_ids: list }); }
     catch (e) { alert(e.message); load(); }
+  }
+  // Touch-proof reorder: move one card up (-1) or down (+1) within Production.
+  async function persistProduction(list) {
+    const byId = Object.fromEntries((board.production || []).map((o) => [o.id, o]));
+    setBoard({ ...board, production: list.map((id) => byId[id]) }); // optimistic
+    try { await api("POST", "/orders/reorder", { stage: "production", ordered_ids: list }); }
+    catch (e) { alert(e.message); load(); }
+  }
+  function reorderMove(id, dir) {
+    if (!board) return;
+    const list = (board.production || []).map((o) => o.id);
+    const i = list.indexOf(id), j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    persistProduction(list);
   }
   const filt = (arr) => {
     const q = search.trim().toLowerCase();
@@ -654,18 +677,29 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                 {s === "production" && canReorder && orders.length > 1 && (
-                  <div style={{ fontSize: 11, color: C.text3, marginBottom: 2 }}>↕ Drag cards to set priority order</div>
+                  <div style={{ fontSize: 11, color: C.text3, marginBottom: 2 }}>Use ▲▼ (or drag) to set priority order</div>
                 )}
-                {orders.map((o) => (s === "production" && canReorder) ? (
-                  <div key={o.id} draggable
-                    onDragStart={() => setDragId(o.id)} onDragEnd={() => setDragId(null)}
-                    onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); reorderTo(o.id); }}
-                    style={{ cursor: "grab", opacity: dragId === o.id ? 0.5 : 1 }}>
-                    <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} />
-                  </div>
-                ) : (
-                  <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} />
-                ))}
+                {orders.map((o) => {
+                  if (!(s === "production" && canReorder)) {
+                    return <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} />;
+                  }
+                  const full = (board && board.production) || [];
+                  const pi = full.findIndex((x) => x.id === o.id);
+                  const showDropLine = dragOverId === o.id && dragId && dragId !== o.id;
+                  return (
+                    <div key={o.id} draggable
+                      onDragStart={(e) => { setDragId(o.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", o.id); } catch (_) {} }}
+                      onDragEnd={() => { setDragId(null); setDragOverId(null); }}
+                      onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) {} if (dragOverId !== o.id) setDragOverId(o.id); }}
+                      onDragLeave={() => setDragOverId((cur) => (cur === o.id ? null : cur))}
+                      onDrop={(e) => { e.preventDefault(); setDragOverId(null); reorderTo(o.id); }}
+                      style={{ cursor: "grab", opacity: dragId === o.id ? 0.4 : 1, borderRadius: 11, boxShadow: showDropLine ? `inset 0 3px 0 ${C.accent}` : "none" }}>
+                      <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance}
+                        onReorderUp={pi > 0 ? () => reorderMove(o.id, -1) : null}
+                        onReorderDown={(pi >= 0 && pi < full.length - 1) ? () => reorderMove(o.id, 1) : null} />
+                    </div>
+                  );
+                })}
                 {orders.length === 0 && <Empty label="No orders" />}
               </div>
             </div>
@@ -934,10 +968,12 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
   const isDispatch = user.role === "delivery_team"; // delivery coordinator — keep their view delivery-focused
   const canAmend = ["super_admin", "admin"].includes(user.role); // may correct a placed line (qty / STK / unit)
   const [editItem, setEditItem] = useState(null); // { id, sku, name, quantity, unit } while editing a line
+  const [catalog, setCatalog] = useState([]); // STK catalogue for amend autofill (Boss/Admin)
   async function load() { try { const o = await api("GET", `/orders/${orderId}`); setOrder(o); setNotes(o.notes || ""); } catch (e) { setOrder({ _error: e.message }); } }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
   useEffect(() => { api("GET", `/delivery?order_id=${orderId}`).then((d) => setDelivery((d && d[0]) || null)).catch(() => setDelivery(null)); }, [orderId]);
   useEffect(() => { if (canMove) api("GET", "/users").then(setUsers).catch(() => setUsers([])); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { if (canAmend) api("GET", "/orders/skus").then((d) => setCatalog(d || [])).catch(() => setCatalog([])); /* eslint-disable-next-line */ }, []);
 
   async function doMove(to, why) {
     if (!to) return;
@@ -1145,8 +1181,14 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
         const doneLines = items.filter((it) => itemStatusKey(it) === "done").length;
         const pct = total > 0 ? Math.round((doneLines / total) * 100) : 0;
         const head = canAmend ? ["STK", "Product", "Qty", "Unit", "Status", ""] : ["STK", "Product", "Qty", "Unit", "Status"];
+        const bySku = Object.fromEntries(catalog.map((c) => [c.sku, c]));
+        const byName = Object.fromEntries(catalog.map((c) => [c.name, c]));
         return (
         <div>
+          {canAmend && <>
+            <datalist id="amend-stk">{catalog.map((c) => <option key={c.sku} value={c.sku}>{c.name}</option>)}</datalist>
+            <datalist id="amend-names">{catalog.map((c) => <option key={"an" + c.sku} value={c.name} />)}</datalist>
+          </>}
           {roleCanMark && !canMark && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 9, padding: "9px 12px", fontSize: 12.5, color: C.text2, marginBottom: 14 }}>
               <span aria-hidden>🔒</span>
@@ -1172,8 +1214,8 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
                 if (canAmend && editItem && editItem.id === it.id) {
                   return (
                     <div key={it.id} style={{ border: `1px solid ${C.accent}55`, borderRadius: 10, padding: 12, marginBottom: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-                      <input value={editItem.sku} onChange={(e) => setEditItem({ ...editItem, sku: e.target.value })} placeholder="STK" style={cellInput()} />
-                      <input value={editItem.name} onChange={(e) => setEditItem({ ...editItem, name: e.target.value })} placeholder="Product" style={cellInput()} />
+                      <input list="amend-stk" value={editItem.sku} onChange={(e) => { const v = e.target.value; const hit = bySku[v]; setEditItem({ ...editItem, sku: v, ...(hit ? { name: hit.name, unit: hit.unit || editItem.unit } : {}) }); }} placeholder="STK" style={cellInput()} />
+                      <input list="amend-names" value={editItem.name} onChange={(e) => { const v = e.target.value; const hit = byName[v]; setEditItem({ ...editItem, name: v, ...(hit ? { sku: hit.sku, unit: hit.unit || editItem.unit } : {}) }); }} placeholder="Product" style={cellInput()} />
                       <div style={{ display: "flex", gap: 8 }}>
                         <input type="number" min="0" value={editItem.quantity} onChange={(e) => setEditItem({ ...editItem, quantity: e.target.value })} placeholder="Qty" style={cellInput()} />
                         <input value={editItem.unit} onChange={(e) => setEditItem({ ...editItem, unit: e.target.value })} placeholder="Unit" style={cellInput()} />
@@ -1209,8 +1251,8 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
                 if (canAmend && editItem && editItem.id === it.id) {
                   return (
                   <tr key={it.id} style={{ borderBottom: `1px solid ${C.border}`, background: C.surface2 }}>
-                    <td style={{ padding: "6px 10px" }}><input value={editItem.sku} onChange={(e) => setEditItem({ ...editItem, sku: e.target.value })} style={cellInput(95)} /></td>
-                    <td style={{ padding: "6px 10px" }}><input value={editItem.name} onChange={(e) => setEditItem({ ...editItem, name: e.target.value })} style={cellInput()} /></td>
+                    <td style={{ padding: "6px 10px" }}><input list="amend-stk" value={editItem.sku} onChange={(e) => { const v = e.target.value; const hit = bySku[v]; setEditItem({ ...editItem, sku: v, ...(hit ? { name: hit.name, unit: hit.unit || editItem.unit } : {}) }); }} style={cellInput(95)} /></td>
+                    <td style={{ padding: "6px 10px" }}><input list="amend-names" value={editItem.name} onChange={(e) => { const v = e.target.value; const hit = byName[v]; setEditItem({ ...editItem, name: v, ...(hit ? { sku: hit.sku, unit: hit.unit || editItem.unit } : {}) }); }} style={cellInput()} /></td>
                     <td style={{ padding: "6px 10px" }}><input type="number" min="0" value={editItem.quantity} onChange={(e) => setEditItem({ ...editItem, quantity: e.target.value })} style={cellInput(70)} /></td>
                     <td style={{ padding: "6px 10px" }}><input value={editItem.unit} onChange={(e) => setEditItem({ ...editItem, unit: e.target.value })} style={cellInput(70)} /></td>
                     <td style={{ padding: "6px 10px" }}>{pill}</td>
@@ -1232,7 +1274,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
           </table>
           )}
           {items.length > 0 && canAmend && (
-            <div style={{ marginTop: 10, fontSize: 11.5, color: C.text3 }}>You can correct a line's STK, quantity or unit here. Adding or removing whole lines still happens in SQL Account.</div>
+            <div style={{ marginTop: 10, fontSize: 11.5, color: C.text3 }}>Correct a line's STK, quantity or unit here. This changes OMS only — it won't update the SQL Account invoice, so keep them matching. Adding or removing whole lines still happens in SQL Account.</div>
           )}
           {items.length > 0 && !canAmend && canMove && (
             <div style={{ marginTop: 10, fontSize: 11.5, color: C.text3 }}>Line items are locked to match the invoice — only an item's status can change. To correct a STK or quantity, fix it in SQL Account.</div>
