@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
+import autoTableImport from "jspdf-autotable";
 
 // ─── API client ──────────────────────────────────────────────────────────────
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
@@ -1623,34 +1623,32 @@ function Reports({ user }) {
     setBusy("pdf");
     try {
       const data = await fetchReportData();
+      // jspdf-autotable's default export can arrive as the fn or as { default: fn } depending on the bundler.
+      const autoTable = typeof autoTableImport === "function" ? autoTableImport : (autoTableImport && autoTableImport.default);
+      if (typeof autoTable !== "function") throw new Error("table plugin did not load");
+      // jsPDF's built-in fonts are WinAnsi — swap dashes/arrows so they don't render as boxes.
+      const ascii = (v) => String(v == null ? "" : v).replace(/[—–−]/g, "-").replace(/→/g, "->");
       const doc = new jsPDF();
-      doc.setFontSize(16); doc.setTextColor(20); doc.text("Wawasan Candle — Reports", 14, 18);
-      doc.setFontSize(10); doc.setTextColor(120); doc.text(`Range: ${rangeLabel}`, 14, 25);
-      let y = 32;
+      let y = 18;
+      doc.setFontSize(16); doc.setTextColor(20); doc.text("Wawasan Candle - Reports", 14, y); y += 7;
+      doc.setFontSize(10); doc.setTextColor(120); doc.text(`Range: ${ascii(rangeLabel)}`, 14, y); y += 8;
+      const section = (title, head, body, fill) => {
+        if (!body.length) return;
+        if (y > 250) { doc.addPage(); y = 18; }
+        doc.setFontSize(12); doc.setTextColor(20); doc.text(ascii(title), 14, y);
+        autoTable(doc, { startY: y + 3, head: [head], body: body.map((r) => r.map(ascii)), theme: "striped", headStyles: { fillColor: fill || [249, 115, 22] }, margin: { left: 14, right: 14 } });
+        y = (doc.lastAutoTable && doc.lastAutoTable.finalY != null ? doc.lastAutoTable.finalY : y + 8 + body.length * 8) + 7;
+      };
       for (const key of tabsForRole.filter((k) => metricDefs[k])) {
         const dd = data[key] || {};
-        if (y > 250) { doc.addPage(); y = 18; }
-        doc.setFontSize(12); doc.setTextColor(20); doc.text(META[key], 14, y);
-        autoTable(doc, { startY: y + 3, head: [["Metric", "Value"]], body: kpiRows(key, dd), theme: "striped", headStyles: { fillColor: [249, 115, 22] }, margin: { left: 14, right: 14 } });
-        y = doc.lastAutoTable.finalY + 7;
-        if ((dd.by_delivery_man || []).length) {
-          if (y > 250) { doc.addPage(); y = 18; }
-          autoTable(doc, { startY: y, head: [["Courier", "Deliveries", "On time"]], body: dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]), theme: "grid", headStyles: { fillColor: [120, 120, 120] }, margin: { left: 14, right: 14 } });
-          y = doc.lastAutoTable.finalY + 7;
-        }
+        section(META[key], ["Metric", "Value"], kpiRows(key, dd));
+        if ((dd.by_delivery_man || []).length) section(`${META[key]} - couriers`, ["Courier", "Deliveries", "On time"], dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]), [120, 120, 120]);
       }
-      if (data._staff && data._staff.length) {
-        if (y > 250) { doc.addPage(); y = 18; }
-        doc.setFontSize(12); doc.setTextColor(20); doc.text("Staff productivity", 14, y);
-        autoTable(doc, { startY: y + 3, head: [["Name", "Role", "Done", "Items", "Reworks"]], body: data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks]), theme: "striped", headStyles: { fillColor: [249, 115, 22] }, margin: { left: 14, right: 14 } });
-        y = doc.lastAutoTable.finalY + 7;
-      }
-      if (data._pics && data._pics.length) {
-        if (y > 250) { doc.addPage(); y = 18; }
-        doc.setFontSize(12); doc.setTextColor(20); doc.text("Person in charge", 14, y);
-        autoTable(doc, { startY: y + 3, head: [["Name", "Role", "Open", "Overdue", "On hold", "Completed"]], body: data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed]), theme: "striped", headStyles: { fillColor: [249, 115, 22] }, margin: { left: 14, right: 14 } });
-      }
+      if (data._staff && data._staff.length) section("Staff productivity", ["Name", "Role", "Done", "Items", "Reworks"], data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks]));
+      if (data._pics && data._pics.length) section("Person in charge", ["Name", "Role", "Open", "Overdue", "On hold", "Completed"], data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed]));
       doc.save(`reports-${fileTag}.pdf`);
+    } catch (e) {
+      alert(`PDF export failed: ${e && e.message ? e.message : e}`);
     } finally { setBusy(""); }
   }
   return (
