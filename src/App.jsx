@@ -526,7 +526,7 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
     </Modal>
   );
 }
-function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refreshKey, onCount }) {
+function OrderBoard({ user, search, weekOnly, statusFilter, mineOnly, onOpenOrder, refreshKey, onCount }) {
   const [board, setBoard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -560,6 +560,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     const q = search.trim().toLowerCase();
     let out = arr;
     if (q) out = out.filter((o) => o.invoice_number.toLowerCase().includes(q) || (o.customer_name || "").toLowerCase().includes(q));
+    if (mineOnly) out = out.filter((o) => o.pic_id === user.id);
     if (statusFilter === "urgent") out = out.filter((o) => o.priority === "urgent");
     else if (statusFilter === "late") out = out.filter((o) => (daysUntil(o.required_delivery_date) ?? 0) < 0);
     else if (statusFilter === "on_hold") out = out.filter((o) => o.on_hold);
@@ -841,6 +842,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
   const canMark = ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff"].includes(user.role);
   const isLead = user.role === "production_lead";
   const isFloor = ["production_staff", "packing_staff"].includes(user.role); // pure floor worker — keep their view minimal
+  const isDispatch = user.role === "delivery_team"; // delivery coordinator — keep their view delivery-focused
 
   async function load() { try { const o = await api("GET", `/orders/${orderId}`); setOrder(o); setNotes(o.notes || ""); } catch (e) { setOrder({ _error: e.message }); } }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
@@ -910,7 +912,7 @@ function OrderDetail({ orderId, user, onUpdated }) {
   if (!order) return <Loading />;
   if (order._error) return <div style={{ color: "#fca5a5" }}>⚠ {order._error}</div>;
   const cfg = STAGE_LABELS[order.stage] || { label: order.stage, color: C.text3 };
-  const tabs = isFloor ? ["items", "details"] : ["details", "items", "timeline", "attachments"];
+  const tabs = isFloor ? ["items", "details"] : isDispatch ? ["details", "items"] : ["details", "items", "timeline", "attachments"];
   const picRoles = STAGE_PIC_ROLES[order.stage];
   const picUsers = picRoles ? users.filter((u) => picRoles.includes(u.role)) : users;
 
@@ -956,6 +958,9 @@ function OrderDetail({ orderId, user, onUpdated }) {
             <LV label="Expiry" v={order.expiry_date ? fmtDay(order.expiry_date) : "—"} />
             <LV label="Person in charge" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />
             <LV label="Source" v={order.source === "sql_account" ? "Auto-imported" : "Manual entry"} />
+            {delivery && <LV label="Courier" v={delivery.delivery_man_name || "Not scheduled yet"} />}
+            {delivery && delivery.scheduled_date && <LV label="Scheduled" v={fmtDay(delivery.scheduled_date)} />}
+            {delivery && delivery.tracking_no && <LV label="Tracking" v={<span style={{ fontFamily: MONO, fontSize: 13 }}>{delivery.tracking_no}</span>} />}
             {order.customer_name != null && delivery && delivery.address && <LV label="Delivery address" v={delivery.address} />}
           </div>
           <div style={{ marginTop: 18 }}>
@@ -1687,7 +1692,6 @@ function Delivery({ user, onOpenOrder }) {
                 rows={[
                   ["Customer", o.customer_name || "—"],
                   ["Due", <span style={{ color: countdown(o.required_delivery_date).tone }}>{fmtDay(o.required_delivery_date)}</span>],
-                  ["Expiry", o.expiry_date ? fmtDay(o.expiry_date) : "—"],
                 ]}
                 actions={<Btn size="lg" style={{ width: "100%", justifyContent: "center" }} onClick={() => scheduleFor(o.id)}>Schedule →</Btn>}
               />
@@ -1730,10 +1734,7 @@ function Delivery({ user, onOpenOrder }) {
               </>}
               rows={[
                 ["Customer", dv.customer_name || "—"],
-                ["Address", dv.address || "—"],
                 ["Courier", dv.delivery_man_name || "—"],
-                ["Tracking", <span style={{ fontFamily: MONO }}>{dv.tracking_no || "—"}</span>],
-                ["Scheduled", dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"],
                 ["Due", <span style={{ color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</span>],
               ]}
               actions={<>
@@ -1786,9 +1787,7 @@ function Delivery({ user, onOpenOrder }) {
                 </>}
                 rows={[
                   ["Customer", o.customer_name || "—"],
-                  ["Courier", dv && dv.delivery_man_name ? dv.delivery_man_name : "—"],
                   ["Delivered", dv && dv.delivered_at ? fmtDateTime(dv.delivered_at) : "Delivered"],
-                  ["Due", fmtDay(o.required_delivery_date)],
                 ]}
               />
             );
@@ -2339,6 +2338,7 @@ export default function App() {
   const [page, setPage] = useState("board");
   const [search, setSearch] = useState("");
   const [weekOnly, setWeekOnly] = useState(false);
+  const [mineOnly, setMineOnly] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
@@ -2439,6 +2439,9 @@ export default function App() {
             <button onClick={() => setWeekOnly((w) => !w)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: weekOnly ? C.accent + "1c" : C.surface, border: `1px solid ${weekOnly ? C.accent + "55" : C.border2}`, borderRadius: 9, color: weekOnly ? C.accent : C.text2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
               <Icon name="calendar" size={15} color={weekOnly ? C.accent : C.text3} /> This week only
             </button>
+            <button onClick={() => setMineOnly((m) => !m)} title="Only orders I'm the person in charge of" style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: mineOnly ? C.accent + "1c" : C.surface, border: `1px solid ${mineOnly ? C.accent + "55" : C.border2}`, borderRadius: 9, color: mineOnly ? C.accent : C.text2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+              <Icon name="users" size={15} color={mineOnly ? C.accent : C.text3} /> My orders
+            </button>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} title="Filter by status" style={{ padding: "8px 12px", background: statusFilter ? C.accent + "1c" : C.surface, border: `1px solid ${statusFilter ? C.accent + "55" : C.border2}`, borderRadius: 9, color: statusFilter ? C.accent : C.text2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
               <option value="" style={{ background: C.bg2, color: C.text }}>All statuses</option>
               <option value="urgent" style={{ background: C.bg2, color: C.text }}>Urgent only</option>
@@ -2450,7 +2453,7 @@ export default function App() {
         )}
 
         <main style={{ flex: 1, padding: isMobile ? "16px 14px 32px" : "20px 26px 40px", overflowX: "auto" }}>
-          {page === "board" && <OrderBoard user={user} search={search} weekOnly={weekOnly} statusFilter={statusFilter} refreshKey={boardKey} onOpenOrder={(o) => setSelectedOrder(o.id)} onCount={setBoardCount} />}
+          {page === "board" && <OrderBoard user={user} search={search} weekOnly={weekOnly} statusFilter={statusFilter} mineOnly={mineOnly} refreshKey={boardKey} onOpenOrder={(o) => setSelectedOrder(o.id)} onCount={setBoardCount} />}
           {page === "dashboard" && <Dashboard onOpenOrder={(id) => setSelectedOrder(id)} />}
           {page === "delivery" && <Delivery user={user} onOpenOrder={(id) => setSelectedOrder(id)} />}
           {page === "reports" && <Reports user={user} />}
