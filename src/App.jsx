@@ -509,7 +509,11 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [confirmAdv, setConfirmAdv] = useState(null);
-  const [viewStage, setViewStage] = useState("all");
+  const [viewStage, setViewStageRaw] = useState(() => {
+    const saved = (typeof localStorage !== "undefined" && localStorage.getItem("oms_board_stage")) || "all";
+    return saved === "all" || visibleStages(user.role).includes(saved) ? saved : "all";
+  });
+  const setViewStage = (s) => { setViewStageRaw(s); try { localStorage.setItem("oms_board_stage", s); } catch (e) {} };
   const canMove = ["super_admin", "operations_controller"].includes(user.role);
   const stages = visibleStages(user.role);
 
