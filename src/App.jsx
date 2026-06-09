@@ -79,7 +79,7 @@ const STAGE_LABELS = {
 };
 const ROLE_LABELS = {
   super_admin: "Boss", admin: "Admin", operations_controller: "Ops",
-  production_lead: "Production Lead", production_staff: "Production Staff",
+  production_lead: "Production Head", production_staff: "Production Staff",
   packing_staff: "Packing Staff", delivery_team: "Delivery Coordinator",
 };
 // Every role except the system-only Admin — for nav pages Admin shouldn't see.
@@ -105,6 +105,9 @@ const IMPORTANCE_OPTS = [
   { value: "vip", label: "VIP" },
 ];
 const impCfg = (level) => IMPORTANCE[level] || IMPORTANCE.standard;
+// Priority tier ranking (lower = more important) for drag-to-reorder inference.
+const IMP_RANK = { vip: 0, priority: 1, standard: 2 };
+const IMP_BY_RANK = ["vip", "priority", "standard"];
 
 // Delivery sub-status pill for Ready-for-Delivery cards (board + floor): once a
 // delivery is scheduled the order reads "Pending", otherwise "Ready for Delivery".
@@ -600,22 +603,46 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     try { await api("POST", `/orders/${order.id}/move`, { to_stage: to }); setConfirmAdv(null); load(); }
     catch (e) { alert(e.message); }
   }
-  // Reorder cards within a stage column (manual priority order), shared for everyone.
-  async function persistOrder(stage, list) {
+  // Infer the moved card's priority tier from its new neighbours (the "be smart" rule):
+  // same tier both sides → that tier; a 2-step gap (VIP & Standard) → the middle (Priority);
+  // adjacent tiers → the LOWER (less important) one, so nudging a card up never over-promotes
+  // it; at an end → the adjacent card's tier.
+  function inferImportance(stage, orderedIds, movedId) {
+    const colu = board[stage] || [];
+    const arr = orderedIds.map((id) => colu.find((o) => o.id === id)).filter(Boolean);
+    const k = arr.findIndex((o) => o.id === movedId);
+    if (k < 0) return null;
+    const ai = arr[k - 1] ? IMP_RANK[arr[k - 1].importance] : null;
+    const bi = arr[k + 1] ? IMP_RANK[arr[k + 1].importance] : null;
+    let rank;
+    if (ai != null && bi != null) {
+      if (ai === bi) rank = ai;
+      else { const lo = Math.min(ai, bi), hi = Math.max(ai, bi); rank = (hi - lo >= 2) ? Math.round((lo + hi) / 2) : hi; }
+    } else if (bi != null) rank = bi;
+    else if (ai != null) rank = ai;
+    else return null;
+    const imp = IMP_BY_RANK[rank];
+    const moved = colu.find((o) => o.id === movedId);
+    return (moved && imp && imp !== moved.importance) ? imp : null;
+  }
+  // Reorder within a column + set the moved card's priority tier from neighbours. Shared.
+  async function applyReorder(stage, orderedIds, movedId) {
+    const imp = inferImportance(stage, orderedIds, movedId);
     const byId = Object.fromEntries((board[stage] || []).map((o) => [o.id, o]));
-    setBoard({ ...board, [stage]: list.map((id) => byId[id]) }); // optimistic
-    try { await api("POST", "/orders/reorder", { stage, ordered_ids: list }); }
+    const next = orderedIds.map((id) => (imp && id === movedId) ? { ...byId[id], importance: imp } : byId[id]);
+    setBoard({ ...board, [stage]: next }); // optimistic
+    setDragId(null);
+    try { await api("POST", "/orders/reorder", { stage, ordered_ids: orderedIds, set_importance: imp ? { id: movedId, importance: imp } : undefined }); }
     catch (e) { alert(e.message); load(); }
   }
   // Drag within a column. Cross-column drags are a no-op (use the → arrow to advance a stage).
-  async function reorderTo(stage, targetId) {
+  function reorderTo(stage, targetId) {
     if (!dragId || dragId === targetId || !board) { setDragId(null); return; }
     const list = (board[stage] || []).map((o) => o.id);
     const from = list.indexOf(dragId), to = list.indexOf(targetId);
     if (from < 0 || to < 0) { setDragId(null); return; }
     list.splice(to, 0, list.splice(from, 1)[0]);
-    setDragId(null);
-    persistOrder(stage, list);
+    applyReorder(stage, list, dragId);
   }
   // Touch-proof: move one card up (-1) or down (+1) within its column.
   function reorderMove(stage, id, dir) {
@@ -624,7 +651,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     const i = list.indexOf(id), j = i + dir;
     if (i < 0 || j < 0 || j >= list.length) return;
     [list[i], list[j]] = [list[j], list[i]];
-    persistOrder(stage, list);
+    applyReorder(stage, list, id);
   }
   const filt = (arr) => {
     const q = search.trim().toLowerCase();
@@ -2508,7 +2535,7 @@ function Remarks({ user }) {
             <Icon name="message" size={20} color={C.accent} />
             <span style={{ fontSize: 16, fontWeight: 800, color: C.text }}>This week — {weekLabel}</span>
           </div>
-          <span style={{ fontSize: 13, color: C.text3 }}>Visible to Admin &amp; Production Lead</span>
+          <span style={{ fontSize: 13, color: C.text3 }}>Visible to Admin &amp; Production Head</span>
         </div>
         {canPost ? (
           <>
@@ -2653,7 +2680,6 @@ function Users({ user }) {
   const [newPw, setNewPw] = useState("");
   const [q, setQ] = useState("");
   const [roleF, setRoleF] = useState("");
-  const [statusF, setStatusF] = useState("");
   const [showDisabled, setShowDisabled] = useState(false); // disabled staff collapsed by default
   const isAdmin = user.role === "super_admin";
   function load() { api("GET", "/users").then(setList).catch(() => setList([])); }
@@ -2675,16 +2701,15 @@ function Users({ user }) {
   const ql = q.trim().toLowerCase();
   const filtered = list.filter((u) =>
     (!ql || u.name.toLowerCase().includes(ql) || (u.email || "").toLowerCase().includes(ql)) &&
-    (!roleF || u.role === roleF) &&
-    (!statusF || (statusF === "active" ? u.is_active : !u.is_active))
+    (!roleF || u.role === roleF)
   );
   // Neat order: by role seniority, then name. Active up top; disabled collapsed below.
   const roleRank = { super_admin: 0, admin: 1, operations_controller: 2, production_lead: 3, production_staff: 4, packing_staff: 5, delivery_team: 6 };
   const byRank = (a, b) => ((roleRank[a.role] ?? 9) - (roleRank[b.role] ?? 9)) || a.name.localeCompare(b.name);
   const activeUsers = filtered.filter((u) => u.is_active).sort(byRank);
   const disabledUsers = filtered.filter((u) => !u.is_active).sort(byRank);
-  const showActive = statusF !== "disabled";
-  const showInactive = statusF === "disabled" || (statusF === "" && showDisabled);
+  const showActive = true;
+  const showInactive = showDisabled;
   const visibleCount = (showActive ? activeUsers.length : 0) + (showInactive ? disabledUsers.length : 0);
   const ctrl = { padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13 };
   const renderRow = (u) => (
@@ -2713,11 +2738,6 @@ function Users({ user }) {
           <option value="" style={{ background: C.bg2 }}>All roles</option>
           {Object.entries(ROLE_LABELS).map(([v, l]) => <option key={v} value={v} style={{ background: C.bg2 }}>{l}</option>)}
         </select>
-        <select value={statusF} onChange={(e) => setStatusF(e.target.value)} style={ctrl}>
-          <option value="" style={{ background: C.bg2 }}>All status</option>
-          <option value="active" style={{ background: C.bg2 }}>Active</option>
-          <option value="disabled" style={{ background: C.bg2 }}>Disabled</option>
-        </select>
         <span style={{ fontSize: 12.5, color: C.text3 }}>{filtered.length} of {list.length}</span>
         <Btn onClick={() => setShow(true)} style={{ marginLeft: "auto" }}><Icon name="plus" size={15} /> Add user</Btn>
       </div>
@@ -2734,7 +2754,7 @@ function Users({ user }) {
           </tbody>
         </table>
       </Card>
-      {statusF === "" && disabledUsers.length > 0 && (
+      {disabledUsers.length > 0 && (
         <button onClick={() => setShowDisabled((s) => !s)} style={{ marginTop: 10, background: "none", border: `1px solid ${C.border2}`, color: C.text2, borderRadius: 8, padding: "7px 13px", cursor: "pointer", fontSize: 12.5 }}>
           {showDisabled ? `Hide disabled staff` : `Show ${disabledUsers.length} disabled / former staff`}
         </button>
