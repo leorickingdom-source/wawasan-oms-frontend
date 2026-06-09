@@ -70,6 +70,12 @@ const ROLE_LABELS = {
 };
 // Every role except the system-only Admin — for nav pages Admin shouldn't see.
 const NON_ADMIN_ROLES = ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff", "delivery_team"];
+// The Order Board kanban and Floor Display are for the production-floor roles.
+// The Delivery Coordinator works only the Delivery workspace; on the board they
+// would see a single, non-actionable "Ready for Delivery" column that just
+// duplicates that workspace. Hiding board + floor for them removes the overlap
+// and lands them straight in Delivery (their only nav item).
+const BOARD_ROLES = NON_ADMIN_ROLES.filter((r) => r !== "delivery_team");
 
 // Customer importance tiers — mirrors the backend `importance` column (low → high).
 // Production-floor roles see this in place of the customer name. To rename a tier,
@@ -97,8 +103,8 @@ function deliveryTag(o) {
 }
 
 const NAV = [
-  { id: "board", label: "Order Board", icon: "board", roles: NON_ADMIN_ROLES },
-  { id: "floor", label: "Floor Display", icon: "display", roles: NON_ADMIN_ROLES },
+  { id: "board", label: "Order Board", icon: "board", roles: BOARD_ROLES },
+  { id: "floor", label: "Floor Display", icon: "display", roles: BOARD_ROLES },
   { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "operations_controller"] },
   { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "operations_controller", "delivery_team"] },
   { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "operations_controller"] },
@@ -1420,6 +1426,7 @@ function Delivery({ user }) {
   const [editForm, setEditForm] = useState({ deliverer_id: "", scheduled_date: "", address: "", notes: "", tracking_no: "" });
   const [editOther, setEditOther] = useState("");
   const [showCouriers, setShowCouriers] = useState(false);
+  const [q, setQ] = useState("");
   const canAssign = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
   const canDeliver = ["super_admin", "operations_controller", "delivery_team"].includes(user.role);
 
@@ -1488,19 +1495,35 @@ function Delivery({ user }) {
   const active = list.filter((x) => x.status !== "delivered");
   const delByOrder = {};
   for (const dv of list) delByOrder[dv.order_id] = dv;
-  const shownCompleted = allCompleted ? completed : completed.slice(0, 3);
+  // Filter every table by invoice # or customer name (mirrors the Order Board search).
+  const qq = q.trim().toLowerCase();
+  const match = (o) => !qq || (o.invoice_number || "").toLowerCase().includes(qq) || (o.customer_name || "").toLowerCase().includes(qq);
+  const fReady = ready.filter(match);
+  const fActive = active.filter(match);
+  const fCompleted = completed.filter(match);
+  const shownCompleted = allCompleted ? fCompleted : fCompleted.slice(0, 3);
+  const matchCount = fReady.length + fActive.length + fCompleted.length;
+  const noMatch = qq ? `No match for "${q.trim()}"` : null;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", width: 300, maxWidth: "100%" }}>
+          <span style={{ position: "absolute", left: 11, top: 9 }}><Icon name="search" size={15} color={C.text3} /></span>
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by invoice or customer…" style={{ width: "100%", padding: "8px 12px 8px 34px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5, outline: "none" }} />
+        </div>
+        {qq && <span style={{ fontSize: 12.5, color: C.text3 }}>{matchCount} {matchCount === 1 ? "match" : "matches"}</span>}
+        {qq && <Btn variant="ghost" size="sm" onClick={() => setQ("")}>Clear</Btn>}
+      </div>
       {canAssign && (
         <div>
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Ready for Delivery · {ready.length}</h3>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Ready for Delivery · {fReady.length}</h3>
           <Card style={{ padding: 0, overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
               <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Due", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
               <tbody>
-                {ready.length === 0 && <tr><td colSpan={5}><Empty label="No orders waiting to be scheduled." /></td></tr>}
-                {ready.map((o) => (
+                {fReady.length === 0 && <tr><td colSpan={5}><Empty label={noMatch || "No orders waiting to be scheduled."} /></td></tr>}
+                {fReady.map((o) => (
                   <tr key={o.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                     <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{o.invoice_number}</td>
                     <td style={{ padding: "11px 16px", color: C.text2 }}>{o.customer_name}</td>
@@ -1517,15 +1540,15 @@ function Delivery({ user }) {
 
       <div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Pending · {active.length}</h3>
-          {active.length > 0 && <Btn variant="soft" size="sm" onClick={() => printRouteList(active)}>Print route list</Btn>}
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Pending · {fActive.length}</h3>
+          {fActive.length > 0 && <Btn variant="soft" size="sm" onClick={() => printRouteList(fActive)}>Print route list</Btn>}
         </div>
         <Card style={{ padding: 0, overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
             <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Address", "Courier", "Tracking", "Scheduled", "Due", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
-              {active.length === 0 && <tr><td colSpan={9}><Empty label="Nothing pending. Schedule a Ready-for-Delivery order above." /></td></tr>}
-              {active.map((dv) => (
+              {fActive.length === 0 && <tr><td colSpan={9}><Empty label={noMatch || "Nothing pending. Schedule a Ready-for-Delivery order above."} /></td></tr>}
+              {fActive.map((dv) => (
                 <tr key={dv.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                   <td style={{ padding: "11px 16px", fontFamily: MONO, color: C.text }}>{dv.invoice_number}</td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.customer_name}</td>
@@ -1549,12 +1572,12 @@ function Delivery({ user }) {
       </div>
 
       <div>
-        <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Completed orders · {completed.length}</h3>
+        <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Completed orders · {fCompleted.length}</h3>
         <Card style={{ padding: 0, overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
             <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Courier", "Delivered", "Due"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
-              {completed.length === 0 && <tr><td colSpan={5}><Empty label="No completed orders yet." /></td></tr>}
+              {fCompleted.length === 0 && <tr><td colSpan={5}><Empty label={noMatch || "No completed orders yet."} /></td></tr>}
               {shownCompleted.map((o) => {
                 const dv = delByOrder[o.id];
                 return (
@@ -1570,7 +1593,7 @@ function Delivery({ user }) {
             </tbody>
           </table>
         </Card>
-        {completed.length > 3 && <div style={{ marginTop: 10 }}><Btn variant="ghost" size="sm" onClick={() => setAllCompleted((v) => !v)}>{allCompleted ? "Show less ▲" : `Show all ${completed.length} ▼`}</Btn></div>}
+        {fCompleted.length > 3 && <div style={{ marginTop: 10 }}><Btn variant="ghost" size="sm" onClick={() => setAllCompleted((v) => !v)}>{allCompleted ? "Show less ▲" : `Show all ${fCompleted.length} ▼`}</Btn></div>}
       </div>
 
       {canAssign && (
