@@ -544,6 +544,15 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
   const setViewStage = (s) => { setViewStageRaw(s); try { localStorage.setItem("oms_board_stage", s); } catch (e) {} };
   const canMove = ["super_admin", "operations_controller"].includes(user.role);
   const stages = visibleStages(user.role);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
+  const toggleSel = (id) => setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  async function deleteSelected() {
+    if (!selected.size) return;
+    if (!window.confirm(`Delete ${selected.size} order${selected.size === 1 ? "" : "s"}? This removes them and any queued messages. Cannot be undone.`)) return;
+    try { await api("POST", "/orders/bulk-delete", { ids: [...selected] }); setSelected(new Set()); setSelectMode(false); load(); }
+    catch (e) { alert(e.message); }
+  }
 
   async function load() {
     setLoading(true); setErr("");
@@ -597,6 +606,13 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
           })}
         </div>
       )}
+      {canMove && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+          <button onClick={() => { setSelectMode((v) => !v); setSelected(new Set()); }} style={{ padding: "7px 12px", borderRadius: 8, border: `1px solid ${selectMode ? C.danger + "66" : C.border2}`, background: selectMode ? C.danger + "1c" : C.surface, color: selectMode ? C.danger : C.text2, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>{selectMode ? "Cancel select" : "Select to delete"}</button>
+          {selectMode && <span style={{ fontSize: 12.5, color: C.text3 }}>{selected.size} selected — tap cards to pick</span>}
+          {selectMode && selected.size > 0 && <Btn variant="danger" size="sm" onClick={deleteSelected}>Delete {selected.size} order{selected.size === 1 ? "" : "s"}</Btn>}
+        </div>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: shownStages.length === 1 ? `repeat(1, minmax(min(100%, 280px), 560px))` : `repeat(auto-fit, minmax(min(100%, 250px), 1fr))`, gap: 16, alignItems: "start" }}>
         {shownStages.map((s) => {
           const cfg = STAGES[s];
@@ -611,7 +627,12 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
                 <span style={{ background: C.surface2, color: C.text2, borderRadius: 7, padding: "1px 9px", fontSize: 13, fontWeight: 700 }}>{orders.length}</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                {orders.map((o) => <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} />)}
+                {orders.map((o) => selectMode ? (
+                  <div key={o.id} onClick={() => toggleSel(o.id)} style={{ position: "relative", cursor: "pointer", borderRadius: 13, outline: selected.has(o.id) ? `2px solid ${C.danger}` : "none" }}>
+                    <input type="checkbox" readOnly checked={selected.has(o.id)} style={{ position: "absolute", top: 10, left: 10, zIndex: 3, width: 18, height: 18, accentColor: C.danger }} />
+                    <div style={{ pointerEvents: "none" }}><KanbanCard order={o} user={user} onOpen={() => {}} onAdvance={() => {}} /></div>
+                  </div>
+                ) : <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} />)}
                 {orders.length === 0 && <Empty label="No orders" />}
               </div>
             </div>
@@ -828,7 +849,7 @@ function FloorDisplay({ onExit }) {
 }
 
 // ─── Order detail modal ──────────────────────────────────────────────────────
-function OrderDetail({ orderId, user, onUpdated }) {
+function OrderDetail({ orderId, user, onUpdated, onClose }) {
   const [order, setOrder] = useState(null);
   const [delivery, setDelivery] = useState(null);
   const [tab, setTab] = useState(["production_staff", "packing_staff"].includes(user.role) ? "items" : "details");
@@ -848,6 +869,11 @@ function OrderDetail({ orderId, user, onUpdated }) {
   const isLead = user.role === "production_lead";
   const isFloor = ["production_staff", "packing_staff"].includes(user.role); // pure floor worker — keep their view minimal
   const isDispatch = user.role === "delivery_team"; // delivery coordinator — keep their view delivery-focused
+  async function deleteOrder() {
+    if (!window.confirm(`Delete order ${order.invoice_number}? This removes it and any of its queued messages. Cannot be undone.`)) return;
+    try { await api("DELETE", `/orders/${orderId}`); onUpdated && onUpdated(); onClose && onClose(); }
+    catch (e) { alert(e.message); }
+  }
 
   async function load() { try { const o = await api("GET", `/orders/${orderId}`); setOrder(o); setNotes(o.notes || ""); } catch (e) { setOrder({ _error: e.message }); } }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
@@ -934,7 +960,10 @@ function OrderDetail({ orderId, user, onUpdated }) {
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <span style={{ fontSize: 13, color: C.text3 }}>{order.created_by_name ? `Created by ${order.created_by_name}` : ""} {order.order_date ? `· ${fmtDay(order.order_date)}` : ""}</span>
-        <Btn variant="ghost" size="sm" onClick={() => printPickingSlip(order)}>Print picking slip</Btn>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn variant="ghost" size="sm" onClick={() => printPickingSlip(order)}>Print picking slip</Btn>
+          {canMove && <Btn variant="danger" size="sm" onClick={deleteOrder}>Delete</Btn>}
+        </div>
       </div>
 
       <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${C.border}`, marginBottom: 16 }}>
@@ -1846,8 +1875,7 @@ function Messages({ user }) {
         </span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Btn variant="soft" size="sm" disabled={!!busy} onClick={() => act("enqueue", "/whatsapp/enqueue")}>{busy === "enqueue" ? "Queuing…" : "Queue customer messages"}</Btn>
-          <Btn variant="soft" size="sm" disabled={!!busy} onClick={() => act("brief", "/whatsapp/morning-brief")}>{busy === "brief" ? "…" : "Morning brief"}</Btn>
-          {queued > 0 && <Btn variant="danger" size="sm" disabled={!!busy} onClick={async () => { if (window.confirm(`Cancel ${queued} queued message${queued === 1 ? "" : "s"}? They will NOT be sent.`)) await act("cancel", "/whatsapp/cancel"); }}>{busy === "cancel" ? "Cancelling…" : "Cancel queued"}</Btn>}
+          {queued > 0 && <Btn variant="danger" size="sm" disabled={!!busy} onClick={async () => { if (window.confirm(`Delete ${queued} queued message${queued === 1 ? "" : "s"}? They're removed from the list and not sent.`)) await act("cancel", "/whatsapp/cancel"); }}>{busy === "cancel" ? "Deleting…" : "Delete queued"}</Btn>}
           <Btn size="sm" disabled={!!busy || queued === 0} onClick={() => setConfirmSend(true)}>{busy === "drip" ? "Sending…" : `Send ${queued} queued →`}</Btn>
         </div>
       </div>
@@ -2744,6 +2772,7 @@ export default function App() {
                 <Icon name={n.icon} size={18} color={active ? C.accent : C.text3} />
                 <span style={{ flex: 1 }}>{n.label}</span>
                 {n.id === "board" && boardCount != null && <span style={{ background: active ? C.accent + "33" : C.surface2, color: active ? C.accent : C.text3, borderRadius: 6, padding: "0 7px", fontSize: 12, fontWeight: 700 }}>{boardCount}</span>}
+                {n.id === "messages" && <span style={{ background: "#3a2a0a", color: C.accent, borderRadius: 6, padding: "1px 6px", fontSize: 9.5, fontWeight: 800, letterSpacing: 0.5 }}>DEMO</span>}
               </button>
             );
           })}
@@ -2809,7 +2838,7 @@ export default function App() {
       {showNotifs && <NotificationsPanel onClose={() => setShowNotifs(false)} onChanged={() => setUnread(0)} />}
 
       <Modal open={!!selectedOrder} onClose={() => setSelectedOrder(null)} title="Order detail" width={640}>
-        {selectedOrder && <OrderDetail orderId={selectedOrder} user={user} onUpdated={bumpBoard} />}
+        {selectedOrder && <OrderDetail orderId={selectedOrder} user={user} onUpdated={bumpBoard} onClose={() => setSelectedOrder(null)} />}
       </Modal>
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create new order" width={620}>
