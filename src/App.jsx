@@ -105,9 +105,6 @@ const IMPORTANCE_OPTS = [
   { value: "vip", label: "VIP" },
 ];
 const impCfg = (level) => IMPORTANCE[level] || IMPORTANCE.standard;
-// Priority tier ranking (lower = more important) for drag-to-reorder inference.
-const IMP_RANK = { vip: 0, priority: 1, standard: 2 };
-const IMP_BY_RANK = ["vip", "priority", "standard"];
 
 // Delivery sub-status pill for Ready-for-Delivery cards (board + floor): once a
 // delivery is scheduled the order reads "Pending", otherwise "Ready for Delivery".
@@ -444,8 +441,9 @@ function StackCard({ head, rows, actions }) {
 }
 
 // ─── Kanban card (board) ───────────────────────────────────────────────────────
-function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown, reorderable }) {
+function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown, reorderable, rank, onSetTier }) {
   const stage = STAGES[order.stage] || { color: C.text3 };
+  const [picker, setPicker] = useState(false); // tier-change picker open on the pill
   const rBtn = (dis) => ({ cursor: dis ? "default" : "pointer", opacity: dis ? 0.3 : 1, lineHeight: 1, fontSize: 10, padding: "2px 6px", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 5, color: C.text2 });
   const cd = countdown(order.required_delivery_date);
   const late = (daysUntil(order.required_delivery_date) ?? 0) < 0;
@@ -463,10 +461,19 @@ function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown
       onMouseEnter={(e) => (e.currentTarget.style.background = C.surface2)}
       onMouseLeave={(e) => (e.currentTarget.style.background = C.surface)}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-        <span style={{ fontFamily: MONO, fontSize: 15, fontWeight: 700, color: invColor, letterSpacing: 0.3 }}>{order.invoice_number}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          {rank != null && <span title="Priority order in this group" style={{ flexShrink: 0, width: 22, height: 22, borderRadius: 7, background: C.accent, color: C.bg, fontWeight: 800, fontSize: 12, display: "grid", placeItems: "center" }}>{rank}</span>}
+          <span style={{ fontFamily: MONO, fontSize: 15, fontWeight: 700, color: invColor, letterSpacing: 0.3 }}>{order.invoice_number}</span>
+        </div>
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
           {urgent && <Pill color={C.danger}>Urgent</Pill>}
-          {showName && <Pill color={imp.color}>{imp.label}</Pill>}
+          {showName && (onSetTier
+            ? (picker
+                ? <span style={{ display: "inline-flex", gap: 4 }} onClick={(e) => e.stopPropagation()}>
+                    {IMPORTANCE_OPTS.map((o) => <button key={o.value} onClick={() => { setPicker(false); if (o.value !== order.importance) onSetTier(o.value); }} style={{ cursor: "pointer", fontSize: 10.5, fontWeight: 700, padding: "2px 7px", borderRadius: 7, border: `1px solid ${IMPORTANCE[o.value].color}66`, background: order.importance === o.value ? IMPORTANCE[o.value].color + "33" : C.surface2, color: IMPORTANCE[o.value].color }}>{o.label}</button>)}
+                  </span>
+                : <button onClick={(e) => { e.stopPropagation(); setPicker(true); }} title="Change priority tier" style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer" }}><Pill color={imp.color}>{imp.label} ▾</Pill></button>)
+            : <Pill color={imp.color}>{imp.label}</Pill>)}
           {dtag && <Pill color={dtag.color}>{dtag.label}</Pill>}
           {waiting && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
           {onHold && <Pill color={C.hold}>On hold</Pill>}
@@ -577,8 +584,8 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [confirmAdv, setConfirmAdv] = useState(null);
-  const [dragId, setDragId] = useState(null); // drag-to-reorder the Production column
-  const [dragOverId, setDragOverId] = useState(null); // current drop target (shows a drop line)
+  const [dragId, setDragId] = useState(null); // card being dragged
+  const [dragOverZone, setDragOverZone] = useState(null); // tier drop-zone hovered (key "stage:tier")
   const canReorder = ["super_admin", "operations_controller", "admin", "production_lead"].includes(user.role);
   const [viewStage, setViewStageRaw] = useState(() => {
     const saved = (typeof localStorage !== "undefined" && localStorage.getItem("oms_board_stage")) || "all";
@@ -603,55 +610,62 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     try { await api("POST", `/orders/${order.id}/move`, { to_stage: to }); setConfirmAdv(null); load(); }
     catch (e) { alert(e.message); }
   }
-  // Infer the moved card's priority tier from its new neighbours (the "be smart" rule):
-  // same tier both sides → that tier; a 2-step gap (VIP & Standard) → the middle (Priority);
-  // adjacent tiers → the LOWER (less important) one, so nudging a card up never over-promotes
-  // it; at an end → the adjacent card's tier.
-  function inferImportance(stage, orderedIds, movedId) {
-    const colu = board[stage] || [];
-    const arr = orderedIds.map((id) => colu.find((o) => o.id === id)).filter(Boolean);
-    const k = arr.findIndex((o) => o.id === movedId);
-    if (k < 0) return null;
-    const ai = arr[k - 1] ? IMP_RANK[arr[k - 1].importance] : null;
-    const bi = arr[k + 1] ? IMP_RANK[arr[k + 1].importance] : null;
-    let rank;
-    if (ai != null && bi != null) {
-      if (ai === bi) rank = ai;
-      else { const lo = Math.min(ai, bi), hi = Math.max(ai, bi); rank = (hi - lo >= 2) ? Math.round((lo + hi) / 2) : hi; }
-    } else if (bi != null) rank = bi;
-    else if (ai != null) rank = ai;
-    else return null;
-    const imp = IMP_BY_RANK[rank];
-    const moved = colu.find((o) => o.id === movedId);
-    return (moved && imp && imp !== moved.importance) ? imp : null;
-  }
-  // Reorder within a column + set the moved card's priority tier from neighbours. Shared.
-  async function applyReorder(stage, orderedIds, movedId) {
-    const imp = inferImportance(stage, orderedIds, movedId);
+  // Each column is grouped into priority tiers (VIP > Priority > Standard); within a tier the
+  // cards are a manual order (rank). Backend sorts by tier, then this order. Three clear moves:
+  // ▲▼ rank within a tier · tap the pill to change tier · drag a card into a group (tier + rank).
+  const TIER_ORDER = ["vip", "priority", "standard"];
+  // Persist a column's new full order (+ optionally a moved card's new tier). Optimistic.
+  async function persist(stage, orderedIds, setImp) {
     const byId = Object.fromEntries((board[stage] || []).map((o) => [o.id, o]));
-    const next = orderedIds.map((id) => (imp && id === movedId) ? { ...byId[id], importance: imp } : byId[id]);
+    const next = orderedIds.map((id) => (setImp && id === setImp.id) ? { ...byId[id], importance: setImp.importance } : byId[id]);
     setBoard({ ...board, [stage]: next }); // optimistic
     setDragId(null);
-    try { await api("POST", "/orders/reorder", { stage, ordered_ids: orderedIds, set_importance: imp ? { id: movedId, importance: imp } : undefined }); }
+    try { await api("POST", "/orders/reorder", { stage, ordered_ids: orderedIds, set_importance: setImp || undefined }); }
     catch (e) { alert(e.message); load(); }
   }
-  // Drag within a column. Cross-column drags are a no-op (use the → arrow to advance a stage).
-  function reorderTo(stage, targetId) {
-    if (!dragId || dragId === targetId || !board) { setDragId(null); return; }
-    const list = (board[stage] || []).map((o) => o.id);
-    const from = list.indexOf(dragId), to = list.indexOf(targetId);
-    if (from < 0 || to < 0) { setDragId(null); return; }
-    list.splice(to, 0, list.splice(from, 1)[0]);
-    applyReorder(stage, list, dragId);
-  }
-  // Touch-proof: move one card up (-1) or down (+1) within its column.
+  // ▲▼ — move a card up/down WITHIN its own tier only (rank). Never changes the tier.
   function reorderMove(stage, id, dir) {
-    if (!board) return;
-    const list = (board[stage] || []).map((o) => o.id);
-    const i = list.indexOf(id), j = i + dir;
-    if (i < 0 || j < 0 || j >= list.length) return;
-    [list[i], list[j]] = [list[j], list[i]];
-    applyReorder(stage, list, id);
+    const arr = [...((board && board[stage]) || [])];
+    const i = arr.findIndex((o) => o.id === id); if (i < 0) return;
+    const me = arr[i];
+    let j = -1;
+    if (dir < 0) { for (let k = i - 1; k >= 0; k--) if (arr[k].importance === me.importance) { j = k; break; } }
+    else { for (let k = i + 1; k < arr.length; k++) if (arr[k].importance === me.importance) { j = k; break; } }
+    if (j < 0) return;
+    arr.splice(i, 1); arr.splice(j, 0, me);
+    persist(stage, arr.map((o) => o.id), null);
+  }
+  // Tap-the-pill tier change: move the card to the bottom of the target tier group.
+  function setTier(stage, id, tier) {
+    const arr = [...((board && board[stage]) || [])];
+    const i = arr.findIndex((o) => o.id === id); if (i < 0 || arr[i].importance === tier) return;
+    const me = arr[i]; arr.splice(i, 1);
+    let last = -1; arr.forEach((o, k) => { if (o.importance === tier) last = k; });
+    arr.splice(last + 1, 0, me);
+    persist(stage, arr.map((o) => o.id), { id, importance: tier });
+  }
+  // Drag onto a card → join that card's tier, just above it (sets tier + rank in one move).
+  function dropOnCard(stage, targetId) {
+    if (!dragId || dragId === targetId || !board) { setDragId(null); return; }
+    const arr = [...(board[stage] || [])];
+    const from = arr.findIndex((o) => o.id === dragId);
+    const target = arr.find((o) => o.id === targetId);
+    if (from < 0 || !target) { setDragId(null); return; }
+    const tier = target.importance, changed = arr[from].importance !== tier;
+    const me = arr[from]; arr.splice(from, 1);
+    arr.splice(arr.findIndex((o) => o.id === targetId), 0, me);
+    persist(stage, arr.map((o) => o.id), changed ? { id: dragId, importance: tier } : null);
+  }
+  // Drag onto a group (incl. an empty one) → join that tier at the bottom.
+  function dropOnZone(stage, tier) {
+    if (!dragId || !board) { setDragId(null); return; }
+    const arr = [...(board[stage] || [])];
+    const from = arr.findIndex((o) => o.id === dragId); if (from < 0) { setDragId(null); return; }
+    const changed = arr[from].importance !== tier;
+    const me = arr[from]; arr.splice(from, 1);
+    let last = -1; arr.forEach((o, k) => { if (o.importance === tier) last = k; });
+    arr.splice(last + 1, 0, me);
+    persist(stage, arr.map((o) => o.id), changed ? { id: dragId, importance: tier } : null);
   }
   const filt = (arr) => {
     const q = search.trim().toLowerCase();
@@ -702,31 +716,48 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
                 <span style={{ background: C.surface2, color: C.text2, borderRadius: 7, padding: "1px 9px", fontSize: 13, fontWeight: 700 }}>{orders.length}</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                {canReorder && orders.length > 1 && (
-                  <div style={{ fontSize: 11, color: C.text3, marginBottom: 2 }}>Use ▲▼ (or drag) to set priority order</div>
+                {!canReorder ? (
+                  <>
+                    {orders.map((o) => <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} />)}
+                    {orders.length === 0 && <Empty label="No orders" />}
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 11, color: C.text3, marginBottom: 1 }}>Drag a card into a group to set priority · ▲▼ to rank within</div>
+                    {TIER_ORDER.map((tier) => {
+                      const group = orders.filter((o) => (o.importance || "standard") === tier);
+                      const zoneKey = s + ":" + tier;
+                      const over = dragOverZone === zoneKey && dragId;
+                      const tcfg = IMPORTANCE[tier] || { label: tier, color: C.text3 };
+                      return (
+                        <div key={tier}
+                          onDragOver={(e) => { e.preventDefault(); if (dragOverZone !== zoneKey) setDragOverZone(zoneKey); }}
+                          onDragLeave={() => setDragOverZone((z) => (z === zoneKey ? null : z))}
+                          onDrop={(e) => { e.preventDefault(); setDragOverZone(null); dropOnZone(s, tier); }}
+                          style={{ borderRadius: 10, padding: "1px 2px", boxShadow: over ? `inset 0 0 0 1.5px ${C.accent}` : "none" }}>
+                          <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.5, color: tcfg.color, display: "flex", alignItems: "center", gap: 8, margin: "6px 4px 8px" }}>
+                            {tcfg.label}<span style={{ flex: 1, height: 1, background: C.border }} />
+                          </div>
+                          {group.length === 0
+                            ? <div style={{ fontSize: 11, color: C.text3, padding: "8px 10px", border: `1px dashed ${C.border2}`, borderRadius: 9, textAlign: "center", marginBottom: 4 }}>Drop here → {tcfg.label}</div>
+                            : group.map((o, i) => (
+                                <div key={o.id} draggable
+                                  onDragStart={(e) => { setDragId(o.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", o.id); } catch (_) {} }}
+                                  onDragEnd={() => { setDragId(null); setDragOverZone(null); }}
+                                  onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) {} }}
+                                  onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverZone(null); dropOnCard(s, o.id); }}
+                                  style={{ cursor: "grab", opacity: dragId === o.id ? 0.4 : 1, marginBottom: 9 }}>
+                                  <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} reorderable rank={i + 1}
+                                    onReorderUp={i > 0 ? () => reorderMove(s, o.id, -1) : null}
+                                    onReorderDown={i < group.length - 1 ? () => reorderMove(s, o.id, 1) : null}
+                                    onSetTier={(t) => setTier(s, o.id, t)} />
+                                </div>
+                              ))}
+                        </div>
+                      );
+                    })}
+                  </>
                 )}
-                {orders.map((o) => {
-                  if (!canReorder) {
-                    return <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} />;
-                  }
-                  const full = (board && board[s]) || [];
-                  const pi = full.findIndex((x) => x.id === o.id);
-                  const showDropLine = dragOverId === o.id && dragId && dragId !== o.id;
-                  return (
-                    <div key={o.id} draggable
-                      onDragStart={(e) => { setDragId(o.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", o.id); } catch (_) {} }}
-                      onDragEnd={() => { setDragId(null); setDragOverId(null); }}
-                      onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) {} if (dragOverId !== o.id) setDragOverId(o.id); }}
-                      onDragLeave={() => setDragOverId((cur) => (cur === o.id ? null : cur))}
-                      onDrop={(e) => { e.preventDefault(); setDragOverId(null); reorderTo(s, o.id); }}
-                      style={{ cursor: "grab", opacity: dragId === o.id ? 0.4 : 1, borderRadius: 11, boxShadow: showDropLine ? `inset 0 3px 0 ${C.accent}` : "none" }}>
-                      <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} reorderable
-                        onReorderUp={pi > 0 ? () => reorderMove(s, o.id, -1) : null}
-                        onReorderDown={(pi >= 0 && pi < full.length - 1) ? () => reorderMove(s, o.id, 1) : null} />
-                    </div>
-                  );
-                })}
-                {orders.length === 0 && <Empty label="No orders" />}
               </div>
             </div>
           );
