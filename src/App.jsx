@@ -600,33 +600,31 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     try { await api("POST", `/orders/${order.id}/move`, { to_stage: to }); setConfirmAdv(null); load(); }
     catch (e) { alert(e.message); }
   }
-  // Drag-to-reorder within the Production column. Persists a shared order for everyone.
-  async function reorderTo(targetId) {
+  // Reorder cards within a stage column (manual priority order), shared for everyone.
+  async function persistOrder(stage, list) {
+    const byId = Object.fromEntries((board[stage] || []).map((o) => [o.id, o]));
+    setBoard({ ...board, [stage]: list.map((id) => byId[id]) }); // optimistic
+    try { await api("POST", "/orders/reorder", { stage, ordered_ids: list }); }
+    catch (e) { alert(e.message); load(); }
+  }
+  // Drag within a column. Cross-column drags are a no-op (use the → arrow to advance a stage).
+  async function reorderTo(stage, targetId) {
     if (!dragId || dragId === targetId || !board) { setDragId(null); return; }
-    const list = (board.production || []).map((o) => o.id);
+    const list = (board[stage] || []).map((o) => o.id);
     const from = list.indexOf(dragId), to = list.indexOf(targetId);
     if (from < 0 || to < 0) { setDragId(null); return; }
     list.splice(to, 0, list.splice(from, 1)[0]);
-    const byId = Object.fromEntries((board.production || []).map((o) => [o.id, o]));
-    setBoard({ ...board, production: list.map((id) => byId[id]) }); // optimistic
     setDragId(null);
-    try { await api("POST", "/orders/reorder", { stage: "production", ordered_ids: list }); }
-    catch (e) { alert(e.message); load(); }
+    persistOrder(stage, list);
   }
-  // Touch-proof reorder: move one card up (-1) or down (+1) within Production.
-  async function persistProduction(list) {
-    const byId = Object.fromEntries((board.production || []).map((o) => [o.id, o]));
-    setBoard({ ...board, production: list.map((id) => byId[id]) }); // optimistic
-    try { await api("POST", "/orders/reorder", { stage: "production", ordered_ids: list }); }
-    catch (e) { alert(e.message); load(); }
-  }
-  function reorderMove(id, dir) {
+  // Touch-proof: move one card up (-1) or down (+1) within its column.
+  function reorderMove(stage, id, dir) {
     if (!board) return;
-    const list = (board.production || []).map((o) => o.id);
+    const list = (board[stage] || []).map((o) => o.id);
     const i = list.indexOf(id), j = i + dir;
     if (i < 0 || j < 0 || j >= list.length) return;
     [list[i], list[j]] = [list[j], list[i]];
-    persistProduction(list);
+    persistOrder(stage, list);
   }
   const filt = (arr) => {
     const q = search.trim().toLowerCase();
@@ -677,14 +675,14 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
                 <span style={{ background: C.surface2, color: C.text2, borderRadius: 7, padding: "1px 9px", fontSize: 13, fontWeight: 700 }}>{orders.length}</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                {s === "production" && canReorder && orders.length > 1 && (
+                {canReorder && orders.length > 1 && (
                   <div style={{ fontSize: 11, color: C.text3, marginBottom: 2 }}>Use ▲▼ (or drag) to set priority order</div>
                 )}
                 {orders.map((o) => {
-                  if (!(s === "production" && canReorder)) {
+                  if (!canReorder) {
                     return <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} />;
                   }
-                  const full = (board && board.production) || [];
+                  const full = (board && board[s]) || [];
                   const pi = full.findIndex((x) => x.id === o.id);
                   const showDropLine = dragOverId === o.id && dragId && dragId !== o.id;
                   return (
@@ -693,11 +691,11 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
                       onDragEnd={() => { setDragId(null); setDragOverId(null); }}
                       onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) {} if (dragOverId !== o.id) setDragOverId(o.id); }}
                       onDragLeave={() => setDragOverId((cur) => (cur === o.id ? null : cur))}
-                      onDrop={(e) => { e.preventDefault(); setDragOverId(null); reorderTo(o.id); }}
+                      onDrop={(e) => { e.preventDefault(); setDragOverId(null); reorderTo(s, o.id); }}
                       style={{ cursor: "grab", opacity: dragId === o.id ? 0.4 : 1, borderRadius: 11, boxShadow: showDropLine ? `inset 0 3px 0 ${C.accent}` : "none" }}>
                       <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} reorderable
-                        onReorderUp={pi > 0 ? () => reorderMove(o.id, -1) : null}
-                        onReorderDown={(pi >= 0 && pi < full.length - 1) ? () => reorderMove(o.id, 1) : null} />
+                        onReorderUp={pi > 0 ? () => reorderMove(s, o.id, -1) : null}
+                        onReorderDown={(pi >= 0 && pi < full.length - 1) ? () => reorderMove(s, o.id, 1) : null} />
                     </div>
                   );
                 })}
@@ -2656,6 +2654,7 @@ function Users({ user }) {
   const [q, setQ] = useState("");
   const [roleF, setRoleF] = useState("");
   const [statusF, setStatusF] = useState("");
+  const [showDisabled, setShowDisabled] = useState(false); // disabled staff collapsed by default
   const isAdmin = user.role === "super_admin";
   function load() { api("GET", "/users").then(setList).catch(() => setList([])); }
   useEffect(() => { load(); }, []);
@@ -2679,7 +2678,30 @@ function Users({ user }) {
     (!roleF || u.role === roleF) &&
     (!statusF || (statusF === "active" ? u.is_active : !u.is_active))
   );
+  // Neat order: by role seniority, then name. Active up top; disabled collapsed below.
+  const roleRank = { super_admin: 0, admin: 1, operations_controller: 2, production_lead: 3, production_staff: 4, packing_staff: 5, delivery_team: 6 };
+  const byRank = (a, b) => ((roleRank[a.role] ?? 9) - (roleRank[b.role] ?? 9)) || a.name.localeCompare(b.name);
+  const activeUsers = filtered.filter((u) => u.is_active).sort(byRank);
+  const disabledUsers = filtered.filter((u) => !u.is_active).sort(byRank);
+  const showActive = statusF !== "disabled";
+  const showInactive = statusF === "disabled" || (statusF === "" && showDisabled);
+  const visibleCount = (showActive ? activeUsers.length : 0) + (showInactive ? disabledUsers.length : 0);
   const ctrl = { padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13 };
+  const renderRow = (u) => (
+    <tr key={u.id} style={{ borderBottom: `1px solid ${C.border}`, opacity: u.is_active ? 1 : 0.6 }}>
+      <td style={{ padding: "11px 16px" }}><div style={{ display: "flex", alignItems: "center", gap: 10 }}><Avatar name={u.name} color={u.avatar_color} size={30} /><span style={{ color: C.text, fontWeight: 500 }}>{u.name}</span></div></td>
+      <td style={{ padding: "11px 16px", color: C.text2 }}>{u.email}</td>
+      <td style={{ padding: "11px 16px" }}><Pill color={C.text2}>{ROLE_LABELS[u.role] || u.role}</Pill></td>
+      <td style={{ padding: "11px 16px" }}><Pill color={u.is_active ? C.ready : C.danger}>{u.is_active ? "Active" : "Disabled"}</Pill></td>
+      <td style={{ padding: "11px 16px" }}>
+        <div style={{ display: "flex", gap: 6 }}>
+          {canManage(u) && <Btn size="sm" variant="ghost" onClick={() => { setResetFor(u); setNewPw(""); }}>Reset PW</Btn>}
+          {u.id !== user.id && canManage(u) && <Btn size="sm" variant="ghost" onClick={() => toggle(u)}>{u.is_active ? "Disable" : "Enable"}</Btn>}
+          {u.id !== user.id && canManage(u) && !u.is_active && <Btn size="sm" variant="danger" onClick={() => delUser(u)}>Delete</Btn>}
+        </div>
+      </td>
+    </tr>
+  );
   return (
     <div>
       <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
@@ -2703,25 +2725,20 @@ function Users({ user }) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
           <thead><tr style={{ background: C.bg2 }}>{["User", "Email", "Role", "Status", "Actions"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
           <tbody>
-            {filtered.length === 0 && <tr><td colSpan={5}><Empty label="No users match these filters." /></td></tr>}
-            {filtered.map((u) => (
-              <tr key={u.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                <td style={{ padding: "11px 16px" }}><div style={{ display: "flex", alignItems: "center", gap: 10 }}><Avatar name={u.name} color={u.avatar_color} size={30} /><span style={{ color: C.text, fontWeight: 500 }}>{u.name}</span></div></td>
-                <td style={{ padding: "11px 16px", color: C.text2 }}>{u.email}</td>
-                <td style={{ padding: "11px 16px" }}><Pill color={C.text2}>{ROLE_LABELS[u.role] || u.role}</Pill></td>
-                <td style={{ padding: "11px 16px" }}><Pill color={u.is_active ? C.ready : C.danger}>{u.is_active ? "Active" : "Disabled"}</Pill></td>
-                <td style={{ padding: "11px 16px" }}>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    {canManage(u) && <Btn size="sm" variant="ghost" onClick={() => { setResetFor(u); setNewPw(""); }}>Reset PW</Btn>}
-                    {u.id !== user.id && canManage(u) && <Btn size="sm" variant="ghost" onClick={() => toggle(u)}>{u.is_active ? "Disable" : "Enable"}</Btn>}
-                    {u.id !== user.id && canManage(u) && !u.is_active && <Btn size="sm" variant="danger" onClick={() => delUser(u)}>Delete</Btn>}
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {visibleCount === 0 && <tr><td colSpan={5}><Empty label="No users match these filters." /></td></tr>}
+            {showActive && activeUsers.map(renderRow)}
+            {showInactive && disabledUsers.length > 0 && (
+              <tr><td colSpan={5} style={{ padding: "8px 16px", background: C.bg2, color: C.text3, fontSize: 11.5, fontWeight: 700, letterSpacing: 0.5 }}>FORMER / DISABLED STAFF ({disabledUsers.length})</td></tr>
+            )}
+            {showInactive && disabledUsers.map(renderRow)}
           </tbody>
         </table>
       </Card>
+      {statusF === "" && disabledUsers.length > 0 && (
+        <button onClick={() => setShowDisabled((s) => !s)} style={{ marginTop: 10, background: "none", border: `1px solid ${C.border2}`, color: C.text2, borderRadius: 8, padding: "7px 13px", cursor: "pointer", fontSize: 12.5 }}>
+          {showDisabled ? `Hide disabled staff` : `Show ${disabledUsers.length} disabled / former staff`}
+        </button>
+      )}
       <Modal open={show} onClose={() => setShow(false)} title="Create user">
         <Field label="Full name" value={f.name} onChange={(v) => setF((p) => ({ ...p, name: v }))} required />
         <Field label="Email" type="email" value={f.email} onChange={(v) => setF((p) => ({ ...p, email: v }))} required />
