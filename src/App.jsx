@@ -441,7 +441,7 @@ function StackCard({ head, rows, actions }) {
 }
 
 // ─── Kanban card (board) ───────────────────────────────────────────────────────
-function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown }) {
+function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown, reorderable }) {
   const stage = STAGES[order.stage] || { color: C.text3 };
   const rBtn = (dis) => ({ cursor: dis ? "default" : "pointer", opacity: dis ? 0.3 : 1, lineHeight: 1, fontSize: 10, padding: "2px 6px", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 5, color: C.text2 });
   const cd = countdown(order.required_delivery_date);
@@ -467,6 +467,7 @@ function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown
           {dtag && <Pill color={dtag.color}>{dtag.label}</Pill>}
           {waiting && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
           {onHold && <Pill color={C.hold}>On hold</Pill>}
+          {order.edited && <Pill color={C.accent2}>✎ Edited</Pill>}
           {order.skip_production && <Pill color={C.accent} bg="transparent">No production</Pill>}
         </div>
       </div>
@@ -502,8 +503,8 @@ function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown
             : <span style={{ fontSize: 12, color: C.text3 }}>Unassigned</span>}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={(e) => e.stopPropagation()}>
-          {(onReorderUp || onReorderDown) && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 2, marginRight: 1 }} title="Move priority up / down">
+          {reorderable && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2, marginRight: 1 }} title={(onReorderUp || onReorderDown) ? "Move priority up / down" : "Add another order here to reorder"}>
               <button onClick={() => onReorderUp && onReorderUp()} disabled={!onReorderUp} style={rBtn(!onReorderUp)} aria-label="Move up">▲</button>
               <button onClick={() => onReorderDown && onReorderDown()} disabled={!onReorderDown} style={rBtn(!onReorderDown)} aria-label="Move down">▼</button>
             </div>
@@ -694,7 +695,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
                       onDragLeave={() => setDragOverId((cur) => (cur === o.id ? null : cur))}
                       onDrop={(e) => { e.preventDefault(); setDragOverId(null); reorderTo(o.id); }}
                       style={{ cursor: "grab", opacity: dragId === o.id ? 0.4 : 1, borderRadius: 11, boxShadow: showDropLine ? `inset 0 3px 0 ${C.accent}` : "none" }}>
-                      <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance}
+                      <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} reorderable
                         onReorderUp={pi > 0 ? () => reorderMove(o.id, -1) : null}
                         onReorderDown={(pi >= 0 && pi < full.length - 1) ? () => reorderMove(o.id, 1) : null} />
                     </div>
@@ -1073,6 +1074,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
         {order.importance && order.importance !== "standard" && <Pill color={impCfg(order.importance).color}>{impCfg(order.importance).label}</Pill>}
         {order.waiting_stock && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
         {order.on_hold && <Pill color={C.hold}>On hold</Pill>}
+        {(order.activity || []).some((a) => a.action === "item_edited") && <Pill color={C.accent2}>✎ Edited</Pill>}
         {order.skip_production && <Pill color={C.accent} bg="transparent">No production</Pill>}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
