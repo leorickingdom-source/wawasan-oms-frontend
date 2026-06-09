@@ -118,7 +118,7 @@ function deliveryTag(o) {
 
 const NAV = [
   { id: "board", label: "Order Board", icon: "board", roles: [...BOARD_ROLES, "admin"] },
-  { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "operations_controller"] },
+  { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "operations_controller", "admin"] },
   { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "operations_controller", "delivery_team", "admin"] },
   { id: "floor", label: "Floor Display", icon: "display" }, // every role; rendered as a distinct launch button, not a workspace tab
   { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "operations_controller", "production_lead"] },
@@ -1019,6 +1019,9 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
   const [uploading, setUploading] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const canMove = ["super_admin", "operations_controller"].includes(user.role);
+  // Back-office Admin (deputy) may route an order — set PIC + priority/importance —
+  // but not move stages, hold/flag, or cancel (those stay canMove = Boss/Ops).
+  const canRoute = ["super_admin", "operations_controller", "admin"].includes(user.role);
   const roleCanMark = ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff"].includes(user.role);
   const isLead = user.role === "production_lead";
   const isFloor = ["production_staff", "packing_staff"].includes(user.role); // pure floor worker — keep their view minimal
@@ -1029,7 +1032,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
   async function load() { try { const o = await api("GET", `/orders/${orderId}`); setOrder(o); setNotes(o.notes || ""); } catch (e) { setOrder({ _error: e.message }); } }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
   useEffect(() => { api("GET", `/delivery?order_id=${orderId}`).then((d) => setDelivery((d && d[0]) || null)).catch(() => setDelivery(null)); }, [orderId]);
-  useEffect(() => { if (canMove) api("GET", "/users").then(setUsers).catch(() => setUsers([])); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { if (canRoute) api("GET", "/users").then(setUsers).catch(() => setUsers([])); /* eslint-disable-next-line */ }, []);
   useEffect(() => { if (canAmend) api("GET", "/orders/skus").then((d) => setCatalog(d || [])).catch(() => setCatalog([])); /* eslint-disable-next-line */ }, []);
 
   async function doMove(to, why) {
@@ -1152,12 +1155,12 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
             {order.customer_name != null && <LV label="Customer" v={order.customer_name} />}
             {order.customer_name != null && <LV label="Contact" v={order.customer_contact || "—"} />}
             <LV label="Priority" v={
-              canMove
+              canRoute
                 ? <select value={order.priority || "normal"} onChange={(e) => setPriority(e.target.value)} style={{ padding: "5px 9px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13.5, fontWeight: 700, color: order.priority === "urgent" ? C.danger : C.text2 }}><option value="normal" style={{ background: C.bg2, color: C.text }}>Normal</option><option value="urgent" style={{ background: C.bg2, color: C.text }}>Urgent</option></select>
                 : <Pill color={order.priority === "urgent" ? C.danger : C.text2}>{order.priority === "urgent" ? "Urgent" : "Normal"}</Pill>
             } />
             <LV label="Importance" v={
-              canMove
+              canRoute
                 ? <select value={order.importance || "standard"} onChange={(e) => setImportance(e.target.value)} style={{ padding: "5px 9px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13.5, fontWeight: 700, color: impCfg(order.importance).color }}>{IMPORTANCE_OPTS.map((o) => <option key={o.value} value={o.value} style={{ background: C.bg2, color: C.text }}>{o.label}</option>)}</select>
                 : <Pill color={impCfg(order.importance).color}>{impCfg(order.importance).label}</Pill>
             } />
@@ -1386,10 +1389,10 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
         </div>
       )}
 
-      {canMove && (
+      {canRoute && (
         <div style={{ marginTop: 22, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, marginBottom: 8 }}>Stage actions</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, marginBottom: 8 }}>{canMove ? "Stage actions" : "Routing"}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: canMove ? 12 : 0, flexWrap: "wrap" }}>
             <span style={{ fontSize: 12.5, color: C.text2, minWidth: 28 }}>In charge</span>
             <select value={order.pic_id || ""} onChange={(e) => assignPic(e.target.value)} style={{ flex: 1, minWidth: 180, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }}>
               <option value="" style={{ background: C.bg2 }}>Unassigned</option>
@@ -1398,19 +1401,24 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
             </select>
             <span style={{ fontSize: 11.5, color: C.text3 }}>Saved automatically</span>
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
-            <select value={moveStage} onChange={(e) => setMoveStage(e.target.value)} style={{ flex: 1, minWidth: 170, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }}>
-              <option value="" style={{ background: C.bg2 }}>Move to…</option>
-              {Object.keys(STAGE_LABELS).filter((k) => k !== order.stage && k !== "on_hold" && k !== "cancelled" && k !== "delivered").map((k) => <option key={k} value={k} style={{ background: C.bg2 }}>{STAGE_LABELS[k].label}</option>)}
-            </select>
-            <Btn onClick={() => doMove(moveStage, reason)} disabled={!moveStage || busy}>{moveStage ? `Move to ${STAGE_LABELS[moveStage].label}` : "Move"}</Btn>
-          </div>
-          <input placeholder="Reason / note (optional) — applies to the move, hold or cancel you choose" value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text, marginBottom: 12 }} />
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Btn variant="soft" size="sm" onClick={() => setFlag({ on_hold: !order.on_hold, reason: reason || undefined })} disabled={busy}>{order.on_hold ? "Release hold" : "Put on hold"}</Btn>
-            <Btn variant="soft" size="sm" onClick={() => setFlag({ waiting_stock: !order.waiting_stock })} disabled={busy}>{order.waiting_stock ? "Clear waiting stock" : "Flag waiting stock"}</Btn>
-            <Btn variant="danger" size="sm" onClick={cancelOrder} disabled={busy}>Cancel order</Btn>
-          </div>
+          {canMove && (
+            <>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+                <select value={moveStage} onChange={(e) => setMoveStage(e.target.value)} style={{ flex: 1, minWidth: 170, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }}>
+                  <option value="" style={{ background: C.bg2 }}>Move to…</option>
+                  {Object.keys(STAGE_LABELS).filter((k) => k !== order.stage && k !== "on_hold" && k !== "cancelled" && k !== "delivered").map((k) => <option key={k} value={k} style={{ background: C.bg2 }}>{STAGE_LABELS[k].label}</option>)}
+                </select>
+                <Btn onClick={() => doMove(moveStage, reason)} disabled={!moveStage || busy}>{moveStage ? `Move to ${STAGE_LABELS[moveStage].label}` : "Move"}</Btn>
+              </div>
+              <input placeholder="Reason / note (optional) — applies to the move, hold or cancel you choose" value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text, marginBottom: 12 }} />
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Btn variant="soft" size="sm" onClick={() => setFlag({ on_hold: !order.on_hold, reason: reason || undefined })} disabled={busy}>{order.on_hold ? "Release hold" : "Put on hold"}</Btn>
+                <Btn variant="soft" size="sm" onClick={() => setFlag({ waiting_stock: !order.waiting_stock })} disabled={busy}>{order.waiting_stock ? "Clear waiting stock" : "Flag waiting stock"}</Btn>
+                <Btn variant="danger" size="sm" onClick={cancelOrder} disabled={busy}>Cancel order</Btn>
+              </div>
+            </>
+          )}
+          {!canMove && <p style={{ fontSize: 11.5, color: C.text3, marginTop: 10 }}>As Admin you route this order — set who's in charge, and adjust Priority / Importance above. Stage moves, holds and cancels stay with Ops.</p>}
         </div>
       )}
     </div>
