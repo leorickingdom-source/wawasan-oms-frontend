@@ -1323,21 +1323,98 @@ function OrdersReport({ period }) {
   );
 }
 
+// Per-person productivity: who finished stages / made items this period.
+function StaffReport({ period }) {
+  const [data, setData] = useState(null);
+  useEffect(() => { setData(null); api("GET", `/reports/staff?period=${period}`).then((d) => setData(d.staff || [])).catch(() => setData([])); }, [period]);
+  function exportCsv() {
+    const rows = [["Name", "Role", "Stages completed", "Items done", "Reworks"]];
+    for (const s of data) rows.push([s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks]);
+    downloadCsv(`staff-report-${period}.csv`, rows);
+  }
+  if (!data) return <Loading label="Loading staff…" />;
+  if (data.length === 0) return <Empty label="No staff activity for this period." />;
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <span style={{ fontSize: 13, color: C.text3 }}>{data.length} people · work each person finished this period</span>
+        <Btn variant="soft" size="sm" onClick={exportCsv}>Export staff CSV</Btn>
+      </div>
+      <Card style={{ padding: 0, overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead><tr style={{ background: C.bg2 }}>{["Name", "Role", "Stages completed", "Items done", "Reworks"].map((h, i) => <th key={h} style={{ textAlign: i > 1 ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {data.map((s) => (
+              <tr key={s.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                <td style={{ padding: "9px 14px", color: C.text }}><span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}><Avatar name={s.name} color={s.avatar_color} size={24} />{s.name}</span></td>
+                <td style={{ padding: "9px 14px", color: C.text2 }}>{ROLE_LABELS[s.role] || s.role}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", color: C.text, fontWeight: 700 }}>{s.completions}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", color: C.text2 }}>{s.items_done}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", color: s.reworks > 0 ? C.danger : C.text3 }}>{s.reworks}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+    </div>
+  );
+}
+
+// Per person-in-charge: live open workload + how much they completed this period.
+function PicReport({ period }) {
+  const [data, setData] = useState(null);
+  useEffect(() => { setData(null); api("GET", `/reports/pic?period=${period}`).then((d) => setData(d.pics || [])).catch(() => setData([])); }, [period]);
+  function exportCsv() {
+    const rows = [["Person in charge", "Role", "Open now", "Overdue", "On hold", "Completed (period)"]];
+    for (const p of data) rows.push([p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed]);
+    downloadCsv(`pic-report-${period}.csv`, rows);
+  }
+  if (!data) return <Loading label="Loading people…" />;
+  if (data.length === 0) return <Empty label="No one is in charge of orders yet." />;
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <span style={{ fontSize: 13, color: C.text3 }}>Open / Overdue / On-hold are live now · Completed counts this period</span>
+        <Btn variant="soft" size="sm" onClick={exportCsv}>Export PIC CSV</Btn>
+      </div>
+      <Card style={{ padding: 0, overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead><tr style={{ background: C.bg2 }}>{["Person in charge", "Role", "Open now", "Overdue", "On hold", "Completed"].map((h, i) => <th key={h} style={{ textAlign: i > 1 ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {data.map((p) => (
+              <tr key={p.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                <td style={{ padding: "9px 14px", color: C.text }}><span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}><Avatar name={p.name} color={p.avatar_color} size={24} />{p.name}</span></td>
+                <td style={{ padding: "9px 14px", color: C.text2 }}>{ROLE_LABELS[p.role] || p.role}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", color: C.text, fontWeight: 700 }}>{p.active}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", color: p.overdue > 0 ? C.danger : C.text3 }}>{p.overdue}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", color: p.on_hold > 0 ? C.hold : C.text3 }}>{p.on_hold}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", color: C.ready, fontWeight: 700 }}>{p.completed}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+    </div>
+  );
+}
+
 // ─── Reports ─────────────────────────────────────────────────────────────────
 function Reports({ user }) {
   const tabsForRole = user.role === "production_lead" ? ["production", "packing"]
     : user.role === "delivery_team" ? ["delivery"]
-    : ["production", "packing", "delivery", "orders"];
+    : ["production", "packing", "delivery", "orders", "staff", "pic"];
+  const CUSTOM = ["orders", "staff", "pic"]; // tabs with their own table component (no metric cards/trend)
+  const TAB_LABEL = { staff: "Staff", pic: "Person in charge" }; // friendlier than the capitalized id
   const [tab, setTab] = useState(tabsForRole[0]);
   const [period, setPeriod] = useState("weekly");
   const [d, setD] = useState({});
-  useEffect(() => { if (tab === "orders") return; api("GET", `/reports/${tab}?period=${period}`).then(setD).catch(() => setD({})); }, [tab, period]);
+  useEffect(() => { if (CUSTOM.includes(tab)) return; api("GET", `/reports/${tab}?period=${period}`).then(setD).catch(() => setD({})); }, [tab, period]);
   const metricDefs = {
     production: (d) => [["Orders Completed", d.completed], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["Avg Production", d.avg_production_hours ? d.avg_production_hours + "h" : "—"], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"]],
     packing: (d) => [["Orders Packed", d.packed], ["Avg Pack Time", d.avg_pack_minutes ? d.avg_pack_minutes + "min" : "—"], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"]],
     delivery: (d) => [["Total Deliveries", d.total_deliveries], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["On-Time Count", d.on_time_count]],
   };
-  const metrics = tab === "orders" ? {} : { [tab]: metricDefs[tab](d) };
+  const metrics = CUSTOM.includes(tab) ? {} : { [tab]: metricDefs[tab](d) };
   const trend = d.daily_trend || [];
   const maxT = Math.max(...trend.map((t) => t.count), 1);
   async function exportAll() {
@@ -1352,13 +1429,23 @@ function Reports({ user }) {
       if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
       rows.push([]);
     }
+    if (tabsForRole.includes("staff")) {
+      const sd = await api("GET", `/reports/staff?period=${period}`).then((dd) => dd.staff || []).catch(() => []);
+      rows.push(["Staff productivity"], ["Name", "Role", "Stages completed", "Items done", "Reworks"],
+        ...sd.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks]), []);
+    }
+    if (tabsForRole.includes("pic")) {
+      const pd = await api("GET", `/reports/pic?period=${period}`).then((dd) => dd.pics || []).catch(() => []);
+      rows.push(["Person in charge"], ["Name", "Role", "Open now", "Overdue", "On hold", "Completed"],
+        ...pd.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed]), []);
+    }
     downloadCsv(`reports-${period}.csv`, rows);
   }
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 18 }}>
         <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4 }}>
-          {tabsForRole.map((t) => <button key={t} onClick={() => setTab(t)} style={{ background: tab === t ? C.surface2 : "transparent", border: "none", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 13, fontWeight: tab === t ? 700 : 500, color: tab === t ? C.text : C.text2, textTransform: "capitalize" }}>{t}</button>)}
+          {tabsForRole.map((t) => <button key={t} onClick={() => setTab(t)} style={{ background: tab === t ? C.surface2 : "transparent", border: "none", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 13, fontWeight: tab === t ? 700 : 500, color: tab === t ? C.text : C.text2, textTransform: "capitalize" }}>{TAB_LABEL[t] || t}</button>)}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <select value={period} onChange={(e) => setPeriod(e.target.value)} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13 }}>
@@ -1370,12 +1457,14 @@ function Reports({ user }) {
         </div>
       </div>
       {tab === "orders" && <OrdersReport period={period} />}
-      {tab !== "orders" && (
+      {tab === "staff" && <StaffReport period={period} />}
+      {tab === "pic" && <PicReport period={period} />}
+      {!CUSTOM.includes(tab) && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 20 }}>
           {(metrics[tab] || []).map(([label, value]) => <Card key={label}><div style={{ fontSize: 28, fontWeight: 800, color: C.accent }}>{value ?? "—"}</div><div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{label}</div></Card>)}
         </div>
       )}
-      {tab !== "orders" && trend.length > 0 && (
+      {!CUSTOM.includes(tab) && trend.length > 0 && (
         <Card>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 16 }}>Daily trend</h3>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 130 }}>
