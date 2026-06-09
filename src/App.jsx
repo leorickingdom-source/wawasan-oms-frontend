@@ -1290,10 +1290,22 @@ function OrdersReport({ period }) {
   function exportCsv() {
     const rows = [["Invoice", "Customer", "Stage", "SKUs done", "SKUs total", "% done", "Days in stage", "Cycle (h)", "Due", "Status", "PIC"]];
     for (const o of data) rows.push([o.invoice_number, o.customer_name || "", (STAGE_LABELS[o.stage] || {}).label || o.stage, o.done_count, o.item_count, o.pct, o.days_in_stage, o.cycle_hours, o.required_delivery_date, o.delivered ? (o.on_time ? "Delivered on-time" : "Delivered late") : (o.late ? "Late" : "In progress"), o.pic_name || ""]);
+    const cust = Object.values(data.reduce((m, o) => { const k = o.customer_name || "—"; const r = m[k] || (m[k] = { name: k, orders: 0, delivered: 0, on_time: 0, late: 0 }); r.orders++; if (o.delivered) { r.delivered++; if (o.on_time) r.on_time++; } if (o.late) r.late++; return m; }, {})).sort((a, b) => b.orders - a.orders);
+    rows.push([], ["By customer", "Orders", "Delivered", "On-time", "Late"], ...cust.map((c) => [c.name, c.orders, c.delivered, c.on_time, c.late]));
     downloadCsv(`orders-report-${period}.csv`, rows);
   }
   if (!data) return <Loading label="Loading orders…" />;
   if (data.length === 0) return <Empty label="No orders for this period." />;
+  // Client-side rollup — one row per customer, no extra API call.
+  const byCustomer = Object.values(data.reduce((m, o) => {
+    const k = o.customer_name || "—";
+    const r = m[k] || (m[k] = { name: k, orders: 0, delivered: 0, on_time: 0, late: 0, cyc: 0, cycN: 0 });
+    r.orders++;
+    if (o.delivered) { r.delivered++; if (o.on_time) r.on_time++; }
+    if (o.late) r.late++;
+    if (o.cycle_hours != null) { r.cyc += Number(o.cycle_hours); r.cycN++; }
+    return m;
+  }, {})).sort((a, b) => b.orders - a.orders);
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
@@ -1354,6 +1366,24 @@ function OrdersReport({ period }) {
               );
               return rows;
             })}
+          </tbody>
+        </table>
+      </Card>
+      <div style={{ fontSize: 13, color: C.text3, margin: "20px 0 10px" }}>By customer · {byCustomer.length}</div>
+      <Card style={{ padding: 0, overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead><tr style={{ background: C.bg2 }}>{["Customer", "Orders", "Delivered", "On-time", "Late", "Avg cycle"].map((h, i) => <th key={h} style={{ textAlign: i ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {byCustomer.map((c) => (
+              <tr key={c.name} style={{ borderBottom: `1px solid ${C.border}` }}>
+                <td style={{ padding: "9px 14px", color: C.text }}>{c.name}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", color: C.text, fontWeight: 700 }}>{c.orders}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", color: C.text2 }}>{c.delivered}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", color: C.ready }}>{c.on_time}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", color: c.late > 0 ? C.danger : C.text3 }}>{c.late}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", color: C.text2 }}>{c.cycN ? fmtDur(Math.round((c.cyc / c.cycN) * 10) / 10) : "—"}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </Card>
@@ -1448,9 +1478,9 @@ function Reports({ user }) {
   const [d, setD] = useState({});
   useEffect(() => { if (CUSTOM.includes(tab)) return; api("GET", `/reports/${tab}?period=${period}`).then(setD).catch(() => setD({})); }, [tab, period]);
   const metricDefs = {
-    production: (d) => [["Orders Completed", d.completed], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["Avg Production", d.avg_production_hours ? d.avg_production_hours + "h" : "—"], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"]],
-    packing: (d) => [["Orders Packed", d.packed], ["Avg Pack Time", d.avg_pack_minutes ? d.avg_pack_minutes + "min" : "—"], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"]],
-    delivery: (d) => [["Total Deliveries", d.total_deliveries], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["On-Time Count", d.on_time_count]],
+    production: (d) => [["Orders Completed", d.completed], ["SKUs Made", d.units_made], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["Avg Production", d.avg_production_hours ? d.avg_production_hours + "h" : "—"], ["Reworks", d.rework_count], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"], ["In Production Now", d.in_stage]],
+    packing: (d) => [["Orders Packed", d.packed], ["Avg Pack Time", d.avg_pack_minutes ? d.avg_pack_minutes + "min" : "—"], ["Reworks", d.rework_count], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"], ["In Packing Now", d.in_stage]],
+    delivery: (d) => [["Total Deliveries", d.total_deliveries], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["On-Time Count", d.on_time_count], ["Pending Now", d.pending_count], ["Failed", d.failed_count]],
   };
   const metrics = CUSTOM.includes(tab) ? {} : { [tab]: metricDefs[tab](d) };
   const trend = d.daily_trend || [];
