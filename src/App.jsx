@@ -1,4 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import * as XLSX from "xlsx";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
 // ─── API client ──────────────────────────────────────────────────────────────
 const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
@@ -1288,10 +1292,10 @@ function Dashboard({ onOpenOrder }) {
 }
 
 // ─── Per-order breakdown report ──────────────────────────────────────────────
-function OrdersReport({ period }) {
+function OrdersReport({ period, from, to }) {
   const [data, setData] = useState(null);
   const [open, setOpen] = useState({});
-  useEffect(() => { setData(null); api("GET", `/reports/orders?period=${period}`).then((d) => setData(d.orders || [])).catch(() => setData([])); }, [period]);
+  useEffect(() => { setData(null); api("GET", `/reports/orders?${reportQuery(period, from, to)}`).then((d) => setData(d.orders || [])).catch(() => setData([])); }, [period, from, to]);
   const fmtDur = (h) => h == null ? "—" : h >= 48 ? `${Math.round(h / 24)}d` : `${h}h`;
   function exportCsv() {
     const rows = [["Invoice", "Customer", "Stage", "SKUs done", "SKUs total", "% done", "Days in stage", "Cycle (h)", "Due", "Status", "PIC"]];
@@ -1398,9 +1402,10 @@ function OrdersReport({ period }) {
 }
 
 // Per-person productivity: who finished stages / made items this period.
-function StaffReport({ period }) {
-  const [data, setData] = useState(null);
-  useEffect(() => { setData(null); api("GET", `/reports/staff?period=${period}`).then((d) => setData(d.staff || [])).catch(() => setData([])); }, [period]);
+function StaffReport({ period, from, to, staffId }) {
+  const [raw, setRaw] = useState(null);
+  useEffect(() => { setRaw(null); api("GET", `/reports/staff?${reportQuery(period, from, to)}`).then((d) => setRaw(d.staff || [])).catch(() => setRaw([])); }, [period, from, to]);
+  const data = raw == null ? null : (staffId ? raw.filter((s) => s.id === staffId) : raw);
   function exportCsv() {
     const rows = [["Name", "Role", "Stages completed", "Items done", "Reworks"]];
     for (const s of data) rows.push([s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks]);
@@ -1435,9 +1440,10 @@ function StaffReport({ period }) {
 }
 
 // Per person-in-charge: live open workload + how much they completed this period.
-function PicReport({ period }) {
-  const [data, setData] = useState(null);
-  useEffect(() => { setData(null); api("GET", `/reports/pic?period=${period}`).then((d) => setData(d.pics || [])).catch(() => setData([])); }, [period]);
+function PicReport({ period, from, to, staffId }) {
+  const [raw, setRaw] = useState(null);
+  useEffect(() => { setRaw(null); api("GET", `/reports/pic?${reportQuery(period, from, to)}`).then((d) => setRaw(d.pics || [])).catch(() => setRaw([])); }, [period, from, to]);
+  const data = raw == null ? null : (staffId ? raw.filter((p) => p.id === staffId) : raw);
   function exportCsv() {
     const rows = [["Person in charge", "Role", "Open now", "Overdue", "On hold", "Completed (period)"]];
     for (const p of data) rows.push([p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed]);
@@ -1492,6 +1498,38 @@ function MetricCard({ label, value, tone }) {
   );
 }
 
+// Build the report query string: explicit date range wins over the period quick-pick.
+const reportQuery = (period, from, to) => (from && to) ? `from=${from}&to=${to}` : `period=${period}`;
+// Daily trend rendered with Recharts — bar for volume, line variant for delivery.
+function TrendChart({ data, kind = "bar", color = C.accent, label = "Count" }) {
+  const rows = (data || []).map((t) => ({ date: String(t.date).slice(5), count: t.count }));
+  if (!rows.length) return null;
+  return (
+    <Card>
+      <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 14 }}>Daily trend</h3>
+      <ResponsiveContainer width="100%" height={220}>
+        {kind === "line" ? (
+          <LineChart data={rows} margin={{ top: 6, right: 12, left: -18, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.border} />
+            <XAxis dataKey="date" tick={{ fill: C.text3, fontSize: 11 }} stroke={C.border2} />
+            <YAxis allowDecimals={false} tick={{ fill: C.text3, fontSize: 11 }} stroke={C.border2} />
+            <Tooltip contentStyle={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} labelStyle={{ color: C.text2 }} />
+            <Line type="monotone" dataKey="count" name={label} stroke={color} strokeWidth={2} dot={{ r: 3, fill: color }} />
+          </LineChart>
+        ) : (
+          <BarChart data={rows} margin={{ top: 6, right: 12, left: -18, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+            <XAxis dataKey="date" tick={{ fill: C.text3, fontSize: 11 }} stroke={C.border2} />
+            <YAxis allowDecimals={false} tick={{ fill: C.text3, fontSize: 11 }} stroke={C.border2} />
+            <Tooltip cursor={{ fill: C.surface2 }} contentStyle={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text }} labelStyle={{ color: C.text2 }} />
+            <Bar dataKey="count" name={label} fill={color} radius={[5, 5, 0, 0]} maxBarSize={42} />
+          </BarChart>
+        )}
+      </ResponsiveContainer>
+    </Card>
+  );
+}
+
 // ─── Reports ─────────────────────────────────────────────────────────────────
 function Reports({ user }) {
   const tabsForRole = user.role === "production_lead" ? ["production", "packing", "staff", "pic"]
@@ -1510,81 +1548,154 @@ function Reports({ user }) {
   };
   const [tab, setTab] = useState(tabsForRole[0]);
   const [period, setPeriod] = useState("weekly");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [staffId, setStaffId] = useState("");
+  const [staffOpts, setStaffOpts] = useState([]);
   const [d, setD] = useState({});
-  useEffect(() => { if (CUSTOM.includes(tab)) return; api("GET", `/reports/${tab}?period=${period}`).then(setD).catch(() => setD({})); }, [tab, period]);
+  const [busy, setBusy] = useState("");
+  const usingRange = !!(from && to);
+  const q = reportQuery(period, from, to);
+  const rangeLabel = usingRange ? `${from} → ${to}` : (PERIOD_LABEL[period] || period);
+  const dateInp = { padding: "7px 10px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, color: C.text, fontSize: 13, colorScheme: "dark" };
+
+  useEffect(() => { if (CUSTOM.includes(tab)) return; setD({}); api("GET", `/reports/${tab}?${q}`).then(setD).catch(() => setD({})); }, [tab, q]);
+  // Staff list for the "individual staff" filter — sourced from the staff report so leads can read it too.
+  useEffect(() => {
+    if (!(tabsForRole.includes("staff") || tabsForRole.includes("pic"))) return;
+    api("GET", `/reports/staff?${q}`).then((dd) => setStaffOpts(dd.staff || [])).catch(() => {});
+  }, [q]);
+
   const metricDefs = {
     production: (d) => [["Orders Completed", d.completed], ["SKUs Made", d.units_made], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["Avg Production", d.avg_production_hours ? d.avg_production_hours + "h" : "—"], ["Reworks", d.rework_count], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"], ["In Production Now", d.in_stage]],
     packing: (d) => [["Orders Packed", d.packed], ["Avg Pack Time", d.avg_pack_minutes ? d.avg_pack_minutes + "min" : "—"], ["Reworks", d.rework_count], ["Rework Rate", d.rework_rate != null ? d.rework_rate + "%" : "—"], ["In Packing Now", d.in_stage]],
-    delivery: (d) => [["Total Deliveries", d.total_deliveries], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["On-Time Count", d.on_time_count], ["Pending Now", d.pending_count], ["Failed", d.failed_count]],
+    delivery: (d) => [["Total Deliveries", d.total_deliveries], ["On-Time Rate", d.on_time_rate != null ? d.on_time_rate + "%" : "—"], ["On-Time Count", d.on_time_count], ["Avg Turnaround", d.avg_turnaround_hours != null ? (Number(d.avg_turnaround_hours) >= 48 ? Math.round(Number(d.avg_turnaround_hours) / 24) + "d" : d.avg_turnaround_hours + "h") : "—"], ["Pending Now", d.pending_count], ["Failed", d.failed_count]],
   };
   const metrics = CUSTOM.includes(tab) ? {} : { [tab]: metricDefs[tab](d) };
   const trend = d.daily_trend || [];
-  const maxT = Math.max(...trend.map((t) => t.count), 1);
-  const avgT = trend.length ? Math.round((trend.reduce((a, t) => a + t.count, 0) / trend.length) * 10) / 10 : 0;
-  async function exportAll() {
-    const meta = { production: "Production", packing: "Packing", delivery: "Delivery" };
-    const fetched = await Promise.all(tabsForRole.filter((key) => metricDefs[key]).map((key) =>
-      api("GET", `/reports/${key}?period=${period}`).then((dd) => [key, dd]).catch(() => [key, {}])
-    ));
-    const rows = [["Wawasan Candle — Reports"], ["Period", period], []];
-    for (const [key, dd] of fetched) {
-      rows.push([meta[key]], ["Metric", "Value"], ...metricDefs[key](dd).map(([k, v]) => [k, v == null ? "" : v]));
-      if ((dd.by_delivery_man || []).length) rows.push([], ["Courier", "Deliveries", "On time"], ...dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
-      if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
-      rows.push([]);
-    }
-    if (tabsForRole.includes("staff")) {
-      const sd = await api("GET", `/reports/staff?period=${period}`).then((dd) => dd.staff || []).catch(() => []);
-      rows.push(["Staff productivity"], ["Name", "Role", "Stages completed", "Items done", "Reworks"],
-        ...sd.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks]), []);
-    }
-    if (tabsForRole.includes("pic")) {
-      const pd = await api("GET", `/reports/pic?period=${period}`).then((dd) => dd.pics || []).catch(() => []);
-      rows.push(["Person in charge"], ["Name", "Role", "Open now", "Overdue", "On hold", "Completed"],
-        ...pd.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed]), []);
-    }
-    downloadCsv(`reports-${period}.csv`, rows);
+
+  const META = { production: "Production", packing: "Packing", delivery: "Delivery" };
+  const kpiRows = (key, dd) => (metricDefs[key] ? metricDefs[key](dd).map(([k, v]) => [k, v == null ? "" : String(v)]) : []);
+  const fileTag = usingRange ? `${from}_${to}` : period;
+  async function fetchReportData() {
+    const keys = tabsForRole.filter((k) => metricDefs[k]);
+    const parts = await Promise.all(keys.map((k) => api("GET", `/reports/${k}?${q}`).then((dd) => [k, dd]).catch(() => [k, {}])));
+    const data = Object.fromEntries(parts);
+    if (tabsForRole.includes("staff")) data._staff = await api("GET", `/reports/staff?${q}`).then((dd) => dd.staff || []).catch(() => []);
+    if (tabsForRole.includes("pic")) data._pics = await api("GET", `/reports/pic?${q}`).then((dd) => dd.pics || []).catch(() => []);
+    return data;
+  }
+  async function exportCsv() {
+    setBusy("csv");
+    try {
+      const data = await fetchReportData();
+      const rows = [["Wawasan Candle — Reports"], ["Range", rangeLabel], []];
+      for (const key of tabsForRole.filter((k) => metricDefs[k])) {
+        const dd = data[key] || {};
+        rows.push([META[key]], ["Metric", "Value"], ...kpiRows(key, dd));
+        if ((dd.by_delivery_man || []).length) rows.push([], ["Courier", "Deliveries", "On time"], ...dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
+        if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
+        rows.push([]);
+      }
+      if (data._staff) rows.push(["Staff productivity"], ["Name", "Role", "Stages completed", "Items done", "Reworks"], ...data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks]), []);
+      if (data._pics) rows.push(["Person in charge"], ["Name", "Role", "Open now", "Overdue", "On hold", "Completed"], ...data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed]), []);
+      downloadCsv(`reports-${fileTag}.csv`, rows);
+    } finally { setBusy(""); }
+  }
+  async function exportExcel() {
+    setBusy("xlsx");
+    try {
+      const data = await fetchReportData();
+      const wb = XLSX.utils.book_new();
+      for (const key of tabsForRole.filter((k) => metricDefs[k])) {
+        const dd = data[key] || {};
+        const rows = [[`${META[key]} — ${rangeLabel}`], [], ["Metric", "Value"], ...kpiRows(key, dd)];
+        if ((dd.by_delivery_man || []).length) rows.push([], ["Courier", "Deliveries", "On time"], ...dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
+        if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), META[key]);
+      }
+      if (data._staff) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Name", "Role", "Stages completed", "Items done", "Reworks"], ...data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks])]), "Staff");
+      if (data._pics) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Name", "Role", "Open now", "Overdue", "On hold", "Completed"], ...data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed])]), "PIC");
+      XLSX.writeFile(wb, `reports-${fileTag}.xlsx`);
+    } finally { setBusy(""); }
+  }
+  async function exportPdf() {
+    setBusy("pdf");
+    try {
+      const data = await fetchReportData();
+      const doc = new jsPDF();
+      doc.setFontSize(16); doc.setTextColor(20); doc.text("Wawasan Candle — Reports", 14, 18);
+      doc.setFontSize(10); doc.setTextColor(120); doc.text(`Range: ${rangeLabel}`, 14, 25);
+      let y = 32;
+      for (const key of tabsForRole.filter((k) => metricDefs[k])) {
+        const dd = data[key] || {};
+        if (y > 250) { doc.addPage(); y = 18; }
+        doc.setFontSize(12); doc.setTextColor(20); doc.text(META[key], 14, y);
+        autoTable(doc, { startY: y + 3, head: [["Metric", "Value"]], body: kpiRows(key, dd), theme: "striped", headStyles: { fillColor: [249, 115, 22] }, margin: { left: 14, right: 14 } });
+        y = doc.lastAutoTable.finalY + 7;
+        if ((dd.by_delivery_man || []).length) {
+          if (y > 250) { doc.addPage(); y = 18; }
+          autoTable(doc, { startY: y, head: [["Courier", "Deliveries", "On time"]], body: dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]), theme: "grid", headStyles: { fillColor: [120, 120, 120] }, margin: { left: 14, right: 14 } });
+          y = doc.lastAutoTable.finalY + 7;
+        }
+      }
+      if (data._staff && data._staff.length) {
+        if (y > 250) { doc.addPage(); y = 18; }
+        doc.setFontSize(12); doc.setTextColor(20); doc.text("Staff productivity", 14, y);
+        autoTable(doc, { startY: y + 3, head: [["Name", "Role", "Done", "Items", "Reworks"]], body: data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks]), theme: "striped", headStyles: { fillColor: [249, 115, 22] }, margin: { left: 14, right: 14 } });
+        y = doc.lastAutoTable.finalY + 7;
+      }
+      if (data._pics && data._pics.length) {
+        if (y > 250) { doc.addPage(); y = 18; }
+        doc.setFontSize(12); doc.setTextColor(20); doc.text("Person in charge", 14, y);
+        autoTable(doc, { startY: y + 3, head: [["Name", "Role", "Open", "Overdue", "On hold", "Completed"]], body: data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed]), theme: "striped", headStyles: { fillColor: [249, 115, 22] }, margin: { left: 14, right: 14 } });
+      }
+      doc.save(`reports-${fileTag}.pdf`);
+    } finally { setBusy(""); }
   }
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 18 }}>
-        <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, flexWrap: "wrap" }}>
           {tabsForRole.map((t) => <button key={t} onClick={() => setTab(t)} style={{ background: tab === t ? C.surface2 : "transparent", border: "none", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 13, fontWeight: tab === t ? 700 : 500, color: tab === t ? C.text : C.text2, textTransform: "capitalize" }}>{TAB_LABEL[t] || t}</button>)}
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <select value={period} onChange={(e) => setPeriod(e.target.value)} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13 }}>
-            <option value="daily" style={{ background: C.bg2 }}>Today</option>
-            <option value="weekly" style={{ background: C.bg2 }}>This Week</option>
-            <option value="monthly" style={{ background: C.bg2 }}>This Month</option>
-          </select>
-          <Btn variant="soft" onClick={exportAll}>Export all</Btn>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Btn variant="soft" size="sm" onClick={exportPdf} disabled={!!busy}>{busy === "pdf" ? "Exporting…" : "PDF"}</Btn>
+          <Btn variant="soft" size="sm" onClick={exportExcel} disabled={!!busy}>{busy === "xlsx" ? "Exporting…" : "Excel"}</Btn>
+          <Btn variant="soft" size="sm" onClick={exportCsv} disabled={!!busy}>{busy === "csv" ? "Exporting…" : "CSV"}</Btn>
         </div>
       </div>
-      <div style={{ fontSize: 13, color: C.text3, margin: "0 0 16px" }}>{TAB_DESC[tab]} · {PERIOD_LABEL[period] || period}</div>
-      {tab === "orders" && <OrdersReport period={period} />}
-      {tab === "staff" && <StaffReport period={period} />}
-      {tab === "pic" && <PicReport period={period} />}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 3, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 9, padding: 3 }}>
+          {["daily", "weekly", "monthly"].map((p) => {
+            const on = !usingRange && period === p;
+            return <button key={p} onClick={() => { setPeriod(p); setFrom(""); setTo(""); }} style={{ background: on ? C.surface2 : "transparent", border: "none", borderRadius: 7, padding: "6px 12px", cursor: "pointer", fontSize: 12.5, fontWeight: on ? 700 : 500, color: on ? C.text : C.text2 }}>{PERIOD_LABEL[p]}</button>;
+          })}
+        </div>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} title="From" style={dateInp} />
+          <span style={{ color: C.text3, fontSize: 13 }}>→</span>
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} title="To" style={dateInp} />
+          {usingRange && <button onClick={() => { setFrom(""); setTo(""); }} style={{ background: "transparent", border: "none", color: C.text3, cursor: "pointer", fontSize: 12.5 }}>clear</button>}
+        </div>
+        {(tabsForRole.includes("staff") || tabsForRole.includes("pic")) && (
+          <select value={staffId} onChange={(e) => setStaffId(e.target.value)} title="Filter the Staff / Person-in-charge tables to one person" style={{ padding: "7px 10px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, color: C.text, fontSize: 13 }}>
+            <option value="" style={{ background: C.bg2 }}>All staff</option>
+            {staffOpts.map((s) => <option key={s.id} value={s.id} style={{ background: C.bg2 }}>{s.name}</option>)}
+          </select>
+        )}
+        <span style={{ fontSize: 12.5, color: C.text3, marginLeft: "auto" }}>{TAB_DESC[tab]} · {rangeLabel}</span>
+      </div>
+      {tab === "orders" && <OrdersReport period={period} from={from} to={to} />}
+      {tab === "staff" && <StaffReport period={period} from={from} to={to} staffId={staffId} />}
+      {tab === "pic" && <PicReport period={period} from={from} to={to} staffId={staffId} />}
       {!CUSTOM.includes(tab) && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 18 }}>
           {(metrics[tab] || []).map(([label, value]) => <MetricCard key={label} label={label} value={value} tone={metricTone(label)} />)}
         </div>
       )}
       {!CUSTOM.includes(tab) && trend.length > 0 && (
-        <Card>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 16 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text }}>Daily trend</h3>
-            <span style={{ fontSize: 12, color: C.text3 }}>Peak {maxT} · avg {avgT}</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 130 }}>
-            {trend.map((t, i) => (
-              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 5 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: t.count === maxT ? C.accent : C.text2 }}>{t.count}</span>
-                <div style={{ width: "100%", maxWidth: 46, background: t.count === maxT ? C.accent : C.accent + "88", borderRadius: "5px 5px 0 0", height: `${(t.count / maxT) * 90}px`, minHeight: 4, transition: "height .4s" }} />
-                <span style={{ fontSize: 10.5, color: C.text3 }}>{String(t.date).slice(5)}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
+        <TrendChart data={trend} kind={tab === "delivery" ? "line" : "bar"} color={tab === "delivery" ? C.ready : C.accent} label={tab === "packing" ? "Packed" : tab === "delivery" ? "Delivered" : "Completed"} />
       )}
       {tab === "delivery" && (d.by_delivery_man || []).length > 0 && (
         <Card style={{ marginTop: 18 }}>
