@@ -509,6 +509,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [confirmAdv, setConfirmAdv] = useState(null);
+  const [viewStage, setViewStage] = useState("all");
   const canMove = ["super_admin", "operations_controller"].includes(user.role);
   const stages = visibleStages(user.role);
 
@@ -540,13 +541,32 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     return out;
   };
 
+  const showStagePicker = stages.length > 1;
+  const shownStages = (viewStage !== "all" && stages.includes(viewStage)) ? [viewStage] : stages;
+
   if (loading && !board) return <Loading label="Loading board…" />;
 
   return (
     <div>
       {err && <div style={{ marginBottom: 14, color: "#fca5a5", fontSize: 13 }}>⚠ {err}</div>}
-      <div style={{ display: "grid", gridTemplateColumns: stages.length >= 3 ? `repeat(auto-fit, minmax(min(100%, 250px), 1fr))` : `repeat(${stages.length}, minmax(280px, 440px))`, gap: 16, alignItems: "start" }}>
-        {stages.map((s) => {
+      {showStagePicker && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+          {["all", ...stages].map((s) => {
+            const active = viewStage === s;
+            const color = s === "all" ? C.accent : (STAGES[s] || {}).color || C.accent;
+            const label = s === "all" ? "All stages" : (STAGES[s] || {}).label || s;
+            const count = s === "all" ? null : filt((board && board[s]) || []).length;
+            return (
+              <button key={s} onClick={() => setViewStage(s)} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 9, border: `1px solid ${active ? color + "66" : C.border2}`, background: active ? color + "22" : C.surface, color: active ? color : C.text2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                {s !== "all" && <span style={{ width: 8, height: 8, borderRadius: "50%", background: color }} />}
+                {label}{count != null && <span style={{ background: active ? color + "33" : C.surface2, color: active ? color : C.text3, borderRadius: 6, padding: "0 7px", fontSize: 12, fontWeight: 700 }}>{count}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: shownStages.length === 1 ? `repeat(1, minmax(min(100%, 280px), 560px))` : `repeat(auto-fit, minmax(min(100%, 250px), 1fr))`, gap: 16, alignItems: "start" }}>
+        {shownStages.map((s) => {
           const cfg = STAGES[s];
           const orders = filt((board && board[s]) || []);
           return (
