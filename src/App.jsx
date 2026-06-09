@@ -1795,7 +1795,7 @@ function Reports({ user }) {
 }
 
 // ─── Messages (WhatsApp queue) ──────────────────────────────────────────────────
-const MSG_KIND = { received: "Order received", out_for_delivery: "Out for delivery", delivered: "Delivered", morning_brief: "Morning brief", test: "Test" };
+const MSG_KIND = { received: "Order received", ready: "Packed / ready", out_for_delivery: "Out for delivery", delivered: "Delivered", delayed: "Delay notice", morning_brief: "Morning brief", test: "Test" };
 const MSG_STATUS = {
   queued: { label: "Queued", color: C.packing }, sending: { label: "Sending", color: C.order },
   sent: { label: "Sent", color: C.ready }, failed: { label: "Failed", color: C.danger }, cancelled: { label: "Cancelled", color: C.text3 },
@@ -1804,12 +1804,22 @@ function Messages({ user }) {
   const [d, setD] = useState(null);
   const [busy, setBusy] = useState("");
   const [confirmSend, setConfirmSend] = useState(false);
+  const [redirectTo, setRedirectTo] = useState("");
   const narrow = useViewport() < 760;
   async function load() { try { setD(await api("GET", "/whatsapp/queue")); } catch (e) { setD({ _error: e.message }); } }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
   async function act(label, path) {
     setBusy(label);
     try { await api("POST", path); await load(); } catch (e) { alert(e.message); } finally { setBusy(""); }
+  }
+  async function redirectAll() {
+    if (!redirectTo.trim()) return;
+    setBusy("redirect");
+    try { await api("POST", "/whatsapp/redirect", { to: redirectTo.trim() }); await load(); } catch (e) { alert(e.message); } finally { setBusy(""); }
+  }
+  async function saveRecipient(id, to, old) {
+    if (!to.trim() || to.trim() === old) return;
+    try { await api("POST", "/whatsapp/redirect", { id, to: to.trim() }); await load(); } catch (e) { alert(e.message); }
   }
   if (!d) return <Loading label="Loading messages…" />;
   if (d._error) return <div style={{ color: "#fca5a5" }}>⚠ {d._error}</div>;
@@ -1819,6 +1829,17 @@ function Messages({ user }) {
   const fmtWhen = (s) => s ? new Date(s).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
   return (
     <div>
+      <div style={{ background: "#2a1d0b", border: `1px solid ${C.accent}55`, borderRadius: 11, padding: "12px 14px", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontWeight: 800, color: C.accent, fontSize: 13, letterSpacing: 0.5 }}>🚧 DEMO / PREVIEW ONLY</span>
+          <span style={{ color: C.text3, fontSize: 12.5 }}>Point the queued messages at your own number to watch them arrive on your phone. Don't send to real customers during a demo.</span>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 12.5, color: C.text2 }}>Send all queued to:</span>
+          <input value={redirectTo} onChange={(e) => setRedirectTo(e.target.value)} placeholder="60123456789" style={{ padding: "7px 10px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, color: C.text, fontSize: 13, fontFamily: MONO, width: 160 }} />
+          <Btn variant="soft" size="sm" disabled={!!busy || queued === 0 || !redirectTo.trim()} onClick={redirectAll}>{busy === "redirect" ? "Applying…" : `Apply to ${queued} queued`}</Btn>
+        </div>
+      </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "6px 12px", borderRadius: 9, background: (live ? C.ready : C.packing) + "1c", border: `1px solid ${(live ? C.ready : C.packing)}55`, color: live ? C.ready : C.packing, fontSize: 12.5, fontWeight: 700 }}>
           {live ? "● Live — sending to WhatsApp" : "● Test mode — messages logged, not sent"}
@@ -1847,7 +1868,9 @@ function Messages({ user }) {
                 <Pill color={(MSG_STATUS[m.status] || {}).color || C.text3}>{(MSG_STATUS[m.status] || {}).label || m.status}</Pill>
               </>}
               rows={[
-                ["To", <span style={{ fontFamily: MONO }}>{m.recipient || "—"}</span>],
+                ["To", m.status === "queued"
+                  ? <input key={m.recipient} defaultValue={m.recipient} onBlur={(e) => saveRecipient(m.id, e.target.value, m.recipient)} style={{ padding: "5px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 7, color: C.text, fontSize: 12.5, fontFamily: MONO, width: 150 }} />
+                  : <span style={{ fontFamily: MONO }}>{m.recipient || "—"}</span>],
                 ["When", fmtWhen(m.sent_at || m.created_at)],
                 ["Message", <span style={{ color: C.text2 }}>{m.preview}</span>],
               ]} />
@@ -1861,7 +1884,9 @@ function Messages({ user }) {
                 <tr key={m.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                   <td style={{ padding: "9px 14px", color: C.text, whiteSpace: "nowrap" }}>{MSG_KIND[m.kind] || m.kind}</td>
                   <td style={{ padding: "9px 14px" }}><Pill color={(MSG_STATUS[m.status] || {}).color || C.text3}>{(MSG_STATUS[m.status] || {}).label || m.status}</Pill></td>
-                  <td style={{ padding: "9px 14px", fontFamily: MONO, color: C.text2, whiteSpace: "nowrap" }}>{m.recipient || "—"}</td>
+                  <td style={{ padding: "9px 14px", whiteSpace: "nowrap" }}>{m.status === "queued"
+                    ? <input key={m.recipient} defaultValue={m.recipient} onBlur={(e) => saveRecipient(m.id, e.target.value, m.recipient)} title="Edit recipient (queued only)" style={{ padding: "5px 8px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 7, color: C.text, fontSize: 12.5, fontFamily: MONO, width: 130 }} />
+                    : <span style={{ fontFamily: MONO, color: C.text2 }}>{m.recipient || "—"}</span>}</td>
                   <td style={{ padding: "9px 14px", color: C.text2, maxWidth: 440 }}>{m.preview}</td>
                   <td style={{ padding: "9px 14px", color: C.text3, whiteSpace: "nowrap" }}>{fmtWhen(m.sent_at || m.created_at)}</td>
                 </tr>
