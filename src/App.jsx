@@ -2801,9 +2801,25 @@ function Delivery({ user, onOpenOrder }) {
       load();
     } catch (e) { alert(e.message); }
   }
-  async function markDelivered(id) { try { await api("POST", `/delivery/${id}/deliver`, {}); setConfirmDeliver(null); load(); } catch (e) { alert(e.message); } }
+  // Deliver requires a proof photo — the server returns 428 'no_proof' if none is
+  // attached. If the driver genuinely has none, confirm once and deliver anyway;
+  // Boss & Ops are then notified to verify, so nothing slips through silently.
+  const NO_PROOF_ASK = "No proof photo attached.\n\nDeliver without proof? Boss & Ops will be notified to verify.\n\nTip: tap 📎 Proof to snap a photo first.";
+  async function markDelivered(id, noProof) {
+    try { await api("POST", `/delivery/${id}/deliver`, { no_proof: !!noProof }); setConfirmDeliver(null); load(); }
+    catch (e) {
+      if (e.message === "no_proof") { setConfirmDeliver(null); if (confirm(NO_PROOF_ASK)) markDelivered(id, true); }
+      else alert(e.message);
+    }
+  }
   // One-tap deliver straight from Ready (no Schedule step), and its undo.
-  async function markDeliveredDirect(orderId) { try { await api("POST", "/delivery/quick-deliver", { order_id: orderId }); load(); } catch (e) { alert(e.message); } }
+  async function markDeliveredDirect(orderId, noProof) {
+    try { await api("POST", "/delivery/quick-deliver", { order_id: orderId, no_proof: !!noProof }); load(); }
+    catch (e) {
+      if (e.message === "no_proof") { if (confirm(NO_PROOF_ASK)) markDeliveredDirect(orderId, true); }
+      else alert(e.message);
+    }
+  }
   async function reopenDelivery(deliveryId) {
     if (!deliveryId) { alert("No delivery record to undo."); return; }
     if (!confirm("Reopen this order? It goes back to Ready for Delivery so you can re-deliver it.")) return;
@@ -2909,6 +2925,7 @@ function Delivery({ user, onOpenOrder }) {
                   ["Due", <span style={{ color: countdown(o.required_delivery_date).tone }}>{fmtDay(o.required_delivery_date)}</span>],
                 ]}
                 actions={<>
+                  {canDeliver && <label style={{ ...proofBtn, flex: 1, justifyContent: "center", padding: "11px" }}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(o.id, f); }} /></label>}
                   {canDeliver && <Btn size="lg" variant="success" style={{ flex: 2, justifyContent: "center" }} onClick={() => markDeliveredDirect(o.id)}>✓ Delivered</Btn>}
                   <Btn size="lg" variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => scheduleFor(o.id)}>Schedule</Btn>
                   <Btn size="lg" variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => printOneDO(o.id)}>🖨 DO</Btn>
@@ -2935,6 +2952,7 @@ function Delivery({ user, onOpenOrder }) {
                     <td style={{ padding: "11px 16px" }}><Pill color={C.ready}>Ready for Delivery</Pill></td>
                     <td style={{ padding: "11px 16px" }}>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {canDeliver && <label style={proofBtn}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(o.id, f); }} /></label>}
                         {canDeliver && <Btn size="sm" variant="success" onClick={() => markDeliveredDirect(o.id)}>✓ Delivered</Btn>}
                         <Btn size="sm" variant="soft" onClick={() => scheduleFor(o.id)}>Schedule</Btn>
                         <Btn size="sm" variant="soft" onClick={() => printOneDO(o.id)}>🖨 DO</Btn>
@@ -2995,6 +3013,7 @@ function Delivery({ user, onOpenOrder }) {
                   <td style={{ padding: "11px 16px" }}>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       {canAssign && <Btn size="sm" variant="soft" onClick={() => openEdit(dv)}>Edit</Btn>}
+                      {canDeliver && <label style={proofBtn}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(dv.order_id, f); }} /></label>}
                       {canDeliver && <Btn size="sm" variant="success" onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
                       <Btn size="sm" variant="soft" onClick={() => printOneDO(dv.order_id)}>🖨 DO</Btn>
                     </div>
@@ -3126,8 +3145,12 @@ function Delivery({ user, onOpenOrder }) {
               {confirmDeliver.address && <div><span style={{ color: C.text3 }}>Address: </span>{confirmDeliver.address}</div>}
               <div><span style={{ color: C.text3 }}>Driver: </span>{confirmDeliver.delivery_man_name || "Unassigned"}</div>
               <div><span style={{ color: C.text3 }}>Scheduled: </span>{confirmDeliver.scheduled_date ? fmtDay(confirmDeliver.scheduled_date) : "—"}</div>
+              <div><span style={{ color: C.text3 }}>Proof: </span>{confirmDeliver.has_pod ? <span style={{ color: C.ready }}>✓ Attached</span> : <span style={{ color: C.hold }}>⚠ None yet</span>}</div>
             </div>
-            <div style={{ fontSize: 12.5, color: C.text3, marginBottom: 16 }}>This marks the order delivered. You can undo it from Completed if you mark it by mistake.</div>
+            {!confirmDeliver.has_pod && (
+              <label style={{ ...proofBtn, width: "100%", justifyContent: "center", marginBottom: 12 }}>📎 Attach proof photo<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(confirmDeliver.order_id, f); }} /></label>
+            )}
+            <div style={{ fontSize: 12.5, color: C.text3, marginBottom: 16 }}>This marks the order delivered. Without a proof photo you'll be asked to confirm, and Boss &amp; Ops are notified. You can undo it from Completed if you mark it by mistake.</div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <Btn variant="ghost" onClick={() => setConfirmDeliver(null)}>Cancel</Btn>
               <Btn variant="success" onClick={() => markDelivered(confirmDeliver.id)}><Icon name="check" size={15} /> Confirm delivered</Btn>
