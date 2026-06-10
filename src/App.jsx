@@ -988,7 +988,7 @@ function FloorDisplay({ onExit }) {
         </div>
 
         {/* Spotlight */}
-        <div style={{ width: 420, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 16, padding: "20px 22px", display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ width: 420, background: spot && spot.priority === "urgent" ? C.danger + "14" : C.bg2, border: `1px solid ${spot && spot.priority === "urgent" ? C.danger + "88" : C.border}`, borderRadius: 16, padding: "20px 22px", display: "flex", flexDirection: "column", minHeight: 0 }}>
           {!spot ? <div style={{ margin: "auto", color: C.text3 }}>No active orders</div> : (
             <>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1034,11 +1034,12 @@ function FloorDisplay({ onExit }) {
                   ? (detail.items || []).map((it) => {
                     const st = itemStat(it);
                     const dot = st.k === "done" ? C.green : st.k === "in_progress" ? C.packing : C.accent;
+                    const isDone = st.k === "done";
                     return (
-                    <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "13px 0", borderBottom: `1px solid ${C.border}` }}>
+                    <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "13px 12px", borderBottom: `1px solid ${C.border}`, background: isDone ? C.green + "1f" : "transparent", borderLeft: `4px solid ${isDone ? C.green : "transparent"}` }}>
                       <span style={{ width: 10, height: 10, borderRadius: "50%", background: dot, boxShadow: `0 0 8px ${dot}`, flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontFamily: MONO, fontSize: 23, fontWeight: 800, color: C.text, letterSpacing: 0.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.sku}</div>
+                        <div style={{ fontFamily: MONO, fontSize: 23, fontWeight: 800, color: isDone ? C.green : C.text, letterSpacing: 0.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.sku}</div>
                         <div style={{ fontSize: 13.5, fontWeight: 500, color: C.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
                       </div>
                       <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 18 }}>
@@ -1046,7 +1047,7 @@ function FloorDisplay({ onExit }) {
                           <span style={{ fontSize: 24, fontWeight: 800, color: C.text, lineHeight: 1 }}>{Math.round(it.quantity)}</span>
                           <span style={{ fontSize: 12, fontWeight: 600, color: C.text3 }}> {it.unit || "pcs"}</span>
                         </div>
-                        <span style={{ fontSize: 16, fontWeight: 800, color: dot, textTransform: "uppercase", letterSpacing: 0.5, minWidth: 84, textAlign: "right" }}>{st.label}</span>
+                        <span style={{ fontSize: 16, fontWeight: 800, color: dot, textTransform: "uppercase", letterSpacing: 0.5, minWidth: 84, textAlign: "right" }}>{isDone ? "✓ " + st.label : st.label}</span>
                       </div>
                     </div>
                     );
