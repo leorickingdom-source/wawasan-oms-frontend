@@ -534,15 +534,15 @@ function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown
   // order reads at a glance. Green wins over urgent: it only shows in production/packing
   // and flags the actionable "move it now" state; the Urgent pill still shows.
   const allDone = (order.stage === "production" || order.stage === "packing") && (order.item_count || 0) > 0 && (order.made_count || 0) >= order.item_count;
-  // Urgent AND finished → keep both signals: green inner border + a dark gap + a red
-  // outer ring (double border), instead of green silently hiding the urgency.
-  const urgentDone = urgent && allDone;
+  // Done = green card tint, urgent = red tint — same visual language, no words needed.
+  // When an order is both, green wins (it flags the actionable "advance me" state) and
+  // the Urgent pill carries the urgency — no noisy double-ring.
   const cardBg = allDone ? C.ready + "1A" : urgent ? C.danger + "1A" : C.surface;
   const cardBgHover = allDone ? C.ready + "26" : urgent ? C.danger + "26" : C.surface2;
   const next = BOARD_STAGES[BOARD_STAGES.indexOf(order.stage) + 1] || "delivered";
   return (
     <div onClick={() => onOpen(order)}
-      style={{ position: "relative", background: cardBg, border: `1px solid ${urgentDone ? C.ready : unread ? C.accent : allDone ? C.ready + "88" : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "12px 13px", cursor: "pointer", transition: "background .12s", boxShadow: urgentDone ? `0 0 0 2px ${C.bg}, 0 0 0 4px ${C.danger}` : unread ? `0 0 0 2px ${C.accent}` : "none", animation: (unread && !urgentDone) ? "wws-ring 1.5s ease infinite" : "none" }}
+      style={{ position: "relative", background: cardBg, border: `1px solid ${unread ? C.accent : allDone ? C.ready + "88" : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "12px 13px", cursor: "pointer", transition: "background .12s", boxShadow: unread ? `0 0 0 2px ${C.accent}` : "none", animation: unread ? "wws-ring 1.5s ease infinite" : "none" }}
       onMouseEnter={(e) => (e.currentTarget.style.background = cardBgHover)}
       onMouseLeave={(e) => (e.currentTarget.style.background = cardBg)}>
       {unread && <span style={{ position: "absolute", top: -8, right: -8, display: "inline-flex", alignItems: "center", gap: 3, background: C.accent, color: "#1a1410", fontSize: 9.5, fontWeight: 800, borderRadius: 20, padding: "2px 7px", boxShadow: "0 2px 8px rgba(0,0,0,.4)" }}>● NEW</span>}
@@ -553,13 +553,6 @@ function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown
         </div>
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
           {urgent && <Pill color={C.danger}>Urgent</Pill>}
-          {showName && (onSetTier
-            ? (picker
-                ? <span style={{ display: "inline-flex", gap: 4 }} onClick={(e) => e.stopPropagation()}>
-                    {IMPORTANCE_OPTS.map((o) => <button key={o.value} onClick={() => { setPicker(false); if (o.value !== order.importance) onSetTier(o.value); }} style={{ cursor: "pointer", fontSize: 10.5, fontWeight: 700, padding: "2px 7px", borderRadius: 7, border: `1px solid ${IMPORTANCE[o.value].color}66`, background: order.importance === o.value ? IMPORTANCE[o.value].color + "33" : C.surface2, color: IMPORTANCE[o.value].color }}>{o.label}</button>)}
-                  </span>
-                : <button onClick={(e) => { e.stopPropagation(); setPicker(true); }} title="Change priority tier" style={{ border: "none", background: "transparent", padding: 0, cursor: "pointer" }}><Pill color={imp.color}>{imp.label} ▾</Pill></button>)
-            : <Pill color={imp.color}>{imp.label}</Pill>)}
           {dtag && <Pill color={dtag.color}>{dtag.label}</Pill>}
           {waiting && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
           {onHold && <Pill color={C.hold}>On hold</Pill>}
@@ -573,21 +566,22 @@ function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown
         {cd.text && <span style={{ color: cd.tone, fontWeight: 600 }}>· {cd.text}</span>}
       </div>
       <div style={{ fontSize: 13, color: showName ? C.text : imp.color, fontWeight: showName ? 500 : 700, marginBottom: 3 }}>{showName ? order.customer_name : imp.label}</div>
-      <div style={{ fontSize: 12, color: C.text3, marginBottom: 5 }}>
-        {order.item_count} {order.item_count === 1 ? "line" : "lines"}
-        {order.expiry_date && <span> · Exp {fmtDay(order.expiry_date)}</span>}
-      </div>
-      {(order.stage === "production" || order.stage === "packing") && order.item_count > 0 && (() => {
+      {(order.item_count === 0 || order.expiry_date) && (
+        <div style={{ fontSize: 12, color: C.text3, marginBottom: 5 }}>
+          {order.item_count === 0
+            ? <span style={{ color: C.packing, fontWeight: 600 }}>⚠ no items</span>
+            : <>Exp {fmtDay(order.expiry_date)}</>}
+        </div>
+      )}
+      {(order.stage === "production" || order.stage === "packing") && order.item_count > 0 && (order.made_count || 0) < order.item_count && (() => {
         const done = order.made_count || 0, total = order.item_count || 0;
-        const full = total > 0 && done >= total;
         const p = total > 0 ? Math.round((done / total) * 100) : 0;
+        // The "all done" state is shown by the green card tint — no redundant text/bar.
         return (
           <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: full ? C.ready : C.accent, marginBottom: 4 }}>
-              {full ? "All STKs done ✓" : `${done}/${total} STKs done`}
-            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: C.accent, marginBottom: 4 }}>{done}/{total} STKs done</div>
             <div style={{ height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${p}%`, background: full ? C.ready : C.accent }} />
+              <div style={{ height: "100%", width: `${p}%`, background: C.accent }} />
             </div>
           </div>
         );
@@ -809,39 +803,49 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
                   </>
                 ) : (
                   <>
-                    <div style={{ fontSize: 11, color: C.text3, marginBottom: 1 }}>Drag a card into a group to set priority · ▲▼ to rank within</div>
-                    {TIER_ORDER.map((tier) => {
-                      const group = orders.filter((o) => (o.importance || "standard") === tier);
-                      const zoneKey = s + ":" + tier;
-                      const over = dragOverZone === zoneKey && dragId;
-                      const tcfg = IMPORTANCE[tier] || { label: tier, color: C.text3 };
-                      return (
-                        <div key={tier}
-                          onDragOver={(e) => { e.preventDefault(); if (dragOverZone !== zoneKey) setDragOverZone(zoneKey); }}
-                          onDragLeave={() => setDragOverZone((z) => (z === zoneKey ? null : z))}
-                          onDrop={(e) => { e.preventDefault(); setDragOverZone(null); dropOnZone(s, tier); }}
-                          style={{ borderRadius: 10, padding: "1px 2px", boxShadow: over ? `inset 0 0 0 1.5px ${C.accent}` : "none" }}>
-                          <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.5, color: tcfg.color, display: "flex", alignItems: "center", gap: 8, margin: "6px 4px 8px" }}>
-                            {tcfg.label}<span style={{ flex: 1, height: 1, background: C.border }} />
+                    {(() => {
+                      // Calm the tier scaffolding: hide empty tiers at rest (they come back
+                      // while dragging so you can still drop into one), and drop the tier
+                      // headers when a column only has one tier in play. Per-column helper
+                      // text removed — the ⓘ in the toolbar explains drag/▲▼.
+                      const nonEmpty = TIER_ORDER.filter((t) => orders.some((o) => (o.importance || "standard") === t)).length;
+                      const showHeaders = nonEmpty > 1 || !!dragId;
+                      return TIER_ORDER.map((tier) => {
+                        const group = orders.filter((o) => (o.importance || "standard") === tier);
+                        if (group.length === 0 && !dragId) return null;
+                        const zoneKey = s + ":" + tier;
+                        const over = dragOverZone === zoneKey && dragId;
+                        const tcfg = IMPORTANCE[tier] || { label: tier, color: C.text3 };
+                        return (
+                          <div key={tier}
+                            onDragOver={(e) => { e.preventDefault(); if (dragOverZone !== zoneKey) setDragOverZone(zoneKey); }}
+                            onDragLeave={() => setDragOverZone((z) => (z === zoneKey ? null : z))}
+                            onDrop={(e) => { e.preventDefault(); setDragOverZone(null); dropOnZone(s, tier); }}
+                            style={{ borderRadius: 10, padding: "1px 2px", boxShadow: over ? `inset 0 0 0 1.5px ${C.accent}` : "none" }}>
+                            {showHeaders && (
+                              <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.5, color: tcfg.color, display: "flex", alignItems: "center", gap: 8, margin: "6px 4px 8px" }}>
+                                {tcfg.label}<span style={{ flex: 1, height: 1, background: C.border }} />
+                              </div>
+                            )}
+                            {group.length === 0
+                              ? <div style={{ fontSize: 11, color: C.text3, padding: "8px 10px", border: `1px dashed ${C.border2}`, borderRadius: 9, textAlign: "center", marginBottom: 4 }}>Drop here → {tcfg.label}</div>
+                              : group.map((o, i) => (
+                                  <div key={o.id} draggable
+                                    onDragStart={(e) => { setDragId(o.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", o.id); } catch (_) {} }}
+                                    onDragEnd={() => { setDragId(null); setDragOverZone(null); }}
+                                    onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) {} }}
+                                    onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverZone(null); dropOnCard(s, o.id); }}
+                                    style={{ cursor: "grab", opacity: dragId === o.id ? 0.4 : 1, marginBottom: 9 }}>
+                                    <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} reorderable rank={i + 1} unread={unreadIds && unreadIds.has(o.id)}
+                                      onReorderUp={i > 0 ? () => reorderMove(s, o.id, -1) : null}
+                                      onReorderDown={i < group.length - 1 ? () => reorderMove(s, o.id, 1) : null}
+                                      onSetTier={(t) => setTier(s, o.id, t)} />
+                                  </div>
+                                ))}
                           </div>
-                          {group.length === 0
-                            ? <div style={{ fontSize: 11, color: C.text3, padding: "8px 10px", border: `1px dashed ${C.border2}`, borderRadius: 9, textAlign: "center", marginBottom: 4 }}>Drop here → {tcfg.label}</div>
-                            : group.map((o, i) => (
-                                <div key={o.id} draggable
-                                  onDragStart={(e) => { setDragId(o.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", o.id); } catch (_) {} }}
-                                  onDragEnd={() => { setDragId(null); setDragOverZone(null); }}
-                                  onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) {} }}
-                                  onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverZone(null); dropOnCard(s, o.id); }}
-                                  style={{ cursor: "grab", opacity: dragId === o.id ? 0.4 : 1, marginBottom: 9 }}>
-                                  <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} reorderable rank={i + 1} unread={unreadIds && unreadIds.has(o.id)}
-                                    onReorderUp={i > 0 ? () => reorderMove(s, o.id, -1) : null}
-                                    onReorderDown={i < group.length - 1 ? () => reorderMove(s, o.id, 1) : null}
-                                    onSetTier={(t) => setTier(s, o.id, t)} />
-                                </div>
-                              ))}
-                        </div>
-                      );
-                    })}
+                        );
+                      });
+                    })()}
                   </>
                 )}
               </div>
