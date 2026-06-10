@@ -3687,7 +3687,7 @@ function Settings() {
 }
 
 // ─── Notifications ─────────────────────────────────────────────────────────────
-function NotificationsPanel({ onClose, onChanged }) {
+function NotificationsPanel({ onClose, onChanged, onOpen }) {
   const [items, setItems] = useState([]);
   useEffect(() => { api("GET", "/notifications").then((d) => setItems(d.notifications || [])).catch(() => setItems([])); }, []);
   async function markAll() { await api("PATCH", "/notifications/read-all").catch(() => {}); setItems((a) => a.map((i) => ({ ...i, is_read: true }))); onChanged && onChanged(); }
@@ -3702,13 +3702,19 @@ function NotificationsPanel({ onClose, onChanged }) {
       </div>
       <div style={{ maxHeight: 380, overflowY: "auto" }}>
         {items.length === 0 && <Empty label="All caught up." />}
-        {items.map((n) => (
-          <div key={n.id} style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}`, background: n.is_read ? "transparent" : C.accent + "12" }}>
-            <div style={{ fontSize: 13, fontWeight: n.is_read ? 500 : 700, color: C.text }}>{n.title}</div>
-            {n.message && <div style={{ fontSize: 12, color: C.text2, marginTop: 2 }}>{n.message}</div>}
-            <div style={{ fontSize: 11, color: C.text3, marginTop: 3 }}>{new Date(n.created_at).toLocaleString()}</div>
-          </div>
-        ))}
+        {items.map((n) => {
+          const clickable = !!n.order_id && onOpen;
+          return (
+            <div key={n.id}
+              onClick={clickable ? () => onOpen(n.order_id) : undefined}
+              title={clickable ? "Open this order" : undefined}
+              style={{ padding: "12px 16px", borderBottom: `1px solid ${C.border}`, background: n.is_read ? "transparent" : C.accent + "12", cursor: clickable ? "pointer" : "default" }}>
+              <div style={{ fontSize: 13, fontWeight: n.is_read ? 500 : 700, color: C.text }}>{n.title}</div>
+              {n.message && <div style={{ fontSize: 12, color: C.text2, marginTop: 2 }}>{n.message}</div>}
+              <div style={{ fontSize: 11, color: C.text3, marginTop: 3 }}>{new Date(n.created_at).toLocaleString()}{clickable ? " · tap to open" : ""}</div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -3953,7 +3959,7 @@ export default function App() {
         </main>
       </div>
 
-      {showNotifs && <NotificationsPanel onClose={() => setShowNotifs(false)} onChanged={() => setUnread(0)} />}
+      {showNotifs && <NotificationsPanel onClose={() => setShowNotifs(false)} onChanged={() => setUnread(0)} onOpen={(id) => { openOrder(id); setShowNotifs(false); }} />}
 
       <Modal open={!!selectedOrder} onClose={() => { setSelectedOrder(null); setOpenChanges([]); }} title="Order detail" width={640}>
         {selectedOrder && <OrderDetail orderId={selectedOrder} user={user} changes={openChanges} onUpdated={bumpBoard} onClose={() => { setSelectedOrder(null); setOpenChanges([]); }} />}
