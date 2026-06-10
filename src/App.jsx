@@ -844,8 +844,64 @@ function StatCard({ label, value, color }) {
     </div>
   );
 }
+// Full-screen reward leaderboard for the production wall — rotates Departments
+// then People every 12s. Reads the same /reports/scorecard as the Reports tab;
+// weights come from System Settings. Monthly, big and glanceable for a TV.
+function FloorScoreboard() {
+  const [unit, setUnit] = useState("dept");
+  const [d, setD] = useState(null);
+  async function load(u) { try { setD(await api("GET", `/reports/scorecard?unit=${u}&period=monthly`)); } catch { /* keep last */ } }
+  useEffect(() => { load(unit); const t = setInterval(() => load(unit), 60000); return () => clearInterval(t); }, [unit]);
+  useEffect(() => { const t = setInterval(() => setUnit((u) => (u === "dept" ? "people" : "dept")), 12000); return () => clearInterval(t); }, []);
+  const lb = (d && d.leaderboard) || [];
+  const top = lb.slice(0, 3), rest = lb.slice(3, 8);
+  const medals = ["🥇", "🥈", "🥉"];
+  const order = top[1] ? [top[1], top[0], top[2]].filter(Boolean) : top; // 2-1-3 podium
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+      <div style={{ textAlign: "center", marginBottom: 10 }}>
+        <div style={{ fontSize: 30, fontWeight: 800, color: C.text }}>🏆 This Month's Champions</div>
+        <div style={{ fontSize: 16, color: C.text3, marginTop: 2 }}>{unit === "dept" ? "Departments" : "People"} · reward standings</div>
+      </div>
+      {lb.length === 0 ? (
+        <div style={{ margin: "auto", color: C.text3, fontSize: 20 }}>No activity to score yet this month.</div>
+      ) : (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 16, minHeight: 0 }}>
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-end", gap: 18, flexWrap: "wrap" }}>
+            {order.map((u) => {
+              const rank = lb.indexOf(u), first = rank === 0;
+              return (
+                <div key={u.key} style={{ width: 280, background: first ? C.accent + "14" : C.bg2, border: `1px solid ${first ? C.accent : C.border}`, borderRadius: 18, padding: "22px 18px", textAlign: "center", transform: first ? "translateY(-12px)" : "none", boxShadow: first ? `0 0 40px -10px ${C.accent}` : "none" }}>
+                  <div style={{ fontSize: 44 }}>{medals[rank]}</div>
+                  <div style={{ fontSize: 13, color: C.text3, textTransform: "uppercase", letterSpacing: 0.5 }}>{u.dept || "Department"}</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: C.text, marginTop: 2 }}>{u.name}</div>
+                  <div style={{ fontFamily: MONO, fontSize: 46, fontWeight: 800, color: first ? C.accent : C.text, marginTop: 6 }}>{u.score}</div>
+                  {first && <div style={{ fontSize: 14, color: C.accent, marginTop: 6 }}>🏆 Top reward</div>}
+                </div>
+              );
+            })}
+          </div>
+          {rest.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 720, width: "100%", margin: "0 auto", overflowY: "auto" }}>
+              {rest.map((u, i) => (
+                <div key={u.key} style={{ display: "grid", gridTemplateColumns: "48px 1fr auto", gap: 14, alignItems: "center", background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 12, padding: "12px 18px" }}>
+                  <span style={{ fontFamily: MONO, fontSize: 22, color: C.text2 }}>#{i + 4}</span>
+                  <span style={{ fontSize: 19, fontWeight: 600, color: C.text }}>{u.name}{u.dept ? ` · ${u.dept}` : ""}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 24, fontWeight: 800, color: C.text }}>{u.score}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ textAlign: "center", fontSize: 13, color: C.text3 }}>Updates monthly · switches Departments / People every few seconds</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FloorDisplay({ onExit }) {
   const [board, setBoard] = useState(null);
+  const [view, setView] = useState("board"); // board | scoreboard
   const [stats, setStats] = useState({ active: 0, completed_today: 0 });
   const [filter, setFilter] = useState("all");
   const [weekOnly, setWeekOnly] = useState(false);
@@ -916,8 +972,14 @@ function FloorDisplay({ onExit }) {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <Logo size={46} />
           <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.5 }}>
-            <span style={{ color: C.text }}>WAWASAN </span><span style={{ color: C.accent }}>PRODUCTION FLOOR</span>
+            <span style={{ color: C.text }}>WAWASAN </span><span style={{ color: C.accent }}>{view === "scoreboard" ? "SCOREBOARD" : "PRODUCTION FLOOR"}</span>
           </div>
+        </div>
+        <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4 }}>
+          {[["board", "Board"], ["scoreboard", "Scoreboard"]].map(([k, lbl]) => {
+            const on = view === k;
+            return <button key={k} onClick={() => setView(k)} style={{ background: on ? C.surface2 : "transparent", border: "none", borderRadius: 7, padding: "9px 16px", cursor: "pointer", fontSize: 14, fontWeight: on ? 800 : 600, color: on ? C.accent : C.text2 }}>{lbl}</button>;
+          })}
         </div>
         <StatCard label="Completed today" value={stats.completed_today} color={C.green} />
         <StatCard label="Active orders" value={stats.active} color={C.accent} />
@@ -941,6 +1003,8 @@ function FloorDisplay({ onExit }) {
 
       {/* Body */}
       <div style={{ flex: 1, display: "flex", gap: 16, minHeight: 0 }}>
+        {view === "scoreboard" && <FloorScoreboard />}
+        {view === "board" && (<>
         <div style={{ flex: 1, display: "grid", gridTemplateColumns: `repeat(${cols.length}, 1fr)`, gap: 14, minHeight: 0 }}>
           {cols.map((s) => {
             const cfg = STAGES[s];
@@ -1065,6 +1129,7 @@ function FloorDisplay({ onExit }) {
             </>
           )}
         </div>
+        </>)}
       </div>
     </div>
   );
@@ -2128,12 +2193,91 @@ function MistakesReport({ period, from, to }) {
   );
 }
 
+// Reward scorecard / leaderboard — composite 0–100 per department or per person,
+// the engine for the reward system and the floor leaderboard. Pillars + weights
+// are computed server-side (/reports/scorecard); weights are edited in System
+// Settings. Output & Speed are scaled to the best performer that period. ▲▼ = move
+// vs last period. Only weekly / monthly (daily falls back to monthly).
+function ScoreboardReport({ period }) {
+  const [unit, setUnit] = useState("dept");
+  const [d, setD] = useState(null);
+  const scope = period === "weekly" ? "weekly" : "monthly";
+  useEffect(() => { setD(null); api("GET", `/reports/scorecard?unit=${unit}&period=${scope}`).then(setD).catch(() => setD(false)); }, [unit, scope]);
+  if (d === false) return <Empty label="Could not load scorecard." />;
+  if (!d) return <Loading label="Loading scorecard…" />;
+  const lb = d.leaderboard || [];
+  const w = d.weights || {};
+  const wsum = (w.ontime + w.output + w.quality + w.speed) || 1;
+  const PILLARS = [["ontime", "On-time"], ["output", "Output"], ["quality", "Quality"], ["speed", "Speed"]];
+  const medals = ["🥇", "🥈", "🥉"];
+  const pcol = (v) => v >= 85 ? C.ready : v >= 70 ? C.hold : C.danger;
+  const per = scope === "weekly" ? "week" : "month";
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 14 }}>
+        <div style={{ display: "flex", gap: 3, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 9, padding: 3 }}>
+          {[["dept", "Departments"], ["people", "People"]].map(([k, lbl]) => {
+            const on = unit === k;
+            return <button key={k} onClick={() => setUnit(k)} style={{ background: on ? C.surface2 : "transparent", border: "none", borderRadius: 7, padding: "6px 14px", cursor: "pointer", fontSize: 12.5, fontWeight: on ? 700 : 500, color: on ? C.text : C.text2 }}>{lbl}</button>;
+          })}
+        </div>
+        <span style={{ fontSize: 12, color: C.text3 }}>
+          Weights · On-time {Math.round(w.ontime / wsum * 100)}% · Output {Math.round(w.output / wsum * 100)}% · Quality {Math.round(w.quality / wsum * 100)}% · Speed {Math.round(w.speed / wsum * 100)}% · <span style={{ color: C.text2 }}>set in System Settings</span>
+        </span>
+      </div>
+      {lb.length === 0 ? <Empty label="No activity to score this period yet." /> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {lb.map((u, i) => {
+            const first = i === 0;
+            const delta = u.delta;
+            const dEl = delta == null ? <span style={{ color: C.text3, fontSize: 12 }}>new</span>
+              : delta > 0 ? <span style={{ color: C.ready, fontWeight: 700, fontSize: 12 }}>▲{delta}</span>
+              : delta < 0 ? <span style={{ color: C.danger, fontWeight: 700, fontSize: 12 }}>▼{-delta}</span>
+              : <span style={{ color: C.text3, fontSize: 12 }}>—</span>;
+            return (
+              <Card key={u.key} style={{ padding: "14px 16px", border: `1px solid ${first ? C.accent : C.border}`, display: "grid", gridTemplateColumns: "42px 1fr 92px", gap: 14, alignItems: "center" }}>
+                <div style={{ textAlign: "center", fontSize: i < 3 ? 24 : 18, fontWeight: 800, fontFamily: i < 3 ? "inherit" : MONO, color: C.text2 }}>{i < 3 ? medals[i] : "#" + (i + 1)}</div>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 15.5, fontWeight: 700, color: C.text }}>{u.name}</span>
+                    {u.dept && <Pill color={u.color || C.accent} style={{ fontSize: 10 }}>{u.dept}</Pill>}
+                    {dEl}
+                    {first && <Pill color={C.accent} style={{ fontSize: 10 }}>🏆 Champion</Pill>}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginTop: 9 }}>
+                    {PILLARS.map(([k, lbl]) => {
+                      const v = (u.pillars && u.pillars[k]) || 0;
+                      return (
+                        <div key={k} style={{ fontSize: 10, color: C.text3 }}>
+                          {lbl}<span style={{ float: "right", fontFamily: MONO, color: C.text2 }}>{v}</span>
+                          <div style={{ height: 6, borderRadius: 4, background: C.surface2, overflow: "hidden", marginTop: 3, clear: "both" }}><div style={{ width: v + "%", height: "100%", background: pcol(v) }} /></div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontFamily: MONO, fontSize: 28, fontWeight: 800, lineHeight: 1, color: first ? C.accent : C.text }}>{u.score}</div>
+                  <div style={{ fontSize: 10.5, color: C.text3 }}>/ 100</div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+      <div style={{ marginTop: 14, fontSize: 12, color: C.text3, lineHeight: 1.5 }}>
+        Score blends four pillars — On-time, Output, Quality, Speed — each 0–100 (Output &amp; Speed scaled to the best {unit === "people" ? "person" : "department"} this {per}). ▲▼ shows movement vs last {per}. Built from existing data — no money. Change the weights in System Settings.
+      </div>
+    </div>
+  );
+}
+
 // ─── Reports ─────────────────────────────────────────────────────────────────
 function Reports({ user }) {
-  const tabsForRole = user.role === "production_lead" ? ["production", "packing", "staff", "pic"]
-    : ["production", "packing", "delivery", "efficiency", "mistakes", "orders", "staff", "pic"];
-  const CUSTOM = ["orders", "staff", "pic", "efficiency", "mistakes"]; // tabs with their own component (no metric cards/trend)
-  const TAB_LABEL = { staff: "Staff", pic: "Person in charge", efficiency: "Efficiency", mistakes: "Mistakes" };
+  const tabsForRole = user.role === "production_lead" ? ["production", "packing", "staff", "pic", "scorecard"]
+    : ["production", "packing", "delivery", "efficiency", "mistakes", "scorecard", "orders", "staff", "pic"];
+  const CUSTOM = ["orders", "staff", "pic", "efficiency", "mistakes", "scorecard"]; // tabs with their own component (no metric cards/trend)
+  const TAB_LABEL = { staff: "Staff", pic: "Person in charge", efficiency: "Efficiency", mistakes: "Mistakes", scorecard: "Scoreboard" };
   const PERIOD_LABEL = { daily: "Today", weekly: "This week", monthly: "This month" };
   const TAB_DESC = {
     production: "Throughput, on-time rate and reworks in production",
@@ -2144,6 +2288,7 @@ function Reports({ user }) {
     orders: "Per-order progress, cycle time and customer rollup",
     staff: "What each person finished this period",
     pic: "Live workload per person in charge",
+    scorecard: "Reward score per department or person",
   };
   const [tab, setTab] = useState(tabsForRole[0]);
   const [period, setPeriod] = useState("weekly");
@@ -2366,6 +2511,7 @@ function Reports({ user }) {
       {tab === "pic" && <PicReport period={period} from={from} to={to} staffId={staffId} />}
       {tab === "efficiency" && <EfficiencyReport period={period} from={from} to={to} />}
       {tab === "mistakes" && <MistakesReport period={period} from={from} to={to} />}
+      {tab === "scorecard" && <ScoreboardReport period={period} />}
       {!CUSTOM.includes(tab) && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 18 }}>
           {(metrics[tab] || []).map(([label, value]) => <MetricCard key={label} label={label} value={value} tone={metricTone(label)} />)}
@@ -3241,8 +3387,23 @@ function Settings() {
   const [busy, setBusy] = useState(false);
   const [holidays, setHolidays] = useState([]);
   const [newHol, setNewHol] = useState({ date: "", name: "" });
+  const [weights, setWeights] = useState(null);
+  const [wBusy, setWBusy] = useState(false);
+  const [wSaved, setWSaved] = useState(false);
 
   useEffect(() => { api("GET", "/settings").then(setS).catch(() => setS({})); }, []);
+  // Reward-scoreboard weights live in system_settings as a JSON string.
+  useEffect(() => {
+    if (!s) return;
+    let w = { ontime: 30, output: 30, quality: 25, speed: 15 };
+    try { if (s.scorecard_weights) w = { ...w, ...JSON.parse(s.scorecard_weights) }; } catch { /* keep defaults */ }
+    setWeights(w);
+  }, [s]);
+  async function saveWeights() {
+    setWBusy(true);
+    try { await api("PUT", "/settings", { settings: { scorecard_weights: JSON.stringify(weights) } }); setWSaved(true); }
+    catch (e) { alert(e.message); } finally { setWBusy(false); }
+  }
   function loadHolidays() { api("GET", "/settings/holidays").then((d) => setHolidays(d || [])).catch(() => setHolidays([])); }
   useEffect(() => { loadHolidays(); }, []);
   function setField(k, v) { setS((p) => ({ ...p, [k]: v })); setSaved(false); }
@@ -3276,6 +3437,32 @@ function Settings() {
           <Btn onClick={save} disabled={busy}>{busy ? "Saving…" : "Save settings"}</Btn>
           {saved && <span style={{ color: C.ready, fontSize: 13 }}>Saved ✓</span>}
         </div>
+      </Card>
+
+      <Card>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 6 }}>Reward scoreboard weights</h3>
+        <p style={{ fontSize: 12.5, color: C.text3, marginBottom: 14 }}>How the monthly reward score is blended for the Scoreboard report and the Floor Display. Drag to set what matters most — the shares re-balance to 100% automatically.</p>
+        {weights && (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14 }}>
+              {[["ontime", "On-time"], ["output", "Output"], ["quality", "Quality"], ["speed", "Speed"]].map(([k, lbl]) => {
+                const sum = (weights.ontime + weights.output + weights.quality + weights.speed) || 1;
+                return (
+                  <div key={k}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, color: C.text2, marginBottom: 6 }}>
+                      <span>{lbl}</span><span style={{ fontFamily: MONO, color: C.text }}>{Math.round(weights[k] / sum * 100)}%</span>
+                    </div>
+                    <input type="range" min="0" max="60" value={weights[k]} onChange={(e) => { const v = +e.target.value; setWeights((p) => ({ ...p, [k]: v })); setWSaved(false); }} style={{ width: "100%", accentColor: C.accent }} />
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14 }}>
+              <Btn onClick={saveWeights} disabled={wBusy}>{wBusy ? "Saving…" : "Save weights"}</Btn>
+              {wSaved && <span style={{ color: C.ready, fontSize: 13 }}>Saved ✓</span>}
+            </div>
+          </>
+        )}
       </Card>
 
       <Card>
