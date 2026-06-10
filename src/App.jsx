@@ -1315,10 +1315,6 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
         const byName = Object.fromEntries(catalog.map((c) => [c.name, c]));
         return (
         <div>
-          {canAmend && <>
-            <datalist id="amend-stk">{catalog.map((c) => <option key={c.sku} value={c.sku}>{c.name}</option>)}</datalist>
-            <datalist id="amend-names">{catalog.map((c) => <option key={"an" + c.sku} value={c.name} />)}</datalist>
-          </>}
           {roleCanMark && !canMark && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 9, padding: "9px 12px", fontSize: 12.5, color: C.text2, marginBottom: 14 }}>
               <span aria-hidden>🔒</span>
@@ -1344,8 +1340,10 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
                 if (canAmend && editItem && editItem.id === it.id) {
                   return (
                     <div key={it.id} style={{ border: `1px solid ${C.accent}55`, borderRadius: 10, padding: 12, marginBottom: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-                      <input list="amend-stk" value={editItem.sku} onChange={(e) => { const v = e.target.value; const hit = bySku[v]; setEditItem({ ...editItem, sku: v, ...(hit ? { name: hit.name, unit: hit.unit || editItem.unit } : {}) }); }} placeholder="STK" style={cellInput()} />
-                      <input list="amend-names" value={editItem.name} onChange={(e) => { const v = e.target.value; const hit = byName[v]; setEditItem({ ...editItem, name: v, ...(hit ? { sku: hit.sku, unit: hit.unit || editItem.unit } : {}) }); }} placeholder="Product" style={cellInput()} />
+                      <SkuCombo value={editItem.sku} catalog={catalog} placeholder="STK" style={cellInput()}
+                        onType={(v) => setEditItem({ ...editItem, sku: v })}
+                        onPick={(c) => setEditItem({ ...editItem, sku: c.sku, name: c.name, unit: c.unit || editItem.unit })} />
+                      <input value={editItem.name} onChange={(e) => { const v = e.target.value; const hit = byName[v]; setEditItem({ ...editItem, name: v, ...(hit ? { sku: hit.sku, unit: hit.unit || editItem.unit } : {}) }); }} placeholder="Product" style={cellInput()} />
                       <div style={{ display: "flex", gap: 8 }}>
                         <input type="number" min="0" value={editItem.quantity} onChange={(e) => setEditItem({ ...editItem, quantity: e.target.value })} placeholder="Qty" style={cellInput()} />
                         <input value={editItem.unit} onChange={(e) => setEditItem({ ...editItem, unit: e.target.value })} placeholder="Unit" style={cellInput()} />
@@ -1381,8 +1379,8 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
                 if (canAmend && editItem && editItem.id === it.id) {
                   return (
                   <tr key={it.id} style={{ borderBottom: `1px solid ${C.border}`, background: C.surface2 }}>
-                    <td style={{ padding: "6px 10px" }}><input list="amend-stk" value={editItem.sku} onChange={(e) => { const v = e.target.value; const hit = bySku[v]; setEditItem({ ...editItem, sku: v, ...(hit ? { name: hit.name, unit: hit.unit || editItem.unit } : {}) }); }} style={cellInput(95)} /></td>
-                    <td style={{ padding: "6px 10px" }}><input list="amend-names" value={editItem.name} onChange={(e) => { const v = e.target.value; const hit = byName[v]; setEditItem({ ...editItem, name: v, ...(hit ? { sku: hit.sku, unit: hit.unit || editItem.unit } : {}) }); }} style={cellInput()} /></td>
+                    <td style={{ padding: "6px 10px" }}><SkuCombo value={editItem.sku} catalog={catalog} style={cellInput(95)} onType={(v) => setEditItem({ ...editItem, sku: v })} onPick={(c) => setEditItem({ ...editItem, sku: c.sku, name: c.name, unit: c.unit || editItem.unit })} /></td>
+                    <td style={{ padding: "6px 10px" }}><input value={editItem.name} onChange={(e) => { const v = e.target.value; const hit = byName[v]; setEditItem({ ...editItem, name: v, ...(hit ? { sku: hit.sku, unit: hit.unit || editItem.unit } : {}) }); }} style={cellInput()} /></td>
                     <td style={{ padding: "6px 10px" }}><input type="number" min="0" value={editItem.quantity} onChange={(e) => setEditItem({ ...editItem, quantity: e.target.value })} style={cellInput(70)} /></td>
                     <td style={{ padding: "6px 10px" }}><input value={editItem.unit} onChange={(e) => setEditItem({ ...editItem, unit: e.target.value })} style={cellInput(70)} /></td>
                     <td style={{ padding: "6px 10px" }}>{pill}</td>
@@ -1499,6 +1497,35 @@ function LV({ label, v }) {
 }
 
 // ─── Create order ──────────────────────────────────────────────────────────────
+// Searchable STK picker — replaces the native <datalist> so it scales past 100+
+// items: filters the catalogue by code OR name as you type, capped at 10 hits,
+// shows code + product name. onPick fills the row; onType keeps free entry.
+function SkuCombo({ value, catalog, onPick, onType, placeholder = "STK", style }) {
+  const [open, setOpen] = useState(false);
+  const ql = (value || "").trim().toLowerCase();
+  const matches = (!ql ? (catalog || []) : (catalog || []).filter((c) => (c.sku || "").toLowerCase().includes(ql) || (c.name || "").toLowerCase().includes(ql))).slice(0, 10);
+  return (
+    <div style={{ position: "relative", width: "100%" }}>
+      <input value={value} placeholder={placeholder} style={{ ...style, width: "100%" }}
+        onChange={(e) => { onType(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 160)} />
+      {open && matches.length > 0 && (
+        <div style={{ position: "absolute", top: "calc(100% + 3px)", left: 0, minWidth: 240, zIndex: 40, background: C.bg2, border: `1px solid ${C.border2}`, borderRadius: 9, maxHeight: 244, overflowY: "auto", boxShadow: "0 14px 36px rgba(0,0,0,.55)" }}>
+          {matches.map((c) => (
+            <div key={c.sku} onMouseDown={(e) => { e.preventDefault(); onPick(c); setOpen(false); }}
+              style={{ padding: "8px 11px", cursor: "pointer", borderBottom: `1px solid ${C.border}` }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = C.surface2)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+              <div style={{ fontFamily: MONO, fontSize: 12.5, fontWeight: 700, color: C.accent2 }}>{c.sku}</div>
+              <div style={{ fontSize: 11.5, color: C.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 280 }}>{c.name}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 function CreateOrderForm({ onCreated, onClose }) {
   const [f, setF] = useState({ invoice_number: "", customer_name: "", customer_contact: "", delivery_address: "", required_delivery_date: "", expiry_date: "", priority: "normal", importance: "standard", skip_production: false, notes: "" });
   const [items, setItems] = useState([{ sku: "", name: "", quantity: 1, unit: "pcs" }]);
@@ -1542,12 +1569,12 @@ function CreateOrderForm({ onCreated, onClose }) {
       {holidayHit && <p style={{ color: C.packing, fontSize: 12.5, margin: "0 0 8px" }}>⚠ {fmtDay(f.required_delivery_date)} is a holiday: {holidayHit.name}. Delivery may not happen that day.</p>}
       <Field label="Notes" value={f.notes} onChange={(v) => set("notes", v)} placeholder="Optional…" />
       <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, margin: "6px 0 8px" }}>Order Items <span style={{ fontWeight: 400, color: C.text3 }}>· type a STK or product to autofill</span></div>
-      <datalist id="stk-codes">{catalog.map((c) => <option key={c.sku} value={c.sku}>{c.name}</option>)}</datalist>
-      <datalist id="stk-names">{catalog.map((c) => <option key={"n" + c.sku} value={c.name} />)}</datalist>
       {items.map((it, i) => (
         <div key={i} style={{ display: "grid", gridTemplateColumns: narrow ? "1fr 1fr" : "110px 1fr 70px 64px 32px", gap: 6, marginBottom: 6 }}>
-          <input placeholder="STK" list="stk-codes" value={it.sku} onChange={(e) => { const v = e.target.value; const hit = bySku[v]; setItems((a) => a.map((x, j) => j === i ? { ...x, sku: v, ...(hit ? { name: hit.name, unit: hit.unit || x.unit } : {}) } : x)); }} style={inp} />
-          <input placeholder="Product" list="stk-names" value={it.name} onChange={(e) => { const v = e.target.value; const hit = byName[v]; setItems((a) => a.map((x, j) => j === i ? { ...x, name: v, ...(hit ? { sku: hit.sku, unit: hit.unit || x.unit } : {}) } : x)); }} style={inp} />
+          <SkuCombo value={it.sku} catalog={catalog} placeholder="STK" style={inp}
+            onType={(v) => setItems((a) => a.map((x, j) => j === i ? { ...x, sku: v } : x))}
+            onPick={(c) => setItems((a) => a.map((x, j) => j === i ? { ...x, sku: c.sku, name: c.name, unit: c.unit || x.unit } : x))} />
+          <input placeholder="Product" value={it.name} onChange={(e) => { const v = e.target.value; const hit = byName[v]; setItems((a) => a.map((x, j) => j === i ? { ...x, name: v, ...(hit ? { sku: hit.sku, unit: hit.unit || x.unit } : {}) } : x)); }} style={inp} />
           <input type="number" min="1" value={it.quantity} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, quantity: +e.target.value } : x))} style={inp} />
           <input placeholder="unit" value={it.unit} onChange={(e) => setItems((a) => a.map((x, j) => j === i ? { ...x, unit: e.target.value } : x))} style={inp} />
           <button onClick={() => setItems((a) => a.filter((_, j) => j !== i))} style={{ background: "#3a1a1a", border: "none", borderRadius: 8, color: "#fca5a5", cursor: "pointer" }}>×</button>
