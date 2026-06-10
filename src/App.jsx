@@ -1190,6 +1190,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
   const [uploading, setUploading] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false); // Details "More" expander — keep the wall collapsed
+  const [notesEditOpen, setNotesEditOpen] = useState(false); // Notes collapsed until opened — tidier for higher roles
   const canMove = ["super_admin"].includes(user.role);
   // Back-office Admin (deputy) may route an order — set PIC + priority/importance —
   // but not move stages, hold/flag, or cancel (those stay canMove = Boss/Ops).
@@ -1370,17 +1371,24 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
             </div>
           )}
           <div style={{ marginTop: 18 }}>
-            <div style={{ fontSize: 11, color: C.text3, fontWeight: 600, marginBottom: 6, letterSpacing: 0.4 }}>INTERNAL NOTES</div>
             {canMove ? (
-              <>
-                <textarea value={notes} onChange={(e) => { setNotes(e.target.value); setNotesSaved(false); }} rows={3} placeholder="Internal notes (not shown to the customer)…" style={{ width: "100%", padding: "10px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 14, resize: "vertical", lineHeight: 1.5, boxSizing: "border-box" }} />
-                <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}>
-                  <Btn size="sm" onClick={saveNotes} disabled={notesBusy}>{notesBusy ? "Saving…" : "Save notes"}</Btn>
-                  {notesSaved && <span style={{ color: C.ready, fontSize: 12.5 }}>Saved ✓</span>}
-                </div>
-              </>
+              !notesEditOpen ? (
+                <button onClick={() => setNotesEditOpen(true)} style={{ background: "none", border: `1px solid ${C.border2}`, color: order.notes ? C.text2 : C.text3, borderRadius: 8, fontSize: 13, padding: "8px 12px", cursor: "pointer", maxWidth: "100%", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {order.notes ? `✎ Note: ${order.notes}` : "✎ Add internal note"}
+                </button>
+              ) : (
+                <>
+                  <div style={{ fontSize: 11, color: C.text3, fontWeight: 600, marginBottom: 6, letterSpacing: 0.4 }}>INTERNAL NOTES</div>
+                  <textarea autoFocus value={notes} onChange={(e) => { setNotes(e.target.value); setNotesSaved(false); }} rows={3} placeholder="Internal notes (not shown to the customer)…" style={{ width: "100%", padding: "10px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 14, resize: "vertical", lineHeight: 1.5, boxSizing: "border-box" }} />
+                  <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}>
+                    <Btn size="sm" onClick={saveNotes} disabled={notesBusy}>{notesBusy ? "Saving…" : "Save notes"}</Btn>
+                    <Btn size="sm" variant="ghost" onClick={() => setNotesEditOpen(false)}>Done ▴</Btn>
+                    {notesSaved && <span style={{ color: C.ready, fontSize: 12.5 }}>Saved ✓</span>}
+                  </div>
+                </>
+              )
             ) : (
-              <div style={{ fontSize: 14, color: order.notes ? C.text2 : C.text3, whiteSpace: "pre-wrap" }}>{order.notes || "No internal notes."}</div>
+              order.notes ? <><div style={{ fontSize: 11, color: C.text3, fontWeight: 600, marginBottom: 6, letterSpacing: 0.4 }}>INTERNAL NOTES</div><div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{order.notes}</div></> : null
             )}
           </div>
         </div>
@@ -1780,6 +1788,9 @@ function Dashboard({ onOpenOrder }) {
 function OrdersReport({ period, from, to }) {
   const [data, setData] = useState(null);
   const [open, setOpen] = useState({});
+  const [allOrders, setAllOrders] = useState(false);
+  const [allCust, setAllCust] = useState(false);
+  const LIM = 8; // tidy: show the top rows, "Show all" expands — no scrolling the full period
   useEffect(() => { setData(null); api("GET", `/reports/orders?${reportQuery(period, from, to)}`).then((d) => setData(d.orders || [])).catch(() => setData([])); }, [period, from, to]);
   const fmtDur = (h) => h == null ? "—" : h >= 48 ? `${Math.round(h / 24)}d` : `${h}h`;
   function exportCsv() {
@@ -1811,7 +1822,7 @@ function OrdersReport({ period, from, to }) {
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Stage", "Progress", "Days in stage", "Cycle", "Due", "Status"].map((h) => <th key={h} style={{ textAlign: "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
           <tbody>
-            {data.flatMap((o) => {
+            {(allOrders ? data : data.slice(0, LIM)).flatMap((o) => {
               const cfg = STAGE_LABELS[o.stage] || { label: o.stage, color: C.text3 };
               const isOpen = open[o.id];
               const statusPill = o.delivered
@@ -1864,12 +1875,13 @@ function OrdersReport({ period, from, to }) {
           </tbody>
         </table>
       </Card>
+      {data.length > LIM && <div style={{ marginTop: 10 }}><Btn variant="ghost" size="sm" onClick={() => setAllOrders((v) => !v)}>{allOrders ? "Show less ▲" : `Show all ${data.length} orders ▼`}</Btn></div>}
       <div style={{ fontSize: 13, color: C.text3, margin: "20px 0 10px" }}>By customer · {byCustomer.length}</div>
       <Card style={{ padding: 0, overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead><tr style={{ background: C.bg2 }}>{["Customer", "Orders", "Delivered", "On-time", "Late", "Avg cycle"].map((h, i) => <th key={h} style={{ textAlign: i ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
           <tbody>
-            {byCustomer.map((c) => (
+            {(allCust ? byCustomer : byCustomer.slice(0, LIM)).map((c) => (
               <tr key={c.name} style={{ borderBottom: `1px solid ${C.border}` }}>
                 <td style={{ padding: "9px 14px", color: C.text }}>{c.name}</td>
                 <td style={{ padding: "9px 14px", textAlign: "right", color: C.text, fontWeight: 700 }}>{c.orders}</td>
@@ -1882,6 +1894,7 @@ function OrdersReport({ period, from, to }) {
           </tbody>
         </table>
       </Card>
+      {byCustomer.length > LIM && <div style={{ marginTop: 10 }}><Btn variant="ghost" size="sm" onClick={() => setAllCust((v) => !v)}>{allCust ? "Show less ▲" : `Show all ${byCustomer.length} customers ▼`}</Btn></div>}
     </div>
   );
 }
