@@ -1346,7 +1346,8 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
                 ? <select value={order.importance || "standard"} onChange={(e) => setImportance(e.target.value)} style={{ padding: "5px 9px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13.5, fontWeight: 700, color: impCfg(order.importance).color }}>{IMPORTANCE_OPTS.map((o) => <option key={o.value} value={o.value} style={{ background: C.bg2, color: C.text }}>{o.label}</option>)}</select>
                 : <Pill color={impCfg(order.importance).color}>{impCfg(order.importance).label}</Pill>
             } />
-            <LV label="Person in charge" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />
+            {/* canRoute (Boss/Admin) edit the PIC in Stage actions below — don't show it twice. */}
+            {!canRoute && <LV label="Person in charge" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />}
           </div>
           <button onClick={() => setMoreOpen((o) => !o)} style={{ marginTop: 14, background: "none", border: `1px solid ${C.border2}`, color: C.text2, borderRadius: 8, fontSize: 12.5, padding: "7px 12px", cursor: "pointer" }}>{moreOpen ? "Hide details ▴" : "More details ▾"}</button>
           {moreOpen && (
