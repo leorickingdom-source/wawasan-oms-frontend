@@ -454,12 +454,15 @@ function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown
   const showName = !!order.customer_name;
   const dtag = deliveryTag(order);
   const invColor = late ? C.danger : urgent ? C.accent2 : C.text;
+  // Urgent tints the whole card (not just a pill) so it reads at a glance.
+  const cardBg = urgent ? C.danger + "1A" : C.surface;
+  const cardBgHover = urgent ? C.danger + "26" : C.surface2;
   const next = BOARD_STAGES[BOARD_STAGES.indexOf(order.stage) + 1] || "delivered";
   return (
     <div onClick={() => onOpen(order)}
-      style={{ background: C.surface, border: `1px solid ${urgent || late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "12px 13px", cursor: "pointer", transition: "background .12s" }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = C.surface2)}
-      onMouseLeave={(e) => (e.currentTarget.style.background = C.surface)}>
+      style={{ background: cardBg, border: `1px solid ${urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "12px 13px", cursor: "pointer", transition: "background .12s" }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = cardBgHover)}
+      onMouseLeave={(e) => (e.currentTarget.style.background = cardBg)}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           {rank != null && <span title="Priority order in this group" style={{ flexShrink: 0, width: 22, height: 22, borderRadius: 7, background: C.accent, color: C.bg, fontWeight: 800, fontSize: 12, display: "grid", placeItems: "center" }}>{rank}</span>}
