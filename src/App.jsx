@@ -2931,7 +2931,7 @@ function LoginPage({ onLogin }) {
     } catch (e2) { setErr(e2.message === "Failed to fetch" ? "Cannot reach the server." : e2.message); setBusy(false); }
   }
   return (
-    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: `radial-gradient(900px 500px at 50% -10%, ${C.accent}18, transparent), ${C.bg}` }}>
+    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: `radial-gradient(900px 500px at 50% -10%, ${C.accent}18, transparent), ${C.bg}`, zoom: 0.9 }}>
       <form onSubmit={submit} style={{ width: 380, background: C.bg2, border: `1px solid ${C.border2}`, borderRadius: 18, padding: "36px 34px", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 26 }}>
           <Logo size={52} />
@@ -3013,7 +3013,9 @@ export default function App() {
   const [title, subtitle] = PAGE_META[view] || ["", ""];
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: C.bg }}>
+    // zoom 0.9 = render the workspace as if the browser were at 90% (owner found
+    // 100% too big). Floor Display is a separate early return, so the wall stays full-size.
+    <div style={{ display: "flex", minHeight: "100vh", background: C.bg, zoom: 0.9 }}>
       {/* Mobile sidebar backdrop */}
       {isMobile && navOpen && <div onClick={() => setNavOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.55)", zIndex: 1250 }} />}
       {/* Sidebar */}
