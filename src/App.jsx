@@ -98,6 +98,12 @@ const BOARD_ROLES = NON_ADMIN_ROLES.filter((r) => r !== "delivery_team");
 // /reports/scorecard + system_settings weights stay in place, just unreachable.
 const REWARD_SYSTEM_ENABLED = false;
 
+// Staff / Person-in-charge ranking tabs in Reports — they rank people (a de-facto
+// scoreboard). Hidden 2026-06-10 at the user's request. The StaffReport / PicReport /
+// StaffDetail components and the backend /reports/staff + /reports/pic endpoints
+// stay in place; flip to true to bring the two tabs back.
+const STAFF_RANKING_ENABLED = false;
+
 // Customer importance tiers — mirrors the backend `importance` column (low → high).
 // Production-floor roles see this in place of the customer name. To rename a tier,
 // change the label here (and the CHECK values in schema.sql if you add/remove one).
@@ -2357,8 +2363,8 @@ function MoMReport() {
 // ─── Reports ─────────────────────────────────────────────────────────────────
 function Reports({ user }) {
   const tabsForRole = user.role === "production_lead"
-    ? ["production", "packing", "staff", "pic", ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : [])]
-    : ["production", "packing", "delivery", "efficiency", "mistakes", ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : []), "trend", "orders", "staff", "pic"];
+    ? ["production", "packing", ...(STAFF_RANKING_ENABLED ? ["staff", "pic"] : []), ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : [])]
+    : ["production", "packing", "delivery", "efficiency", "mistakes", ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : []), "trend", "orders", ...(STAFF_RANKING_ENABLED ? ["staff", "pic"] : [])];
   const CUSTOM = ["orders", "staff", "pic", "efficiency", "mistakes", "scorecard", "trend"]; // tabs with their own component (no metric cards/trend)
   const TAB_LABEL = { staff: "Staff", pic: "Person in charge", efficiency: "Efficiency", mistakes: "Mistakes", scorecard: "Scoreboard", trend: "Trend" };
   const PERIOD_LABEL = { daily: "Today", weekly: "This week", monthly: "This month" };
