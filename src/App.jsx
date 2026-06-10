@@ -2761,6 +2761,7 @@ function Delivery({ user, onOpenOrder }) {
   const [show, setShow] = useState(false);
   const [allCompleted, setAllCompleted] = useState(false);
   const [confirmDeliver, setConfirmDeliver] = useState(null);
+  const [proofView, setProofView] = useState(null); // { url, inv } — proof-photo lightbox
   const [form, setForm] = useState({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "" });
   const [newDeliverer, setNewDeliverer] = useState({ name: "", phone: "" });
   const [otherCourier, setOtherCourier] = useState("");
@@ -2884,6 +2885,17 @@ function Delivery({ user, onOpenOrder }) {
   const tone = { pending: C.packing, in_transit: C.order, delivered: C.text3, failed: C.danger };
   const statusLabel = { pending: "Pending", in_transit: "In transit", delivered: "Delivered", failed: "Failed" };
   const proofBtn = { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, padding: "6px 11px", borderRadius: 8, border: `1px solid ${C.border2}`, background: C.surface2, color: C.text2, cursor: "pointer", whiteSpace: "nowrap" };
+  // Proof status cell. When a proof photo exists with a URL it becomes a clickable
+  // "View proof" that opens the lightbox — so the photo is viewable straight from the
+  // delivery list, no need to open the order detail. `pill` = compact table variant.
+  const proofCell = (dv, pill) => {
+    if (!dv || !dv.has_pod) return pill ? <Pill color={C.hold} style={{ fontSize: 10 }}>⚠ No proof</Pill> : <span style={{ color: C.hold }}>⚠ None yet</span>;
+    if (!dv.pod_url) return pill ? <Pill color={C.ready} style={{ fontSize: 10 }}>✓ Proof</Pill> : <span style={{ color: C.ready }}>✓ Attached</span>;
+    const open = () => setProofView({ url: dv.pod_url, inv: dv.invoice_number });
+    return pill
+      ? <button onClick={open} title="View proof photo" style={{ background: "none", border: 0, padding: 0, cursor: "pointer" }}><Pill color={C.ready} style={{ fontSize: 10, cursor: "pointer" }}>👁 View proof</Pill></button>
+      : <button onClick={open} title="View proof photo" style={{ background: "none", border: 0, padding: 0, color: C.ready, cursor: "pointer", textDecoration: "underline", font: "inherit", fontWeight: 700 }}>👁 View proof</button>;
+  };
   const active = list.filter((x) => x.status !== "delivered");
   const delByOrder = {};
   for (const dv of list) delByOrder[dv.order_id] = dv;
@@ -2982,7 +2994,7 @@ function Delivery({ user, onOpenOrder }) {
                 ["Customer", dv.customer_name || "—"],
                 ["Driver", dv.delivery_man_name || "—"],
                 ["Due", <span style={{ color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</span>],
-                ["Proof", dv.has_pod ? <span style={{ color: C.ready }}>✓ Attached</span> : <span style={{ color: C.hold }}>⚠ None yet</span>],
+                ["Proof", proofCell(dv, false)],
               ]}
               actions={<>
                 {canDeliver && <label style={{ ...proofBtn, flex: 1, justifyContent: "center", padding: "11px" }}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(dv.order_id, f); }} /></label>}
@@ -3007,7 +3019,7 @@ function Delivery({ user, onOpenOrder }) {
                   <td style={{ padding: "11px 16px", color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</td>
                   <td style={{ padding: "11px 16px" }}>
                     <Pill color={tone[dv.status] || C.text3}>{statusLabel[dv.status] || dv.status}</Pill>
-                    <div style={{ marginTop: 4 }}>{dv.has_pod ? <Pill color={C.ready} style={{ fontSize: 10 }}>✓ Proof</Pill> : <Pill color={C.hold} style={{ fontSize: 10 }}>⚠ No proof</Pill>}</div>
+                    <div style={{ marginTop: 4 }}>{proofCell(dv, true)}</div>
                   </td>
                   <td style={{ padding: "11px 16px" }}>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -3041,7 +3053,7 @@ function Delivery({ user, onOpenOrder }) {
                 rows={[
                   ["Customer", o.customer_name || "—"],
                   ["Delivered", dv && dv.delivered_at ? fmtDateTime(dv.delivered_at) : "Delivered"],
-                  ["Proof", dv && dv.has_pod ? <span style={{ color: C.ready }}>✓ Attached</span> : <span style={{ color: C.hold }}>⚠ None yet</span>],
+                  ["Proof", proofCell(dv, false)],
                 ]}
                 actions={<div style={{ display: "flex", gap: 8, width: "100%" }}>
                   {canDeliver && <label style={{ ...proofBtn, flex: 1, justifyContent: "center" }}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(o.id, f); }} /></label>}
@@ -3065,7 +3077,7 @@ function Delivery({ user, onOpenOrder }) {
                     <td style={{ padding: "11px 16px", color: C.text2 }}>{dv && dv.delivery_man_name ? dv.delivery_man_name : "—"}</td>
                     <td style={{ padding: "11px 16px", color: C.ready }}>
                       <div>{dv && dv.delivered_at ? fmtDateTime(dv.delivered_at) : "Delivered"}</div>
-                      <div style={{ marginTop: 3 }}>{dv && dv.has_pod ? <Pill color={C.ready} style={{ fontSize: 10 }}>✓ Proof</Pill> : <Pill color={C.hold} style={{ fontSize: 10 }}>⚠ No proof</Pill>}</div>
+                      <div style={{ marginTop: 3 }}>{proofCell(dv, true)}</div>
                     </td>
                     <td style={{ padding: "11px 16px", color: C.text3 }}>{fmtDay(o.required_delivery_date)}</td>
                     <td style={{ padding: "11px 16px" }}>
@@ -3180,6 +3192,14 @@ function Delivery({ user, onOpenOrder }) {
           </>
         )}
       </Modal>
+
+      {proofView && (
+        <div onClick={() => setProofView(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.85)", zIndex: 1200, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20, cursor: "zoom-out" }}>
+          <div style={{ color: C.text2, marginBottom: 10, fontSize: 13 }}>Proof of delivery · <span style={{ fontFamily: MONO, color: C.text }}>{proofView.inv}</span> · tap anywhere to close</div>
+          <img src={proofView.url} alt="Proof of delivery" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "100%", maxHeight: "80vh", borderRadius: 12, border: `1px solid ${C.border2}`, objectFit: "contain", background: C.bg2 }} />
+          <a href={proofView.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ marginTop: 12, color: C.accent2, fontSize: 13, textDecoration: "none" }}>Open full image ↗</a>
+        </div>
+      )}
     </div>
   );
 }
