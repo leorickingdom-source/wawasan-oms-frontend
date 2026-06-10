@@ -998,7 +998,7 @@ function FloorDisplay({ onExit }) {
         </Btn>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <Logo size={46} />
-          <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 0.5 }}>
+          <div style={{ fontSize: 36, fontWeight: 800, letterSpacing: 0.5 }}>
             <span style={{ color: C.text }}>WAWASAN </span><span style={{ color: C.accent }}>{view === "scoreboard" ? "SCOREBOARD" : "PRODUCTION FLOOR"}</span>
           </div>
         </div>
@@ -1040,8 +1040,8 @@ function FloorDisplay({ onExit }) {
             const orders = (board && board[s]) || [];
             return (
               <div key={s} style={{ background: C.bg2, border: `1px solid ${C.border}`, borderTop: `4px solid ${cfg.color}`, borderRadius: 14, padding: "16px 14px", display: "flex", flexDirection: "column", minHeight: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: 1, color: C.text3, textTransform: "uppercase" }}>{cfg.label}</div>
-                <div style={{ fontSize: 58, fontWeight: 800, color: cfg.color, lineHeight: 1, margin: "2px 0 14px" }}>{orders.length}</div>
+                <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: 1, color: C.text3, textTransform: "uppercase" }}>{cfg.label}</div>
+                <div style={{ fontSize: 66, fontWeight: 800, color: cfg.color, lineHeight: 1, margin: "2px 0 14px" }}>{orders.length}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 9, overflowY: "auto" }}>
                   {orders.map((o) => {
                     const cd = countdown(o.required_delivery_date);
@@ -1050,26 +1050,26 @@ function FloorDisplay({ onExit }) {
                     const allDone = (o.stage === "production" || o.stage === "packing") && (o.item_count || 0) > 0 && (o.made_count || 0) >= o.item_count;
                     const urgentDone = urgent && allDone;
                     return (
-                      <div key={o.id} style={{ background: allDone ? C.green + "1A" : urgent ? C.danger + "1A" : C.surface, border: `1px solid ${urgentDone ? C.green : allDone ? C.green + "88" : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${cfg.color}`, borderRadius: 9, padding: "9px 11px", boxShadow: urgentDone ? `0 0 0 2px ${C.bg2}, 0 0 0 4px ${C.danger}` : "none" }}>
-                        <div style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 5 }}>
-                          {urgent && <Pill color={C.danger} style={{ fontSize: 9.5, padding: "1px 6px" }}>Urgent</Pill>}
-                          <Pill color={impCfg(o.importance).color} style={{ fontSize: 9.5, padding: "1px 6px" }}>{impCfg(o.importance).label}</Pill>
-                          {dtag && <Pill color={dtag.color} style={{ fontSize: 9.5, padding: "1px 6px" }}>{dtag.label}</Pill>}
-                          {o.waiting_stock && <Pill color={C.danger} style={{ fontSize: 9.5, padding: "1px 6px" }}>⚠ Stock</Pill>}
-                          {o.on_hold && <Pill color={C.hold} style={{ fontSize: 9.5, padding: "1px 6px" }}>Hold</Pill>}
+                      <div key={o.id} style={{ background: allDone ? C.green + "1A" : urgent ? C.danger + "1A" : C.surface, border: `1px solid ${urgentDone ? C.green : allDone ? C.green + "88" : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `5px solid ${cfg.color}`, borderRadius: 10, padding: "13px 16px", boxShadow: urgentDone ? `0 0 0 2px ${C.bg2}, 0 0 0 4px ${C.danger}` : "none" }}>
+                        <div style={{ fontFamily: MONO, fontSize: 28, fontWeight: 800, color: late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 7 }}>
+                          {urgent && <Pill color={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>Urgent</Pill>}
+                          <Pill color={impCfg(o.importance).color} style={{ fontSize: 14, padding: "3px 10px" }}>{impCfg(o.importance).label}</Pill>
+                          {dtag && <Pill color={dtag.color} style={{ fontSize: 14, padding: "3px 10px" }}>{dtag.label}</Pill>}
+                          {o.waiting_stock && <Pill color={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>⚠ Stock</Pill>}
+                          {o.on_hold && <Pill color={C.hold} style={{ fontSize: 14, padding: "3px 10px" }}>Hold</Pill>}
                         </div>
-                        <div style={{ fontSize: 12.5, color: cd.tone, marginTop: 3 }}>
+                        <div style={{ fontSize: 19, color: cd.tone, marginTop: 6, fontWeight: 600 }}>
                           <span style={{ color: C.text2 }}>{fmtDay(o.required_delivery_date)}</span> · {cd.text}
                         </div>
-                        <div style={{ fontSize: 12.5, color: C.text3, marginTop: 2 }}>{o.item_count} {o.item_count === 1 ? "product" : "products"}</div>
+                        <div style={{ fontSize: 18, color: C.text3, marginTop: 3 }}>{o.item_count} {o.item_count === 1 ? "product" : "products"}</div>
                         {(o.stage === "production" || o.stage === "packing") && o.item_count > 0 && (() => {
                           const done = o.made_count || 0, total = o.item_count || 0, full = total > 0 && done >= total;
                           const p = total > 0 ? Math.round((done / total) * 100) : 0;
                           return (
-                            <div style={{ marginTop: 5 }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: full ? C.green : C.accent2, marginBottom: 3 }}>{full ? "All done ✓" : `${done}/${total} STKs · ${p}%`}</div>
-                              <div style={{ height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: full ? C.green : C.accent }} /></div>
+                            <div style={{ marginTop: 8 }}>
+                              <div style={{ fontSize: 17, fontWeight: 800, color: full ? C.green : C.accent2, marginBottom: 5 }}>{full ? "All done ✓" : `${done}/${total} STKs · ${p}%`}</div>
+                              <div style={{ height: 8, background: C.surface2, borderRadius: 4, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: full ? C.green : C.accent }} /></div>
                             </div>
                           );
                         })()}
@@ -1084,7 +1084,7 @@ function FloorDisplay({ onExit }) {
         </div>
 
         {/* Spotlight */}
-        <div style={{ width: 420, background: spotAllDone ? C.green + "14" : spot && spot.priority === "urgent" ? C.danger + "14" : C.bg2, border: `1px solid ${spotUrgentDone ? C.green : spotAllDone ? C.green + "88" : spot && spot.priority === "urgent" ? C.danger + "88" : C.border}`, borderRadius: 16, padding: "20px 22px", display: "flex", flexDirection: "column", minHeight: 0, boxShadow: spotUrgentDone ? `0 0 0 2px ${C.bg}, 0 0 0 4px ${C.danger}` : "none" }}>
+        <div style={{ width: 500, background: spotAllDone ? C.green + "14" : spot && spot.priority === "urgent" ? C.danger + "14" : C.bg2, border: `1px solid ${spotUrgentDone ? C.green : spotAllDone ? C.green + "88" : spot && spot.priority === "urgent" ? C.danger + "88" : C.border}`, borderRadius: 16, padding: "20px 22px", display: "flex", flexDirection: "column", minHeight: 0, boxShadow: spotUrgentDone ? `0 0 0 2px ${C.bg}, 0 0 0 4px ${C.danger}` : "none" }}>
           {!spot ? <div style={{ margin: "auto", color: C.text3 }}>No active orders</div> : (
             <>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1095,9 +1095,9 @@ function FloorDisplay({ onExit }) {
                 </div>
                 <span style={{ fontSize: 14, color: C.text3 }}>{(spotIdx % pool.length) + 1} / {pool.length}</span>
               </div>
-              <div style={{ fontFamily: MONO, fontSize: 52, fontWeight: 800, color: C.accent2, margin: "10px 0 6px", lineHeight: 1 }}>{spot.invoice_number}</div>
+              <div style={{ fontFamily: MONO, fontSize: 62, fontWeight: 800, color: C.accent2, margin: "10px 0 6px", lineHeight: 1 }}>{spot.invoice_number}</div>
               <div style={{ marginBottom: 10 }}>
-                <Pill color={impCfg(spot.importance).color} style={{ fontSize: 14, padding: "4px 12px" }}>{impCfg(spot.importance).label}</Pill>
+                <Pill color={impCfg(spot.importance).color} style={{ fontSize: 18, padding: "5px 14px" }}>{impCfg(spot.importance).label}</Pill>
               </div>
               {detail && detail.id === spot.id && (detail.items || []).length > 0 && (() => {
                 const its = detail.items || [];
@@ -1108,11 +1108,11 @@ function FloorDisplay({ onExit }) {
                 const units = its.reduce((s, it) => s + Math.round(Number(it.quantity) || 0), 0);
                 const p = total > 0 ? Math.round((done / total) * 100) : 0;
                 const chip = (label, n, color) => (
-                  <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, background: color + "1f", border: `1px solid ${color}55`, color, borderRadius: 9, padding: "6px 11px", fontSize: 20, fontWeight: 800 }}>{n}<span style={{ fontSize: 11, fontWeight: 700, opacity: 0.85, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span></span>
+                  <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, background: color + "1f", border: `1px solid ${color}55`, color, borderRadius: 9, padding: "8px 14px", fontSize: 28, fontWeight: 800 }}>{n}<span style={{ fontSize: 14, fontWeight: 700, opacity: 0.85, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span></span>
                 );
                 return (
                   <div style={{ marginBottom: 12 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13.5, marginBottom: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, marginBottom: 8 }}>
                       <span style={{ color: C.text2 }}>{total} products · {units} units</span>
                       <span style={{ color: p >= 100 ? C.green : C.accent2, fontWeight: 800 }}>{p}% done</span>
                     </div>
@@ -1132,18 +1132,18 @@ function FloorDisplay({ onExit }) {
                     const dot = st.k === "done" ? C.green : st.k === "in_progress" ? C.packing : C.accent;
                     const isDone = st.k === "done";
                     return (
-                    <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "13px 12px", borderBottom: `1px solid ${C.border}`, background: isDone ? C.green + "1f" : "transparent", borderLeft: `4px solid ${isDone ? C.green : "transparent"}` }}>
-                      <span style={{ width: 10, height: 10, borderRadius: "50%", background: dot, boxShadow: `0 0 8px ${dot}`, flexShrink: 0 }} />
+                    <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 14px", borderBottom: `1px solid ${C.border}`, background: isDone ? C.green + "1f" : "transparent", borderLeft: `5px solid ${isDone ? C.green : "transparent"}` }}>
+                      <span style={{ width: 13, height: 13, borderRadius: "50%", background: dot, boxShadow: `0 0 8px ${dot}`, flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontFamily: MONO, fontSize: 23, fontWeight: 800, color: isDone ? C.green : C.text, letterSpacing: 0.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.sku}</div>
-                        <div style={{ fontSize: 13.5, fontWeight: 500, color: C.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
+                        <div style={{ fontFamily: MONO, fontSize: 30, fontWeight: 800, color: isDone ? C.green : C.text, letterSpacing: 0.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.sku}</div>
+                        <div style={{ fontSize: 18, fontWeight: 500, color: C.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
                       </div>
                       <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 18 }}>
-                        <div style={{ textAlign: "right", minWidth: 64 }}>
-                          <span style={{ fontSize: 24, fontWeight: 800, color: C.text, lineHeight: 1 }}>{Math.round(it.quantity)}</span>
-                          <span style={{ fontSize: 12, fontWeight: 600, color: C.text3 }}> {it.unit || "pcs"}</span>
+                        <div style={{ textAlign: "right", minWidth: 80 }}>
+                          <span style={{ fontSize: 32, fontWeight: 800, color: C.text, lineHeight: 1 }}>{Math.round(it.quantity)}</span>
+                          <span style={{ fontSize: 16, fontWeight: 600, color: C.text3 }}> {it.unit || "pcs"}</span>
                         </div>
-                        <span style={{ fontSize: 16, fontWeight: 800, color: dot, textTransform: "uppercase", letterSpacing: 0.5, minWidth: 84, textAlign: "right" }}>{isDone ? "✓ " + st.label : st.label}</span>
+                        <span style={{ fontSize: 21, fontWeight: 800, color: dot, textTransform: "uppercase", letterSpacing: 0.5, minWidth: 108, textAlign: "right" }}>{isDone ? "✓ " + st.label : st.label}</span>
                       </div>
                     </div>
                     );
