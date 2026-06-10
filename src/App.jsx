@@ -524,13 +524,19 @@ function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown
   const showName = !!order.customer_name;
   const dtag = deliveryTag(order);
   const invColor = late ? C.danger : urgent ? C.accent2 : C.text;
-  // Urgent tints the whole card (not just a pill) so it reads at a glance.
-  const cardBg = urgent ? C.danger + "1A" : C.surface;
-  const cardBgHover = urgent ? C.danger + "26" : C.surface2;
+  // All STKs made → the whole card greens (like urgent reds it) so a ready-to-advance
+  // order reads at a glance. Green wins over urgent: it only shows in production/packing
+  // and flags the actionable "move it now" state; the Urgent pill still shows.
+  const allDone = (order.stage === "production" || order.stage === "packing") && (order.item_count || 0) > 0 && (order.made_count || 0) >= order.item_count;
+  // Urgent AND finished → keep both signals: green inner border + a dark gap + a red
+  // outer ring (double border), instead of green silently hiding the urgency.
+  const urgentDone = urgent && allDone;
+  const cardBg = allDone ? C.ready + "1A" : urgent ? C.danger + "1A" : C.surface;
+  const cardBgHover = allDone ? C.ready + "26" : urgent ? C.danger + "26" : C.surface2;
   const next = BOARD_STAGES[BOARD_STAGES.indexOf(order.stage) + 1] || "delivered";
   return (
     <div onClick={() => onOpen(order)}
-      style={{ position: "relative", background: cardBg, border: `1px solid ${unread ? C.accent : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "12px 13px", cursor: "pointer", transition: "background .12s", boxShadow: unread ? `0 0 0 2px ${C.accent}` : "none", animation: unread ? "wws-ring 1.5s ease infinite" : "none" }}
+      style={{ position: "relative", background: cardBg, border: `1px solid ${urgentDone ? C.ready : unread ? C.accent : allDone ? C.ready + "88" : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "12px 13px", cursor: "pointer", transition: "background .12s", boxShadow: urgentDone ? `0 0 0 2px ${C.bg}, 0 0 0 4px ${C.danger}` : unread ? `0 0 0 2px ${C.accent}` : "none", animation: (unread && !urgentDone) ? "wws-ring 1.5s ease infinite" : "none" }}
       onMouseEnter={(e) => (e.currentTarget.style.background = cardBgHover)}
       onMouseLeave={(e) => (e.currentTarget.style.background = cardBg)}>
       {unread && <span style={{ position: "absolute", top: -8, right: -8, display: "inline-flex", alignItems: "center", gap: 3, background: C.accent, color: "#1a1410", fontSize: 9.5, fontWeight: 800, borderRadius: 20, padding: "2px 7px", boxShadow: "0 2px 8px rgba(0,0,0,.4)" }}>● NEW</span>}
@@ -967,6 +973,10 @@ function FloorDisplay({ onExit }) {
   const spotStage = spot ? (STAGE_LABELS[spot.stage] || { label: spot.stage, color: C.accent }) : null;
   const spotCd = spot ? countdown(spot.required_delivery_date) : null;
   const spotDtag = spot ? deliveryTag(spot) : null;
+  // Whole spotlight greens when every STK is done (mirrors the red urgent spotlight);
+  // if it's also urgent, double border (green inner + red outer ring).
+  const spotAllDone = spot && (spot.stage === "production" || spot.stage === "packing") && (spot.item_count || 0) > 0 && (spot.made_count || 0) >= spot.item_count;
+  const spotUrgentDone = spotAllDone && spot.priority === "urgent";
 
   return (
     <div style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 2000, display: "flex", flexDirection: "column", padding: 22 }}>
@@ -1027,8 +1037,10 @@ function FloorDisplay({ onExit }) {
                     const cd = countdown(o.required_delivery_date);
                     const late = (cd.n ?? 0) < 0, urgent = o.priority === "urgent";
                     const dtag = deliveryTag(o);
+                    const allDone = (o.stage === "production" || o.stage === "packing") && (o.item_count || 0) > 0 && (o.made_count || 0) >= o.item_count;
+                    const urgentDone = urgent && allDone;
                     return (
-                      <div key={o.id} style={{ background: urgent ? C.danger + "1A" : C.surface, border: `1px solid ${urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${cfg.color}`, borderRadius: 9, padding: "9px 11px" }}>
+                      <div key={o.id} style={{ background: allDone ? C.green + "1A" : urgent ? C.danger + "1A" : C.surface, border: `1px solid ${urgentDone ? C.green : allDone ? C.green + "88" : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${cfg.color}`, borderRadius: 9, padding: "9px 11px", boxShadow: urgentDone ? `0 0 0 2px ${C.bg2}, 0 0 0 4px ${C.danger}` : "none" }}>
                         <div style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 5 }}>
                           {urgent && <Pill color={C.danger} style={{ fontSize: 9.5, padding: "1px 6px" }}>Urgent</Pill>}
@@ -1062,7 +1074,7 @@ function FloorDisplay({ onExit }) {
         </div>
 
         {/* Spotlight */}
-        <div style={{ width: 420, background: spot && spot.priority === "urgent" ? C.danger + "14" : C.bg2, border: `1px solid ${spot && spot.priority === "urgent" ? C.danger + "88" : C.border}`, borderRadius: 16, padding: "20px 22px", display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ width: 420, background: spotAllDone ? C.green + "14" : spot && spot.priority === "urgent" ? C.danger + "14" : C.bg2, border: `1px solid ${spotUrgentDone ? C.green : spotAllDone ? C.green + "88" : spot && spot.priority === "urgent" ? C.danger + "88" : C.border}`, borderRadius: 16, padding: "20px 22px", display: "flex", flexDirection: "column", minHeight: 0, boxShadow: spotUrgentDone ? `0 0 0 2px ${C.bg}, 0 0 0 4px ${C.danger}` : "none" }}>
           {!spot ? <div style={{ margin: "auto", color: C.text3 }}>No active orders</div> : (
             <>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
