@@ -931,6 +931,7 @@ function FloorDisplay({ onExit }) {
   const [now, setNow] = useState(new Date());
   const [spotIdx, setSpotIdx] = useState(0);
   const [detail, setDetail] = useState(null);
+  const [vp, setVp] = useState(() => ({ w: typeof window !== "undefined" ? window.innerWidth : 1920, h: typeof window !== "undefined" ? window.innerHeight : 1080 }));
   const cache = useRef({});
 
   async function load() {
@@ -941,6 +942,9 @@ function FloorDisplay({ onExit }) {
   }
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [weekOnly]);
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
+  // The wall is a fixed 1920×1080 canvas scaled to fill the screen, so it reads the
+  // same proportion on 1080p, 1440p or a 4K TV (×2) — and from further back.
+  useEffect(() => { const r = () => setVp({ w: window.innerWidth, h: window.innerHeight }); window.addEventListener("resize", r); return () => window.removeEventListener("resize", r); }, []);
   // Press Esc to leave the full-screen floor view (the on-screen Exit is easy to miss on a wall TV).
   useEffect(() => { const onKey = (e) => { if (e.key === "Escape") onExit(); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [onExit]);
   // Show the Exit button on activity, then fade it out after 5s idle so the wall stays clean.
@@ -987,9 +991,11 @@ function FloorDisplay({ onExit }) {
   // if it's also urgent, double border (green inner + red outer ring).
   const spotAllDone = spot && (spot.stage === "production" || spot.stage === "packing") && (spot.item_count || 0) > 0 && (spot.made_count || 0) >= spot.item_count;
   const spotUrgentDone = spotAllDone && spot.priority === "urgent";
+  const wallScale = Math.min(vp.w / 1920, vp.h / 1080);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 2000, display: "flex", flexDirection: "column", padding: 22 }}>
+    <div style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 2000, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ width: 1920, height: 1080, flexShrink: 0, transform: `scale(${wallScale})`, transformOrigin: "center center", display: "flex", flexDirection: "column", padding: 22, boxSizing: "border-box" }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", marginBottom: 18 }}>
         <Btn variant="primary" onClick={onExit} title="Exit full-screen (or press Esc)"
@@ -1161,6 +1167,7 @@ function FloorDisplay({ onExit }) {
           )}
         </div>
         </>)}
+      </div>
       </div>
     </div>
   );
