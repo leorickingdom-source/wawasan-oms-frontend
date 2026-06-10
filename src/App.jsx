@@ -1071,7 +1071,7 @@ function FloorDisplay({ onExit }) {
 }
 
 // ─── Order detail modal ──────────────────────────────────────────────────────
-function OrderDetail({ orderId, user, onUpdated, onClose }) {
+function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
   const [order, setOrder] = useState(null);
   const [delivery, setDelivery] = useState(null);
   const [tab, setTab] = useState(["production_staff", "packing_staff"].includes(user.role) ? "items" : "details");
@@ -1204,6 +1204,21 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
         {(order.activity || []).some((a) => a.action === "item_edited") && <Pill color={C.accent2}>✎ Edited</Pill>}
         {order.skip_production && <Pill color={C.accent} bg="transparent">No production</Pill>}
       </div>
+      {changes && changes.length > 0 && (
+        <div style={{ background: C.accent + "14", border: `1px solid ${C.accent}55`, borderRadius: 11, padding: "11px 13px", marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: 11.5, fontWeight: 800, color: C.accent, letterSpacing: 0.3 }}>● WHAT CHANGED SINCE YOU LAST LOOKED</span>
+            {tabs.includes("timeline") && <button onClick={() => setTab("timeline")} style={{ background: "none", border: "none", cursor: "pointer", color: C.accent, fontSize: 12, fontWeight: 600 }}>Full timeline →</button>}
+          </div>
+          {changes.map((c) => (
+            <div key={c.id} style={{ fontSize: 13, color: C.text, marginTop: 5 }}>
+              <span style={{ fontWeight: 600 }}>{c.title}</span>
+              {c.message ? <span style={{ color: C.text2 }}> — {c.message}</span> : null}
+              <span style={{ color: C.text3, fontSize: 11.5 }}> · {relTime(c.created_at)}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <span style={{ fontSize: 13, color: C.text3 }}>{order.created_by_name ? `Created by ${order.created_by_name}` : ""} {order.order_date ? `· ${fmtDay(order.order_date)}` : ""}</span>
         <div style={{ display: "flex", gap: 8 }}>
@@ -2926,6 +2941,17 @@ function fmtDateTime(s) {
   if (!d || isNaN(d)) return "";
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" }) + ", " + d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
+// Short "how long ago" for the what-changed banner — keeps it plain for non-technical staff.
+function relTime(s) {
+  const d = s ? new Date(s) : null;
+  if (!d || isNaN(d)) return "";
+  const m = Math.floor((Date.now() - d) / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
 function Remarks({ user }) {
   const [list, setList] = useState(null);
   const [cur, setCur] = useState(undefined); // current-week remark, or null
@@ -3366,6 +3392,7 @@ export default function App() {
   const [showNotifs, setShowNotifs] = useState(false);
   const [unread, setUnread] = useState(0);
   const [unreadIds, setUnreadIds] = useState(() => new Set());
+  const [openChanges, setOpenChanges] = useState([]); // unread notifs for the order being opened — shown as "what changed" banner
   const [toasts, setToasts] = useState([]);
   const prevUnreadRef = useRef(-1);
   const [boardKey, setBoardKey] = useState(0);
@@ -3389,10 +3416,17 @@ export default function App() {
   // Opening an order clears its board glow — mark that order's notifications read.
   async function openOrder(id) {
     setSelectedOrder(id);
+    setOpenChanges([]);
     if (unreadIds.has(id)) {
       setUnreadIds((s) => { const n = new Set(s); n.delete(id); return n; });
       setUnread((u) => Math.max(0, u - 1));
-      try { const d = await api("GET", "/notifications?unread_only=1"); await Promise.all((d.notifications || []).filter((n) => n.order_id === id).map((n) => api("PATCH", `/notifications/${n.id}/read`))); } catch (e) { /* best effort */ }
+      // Grab what changed BEFORE marking read, so the detail can show it instead of it just vanishing from the bell.
+      try {
+        const d = await api("GET", "/notifications?unread_only=1");
+        const mine = (d.notifications || []).filter((n) => n.order_id === id);
+        setOpenChanges(mine);
+        await Promise.all(mine.map((n) => api("PATCH", `/notifications/${n.id}/read`)));
+      } catch (e) { /* best effort */ }
     }
   }
   useEffect(() => {
@@ -3542,8 +3576,8 @@ export default function App() {
 
       {showNotifs && <NotificationsPanel onClose={() => setShowNotifs(false)} onChanged={() => setUnread(0)} />}
 
-      <Modal open={!!selectedOrder} onClose={() => setSelectedOrder(null)} title="Order detail" width={640}>
-        {selectedOrder && <OrderDetail orderId={selectedOrder} user={user} onUpdated={bumpBoard} onClose={() => setSelectedOrder(null)} />}
+      <Modal open={!!selectedOrder} onClose={() => { setSelectedOrder(null); setOpenChanges([]); }} title="Order detail" width={640}>
+        {selectedOrder && <OrderDetail orderId={selectedOrder} user={user} changes={openChanges} onUpdated={bumpBoard} onClose={() => { setSelectedOrder(null); setOpenChanges([]); }} />}
       </Modal>
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create new order" width={620}>
