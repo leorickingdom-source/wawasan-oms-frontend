@@ -2272,12 +2272,73 @@ function ScoreboardReport({ period }) {
   );
 }
 
+// Month-over-month trend — the "are we getting better or worse" view. Four metrics
+// (completed, on-time %, rework %, avg cycle days) plotted across the last 6 months.
+// Backed by /reports/trend. Boss/Ops only. Monthly by nature — ignores the period bar.
+function MoMReport() {
+  const [d, setD] = useState(null);
+  useEffect(() => { setD(null); api("GET", "/reports/trend?months=6").then(setD).catch(() => setD(false)); }, []);
+  if (d === false) return <Empty label="Could not load trend." />;
+  if (!d) return <Loading label="Loading trend…" />;
+  const rows = d.trend || [];
+  const mLabel = (m) => { const dt = new Date(m + "-01T00:00:00"); return isNaN(dt) ? m : dt.toLocaleDateString("en-GB", { month: "short" }); };
+  const data = rows.map((r) => ({ ...r, label: mLabel(r.month) }));
+  // good: which direction is an improvement, for colouring the month-over-month delta.
+  const METRICS = [
+    { key: "completed", label: "Orders completed", color: C.accent, good: "up", fmt: (v) => (v == null ? "—" : v) },
+    { key: "on_time_rate", label: "On-time %", color: C.ready, good: "up", fmt: (v) => (v == null ? "—" : v + "%") },
+    { key: "rework_rate", label: "Rework %", color: C.danger, good: "down", fmt: (v) => (v == null ? "—" : v + "%") },
+    { key: "avg_cycle_days", label: "Avg days / order", color: C.order, good: "down", fmt: (v) => (v == null ? "—" : v + "d") },
+  ];
+  if (rows.length === 0) return <Empty label="No history to trend yet." />;
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))", gap: 14 }}>
+        {METRICS.map((mt) => {
+          const last = rows[rows.length - 1], prev = rows[rows.length - 2];
+          const lv = last ? last[mt.key] : null, pv = prev ? prev[mt.key] : null;
+          let dEl = <span style={{ color: C.text3, fontSize: 12 }}>—</span>;
+          if (lv != null && pv != null) {
+            const diff = +(lv - pv).toFixed(1);
+            if (diff === 0) dEl = <span style={{ color: C.text3, fontSize: 12 }}>no change</span>;
+            else {
+              const improving = mt.good === "up" ? diff > 0 : diff < 0;
+              dEl = <span style={{ color: improving ? C.ready : C.danger, fontWeight: 700, fontSize: 12 }}>{diff > 0 ? "▲" : "▼"}{Math.abs(diff)}{mt.key === "completed" ? "" : mt.key === "avg_cycle_days" ? "d" : "%"} vs last month</span>;
+            }
+          }
+          return (
+            <Card key={mt.key}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2 }}>
+                <span style={{ fontSize: 12.5, color: C.text2, fontWeight: 600 }}>{mt.label}</span>
+                <span style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, color: mt.color }}>{mt.fmt(lv)}</span>
+              </div>
+              <div style={{ marginBottom: 8 }}>{dEl}</div>
+              <ResponsiveContainer width="100%" height={110}>
+                <LineChart data={data} margin={{ top: 4, right: 6, left: -22, bottom: 0 }}>
+                  <CartesianGrid stroke={C.border} strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: C.text3, fontSize: 11 }} axisLine={{ stroke: C.border }} tickLine={false} />
+                  <YAxis tick={{ fill: C.text3, fontSize: 11 }} axisLine={false} tickLine={false} width={34} />
+                  <Tooltip contentStyle={{ background: C.bg2, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 12 }} labelStyle={{ color: C.text2 }} itemStyle={{ color: mt.color }} formatter={(v) => [mt.fmt(v), mt.label]} />
+                  <Line type="monotone" dataKey={mt.key} stroke={mt.color} strokeWidth={2.5} dot={{ r: 3, fill: mt.color }} connectNulls={false} isAnimationActive={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </Card>
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 14, fontSize: 12, color: C.text3, lineHeight: 1.5 }}>
+        Last 6 months, one point per month. Green ▲▼ = improving, red = slipping. For on-time and rework, a month with no completed orders shows a gap. Built from existing data — no money.
+      </div>
+    </div>
+  );
+}
+
 // ─── Reports ─────────────────────────────────────────────────────────────────
 function Reports({ user }) {
   const tabsForRole = user.role === "production_lead" ? ["production", "packing", "staff", "pic", "scorecard"]
-    : ["production", "packing", "delivery", "efficiency", "mistakes", "scorecard", "orders", "staff", "pic"];
-  const CUSTOM = ["orders", "staff", "pic", "efficiency", "mistakes", "scorecard"]; // tabs with their own component (no metric cards/trend)
-  const TAB_LABEL = { staff: "Staff", pic: "Person in charge", efficiency: "Efficiency", mistakes: "Mistakes", scorecard: "Scoreboard" };
+    : ["production", "packing", "delivery", "efficiency", "mistakes", "scorecard", "trend", "orders", "staff", "pic"];
+  const CUSTOM = ["orders", "staff", "pic", "efficiency", "mistakes", "scorecard", "trend"]; // tabs with their own component (no metric cards/trend)
+  const TAB_LABEL = { staff: "Staff", pic: "Person in charge", efficiency: "Efficiency", mistakes: "Mistakes", scorecard: "Scoreboard", trend: "Trend" };
   const PERIOD_LABEL = { daily: "Today", weekly: "This week", monthly: "This month" };
   const TAB_DESC = {
     production: "Throughput, on-time rate and reworks in production",
@@ -2289,6 +2350,7 @@ function Reports({ user }) {
     staff: "What each person finished this period",
     pic: "Live workload per person in charge",
     scorecard: "Reward score per department or person",
+    trend: "Month-over-month: better or worse?",
   };
   const [tab, setTab] = useState(tabsForRole[0]);
   const [period, setPeriod] = useState("weekly");
@@ -2512,6 +2574,7 @@ function Reports({ user }) {
       {tab === "efficiency" && <EfficiencyReport period={period} from={from} to={to} />}
       {tab === "mistakes" && <MistakesReport period={period} from={from} to={to} />}
       {tab === "scorecard" && <ScoreboardReport period={period} />}
+      {tab === "trend" && <MoMReport />}
       {!CUSTOM.includes(tab) && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 18 }}>
           {(metrics[tab] || []).map(([label, value]) => <MetricCard key={label} label={label} value={value} tone={metricTone(label)} />)}
