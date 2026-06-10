@@ -2982,10 +2982,12 @@ function Delivery({ user, onOpenOrder }) {
                 ["Customer", dv.customer_name || "—"],
                 ["Driver", dv.delivery_man_name || "—"],
                 ["Due", <span style={{ color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</span>],
+                ["Proof", dv.has_pod ? <span style={{ color: C.ready }}>✓ Attached</span> : <span style={{ color: C.hold }}>⚠ None yet</span>],
               ]}
               actions={<>
-                {canAssign && <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => openEdit(dv)}>Edit</Btn>}
+                {canDeliver && <label style={{ ...proofBtn, flex: 1, justifyContent: "center", padding: "11px" }}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(dv.order_id, f); }} /></label>}
                 {canDeliver && <Btn variant="success" style={{ flex: 2, justifyContent: "center" }} onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
+                {canAssign && <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => openEdit(dv)}>Edit</Btn>}
                 <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => printOneDO(dv.order_id)}>🖨 DO</Btn>
               </>}
             />
@@ -3003,7 +3005,10 @@ function Delivery({ user, onOpenOrder }) {
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.delivery_man_name || "—"}</td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"}</td>
                   <td style={{ padding: "11px 16px", color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</td>
-                  <td style={{ padding: "11px 16px" }}><Pill color={tone[dv.status] || C.text3}>{statusLabel[dv.status] || dv.status}</Pill></td>
+                  <td style={{ padding: "11px 16px" }}>
+                    <Pill color={tone[dv.status] || C.text3}>{statusLabel[dv.status] || dv.status}</Pill>
+                    <div style={{ marginTop: 4 }}>{dv.has_pod ? <Pill color={C.ready} style={{ fontSize: 10 }}>✓ Proof</Pill> : <Pill color={C.hold} style={{ fontSize: 10 }}>⚠ No proof</Pill>}</div>
+                  </td>
                   <td style={{ padding: "11px 16px" }}>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       {canAssign && <Btn size="sm" variant="soft" onClick={() => openEdit(dv)}>Edit</Btn>}
