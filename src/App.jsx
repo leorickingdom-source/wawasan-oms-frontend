@@ -265,7 +265,7 @@ function printPickingSlip(order) {
 }
 function printRouteList(deliveries) {
   const rows = (deliveries || []).map((d, i) =>
-    `<tr><td class="n">${i + 1}</td><td class="m">${escHtml(d.invoice_number)}</td><td>${escHtml(d.customer_name || "")}</td><td>${escHtml(d.address || "—")}</td><td>${escHtml(d.delivery_man_name || "—")}</td><td class="m">${escHtml(d.tracking_no || "—")}</td><td class="chk">&#9744;</td></tr>`
+    `<tr><td class="n">${i + 1}</td><td class="m">${escHtml(d.invoice_number)}</td><td>${escHtml(d.customer_name || "")}</td><td>${escHtml(d.address || "—")}</td><td>${escHtml(d.delivery_man_name || "—")}</td><td class="chk">&#9744;</td></tr>`
   ).join("");
   const html = (`<!doctype html><html><head><meta charset="utf-8"><title>Delivery Route List</title>
 <style>
@@ -276,8 +276,8 @@ function printRouteList(deliveries) {
   @media print{body{margin:12mm}}
 </style></head><body>
   <h1>Delivery Route List</h1><div class="sub">Wawasan Candle — ${escHtml(new Date().toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "short", year: "numeric" }))} · ${(deliveries || []).length} stops</div>
-  <table><thead><tr><th>#</th><th>Invoice</th><th>Customer</th><th>Address</th><th>Courier</th><th>Tracking</th><th>Done</th></tr></thead>
-  <tbody>${rows || '<tr><td colspan="7">No deliveries scheduled.</td></tr>'}</tbody></table>
+  <table><thead><tr><th>#</th><th>Invoice</th><th>Customer</th><th>Address</th><th>Driver</th><th>Done</th></tr></thead>
+  <tbody>${rows || '<tr><td colspan="6">No deliveries scheduled.</td></tr>'}</tbody></table>
   <p style="margin-top:22px;color:#888;font-size:12px">Printed ${escHtml(new Date().toLocaleString())}</p>
 </body></html>`);
   const iframe = document.createElement("iframe");
@@ -293,6 +293,69 @@ function printRouteList(deliveries) {
       setTimeout(() => { try { iframe.remove(); } catch (e) {} }, 60000);
     } catch (e) { alert("Could not open the print dialog: " + e.message); try { iframe.remove(); } catch (_) {} }
   }, 350);
+}
+
+// Open a print dialog for an arbitrary HTML document (hidden iframe, self-cleaning).
+function printHtmlDoc(html) {
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+  document.body.appendChild(iframe);
+  const doc = iframe.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+  setTimeout(() => {
+    try {
+      const w = iframe.contentWindow;
+      w.onafterprint = () => { try { iframe.remove(); } catch (e) {} };
+      w.focus(); w.print();
+      setTimeout(() => { try { iframe.remove(); } catch (e) {} }, 60000);
+    } catch (e) { alert("Could not open the print dialog: " + e.message); try { iframe.remove(); } catch (_) {} }
+  }, 350);
+}
+
+// Delivery Order — the driver's signable paper, laid out like the SQL Account
+// invoice (no prices). entries = [{ order, delivery }]; many print as one document
+// with a page break between, so the whole day's run prints in one dialog.
+function printDeliveryOrders(entries) {
+  const co = `<div class="co"><div class="cn">远景蜡烛工贸有限公司</div><div class="en">WAWASAN LTS TRADING SDN BHD <span class="reg">(1119335-A)</span></div><div class="ad">LOT 3869-6, JALAN KAMPUNG ORANG ASLI, KAMPUNG BUNGA RAYA, KUANG,</div><div class="ad">48050 RAWANG, SELANGOR DARUL EHSAN.</div><div class="ad">Tel: 012-228 7870, 012-228 7874</div></div>`;
+  const pages = (entries || []).map(({ order, delivery }, idx) => {
+    const items = (order.items || []).map((it, i) =>
+      `<tr><td>${i + 1}</td><td class="m">${escHtml(it.sku || "")}</td><td>${escHtml(it.name || "")}</td><td class="r">${Math.round(it.quantity)}</td><td>${escHtml(it.unit || "pcs")}</td></tr>`).join("");
+    const totalQty = (order.items || []).reduce((s, it) => s + (Number(it.quantity) || 0), 0);
+    const driver = (delivery && delivery.delivery_man_name) || "—";
+    return `<div class="page"${idx > 0 ? ' style="page-break-before:always"' : ""}>
+      ${co}
+      <div class="title">Delivery Order</div>
+      <div class="addr">
+        <div><div class="lbl">Bill To</div><div class="nm">${escHtml(order.customer_name || "—")}</div><div class="ln">Tel: ${escHtml(order.customer_contact || "—")}</div></div>
+        <div><div class="lbl">Delivery Address</div><div class="ln">${escHtml(order.delivery_address || "—")}</div><div class="ln">Tel: ${escHtml(order.customer_contact || "—")}</div></div>
+      </div>
+      <table class="info"><tr>
+        <td><div class="h">Doc No.</div>${escHtml(order.invoice_number)}</td>
+        <td><div class="h">Date</div>${escHtml(fmtDay(order.required_delivery_date))}</td>
+        <td><div class="h">Driver</div>${escHtml(driver)}</td>
+        <td><div class="h">Page</div>1 of 1</td>
+      </tr></table>
+      <table class="items"><thead><tr><th style="width:30px">No</th><th style="width:74px">STK</th><th>Description</th><th class="r" style="width:54px">Qty</th><th style="width:50px">UOM</th></tr></thead>
+      <tbody>${items || '<tr><td colspan="5">No items.</td></tr>'}</tbody></table>
+      <div class="tot">Total: ${Math.round(totalQty)} units · ${(order.items || []).length} items</div>
+      <div class="recv-note">Goods received in good condition.</div>
+      <div class="sign"><div><div class="sl">Authorised Signature<br>WAWASAN LTS TRADING SDN BHD</div></div><div><div class="sl">Customer chop &amp; sign<br>Name / Date: ____________________</div></div></div>
+    </div>`;
+  }).join("");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Delivery Order</title><style>
+    *{box-sizing:border-box} body{font:13px/1.5 Arial,Helvetica,sans-serif;color:#000;margin:0}
+    .page{padding:24mm 16mm}
+    .co{text-align:center;line-height:1.4} .co .cn{font-size:15px;font-weight:700} .co .en{font-size:16px;font-weight:700} .co .reg{font-weight:400;font-size:12px} .co .ad{font-size:12px}
+    .title{font-size:24px;font-weight:700;margin:14px 0 2px}
+    .lbl{font-size:10px;color:#555}
+    .addr{display:flex;gap:30px;border-top:1px solid #000;padding-top:7px;margin-top:8px} .addr>div{flex:1} .addr .nm{font-weight:700;font-size:13.5px;margin:2px 0 1px} .addr .ln{font-size:12.5px}
+    .info{width:100%;border-collapse:collapse;margin:14px 0 4px;font-size:12px} .info td{border:1px solid #000;padding:4px 8px} .info .h{font-size:9.5px;color:#555;padding:0 0 1px;border:none}
+    table.items{width:100%;border-collapse:collapse;margin-top:10px} table.items th{font-size:10.5px;color:#333;text-align:left;border-bottom:1.5px solid #000;padding:6px 8px} table.items td{padding:7px 8px;border-bottom:1px solid #ccc;font-size:12.5px;vertical-align:top} table.items .r{text-align:right} .m{font-family:ui-monospace,Consolas,monospace;color:#555}
+    .tot{font-size:12px;margin-top:8px;text-align:right;font-weight:700}
+    .recv-note{font-size:12px;margin-top:16px}
+    .sign{display:flex;gap:50px;margin-top:46px} .sign>div{flex:1} .sl{border-top:1px solid #000;padding-top:5px;font-size:12px}
+  </style></head><body>${pages || '<p style="padding:20px">Nothing to print.</p>'}</body></html>`;
+  printHtmlDoc(html);
 }
 
 // ─── Icons ───────────────────────────────────────────────────────────────────
@@ -1143,6 +1206,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
         <span style={{ fontSize: 13, color: C.text3 }}>{order.created_by_name ? `Created by ${order.created_by_name}` : ""} {order.order_date ? `· ${fmtDay(order.order_date)}` : ""}</span>
         <div style={{ display: "flex", gap: 8 }}>
           <Btn variant="ghost" size="sm" onClick={() => printPickingSlip(order)}>Print picking slip</Btn>
+          <Btn variant="ghost" size="sm" onClick={() => printDeliveryOrders([{ order, delivery }])}>Print delivery order</Btn>
         </div>
       </div>
 
@@ -1157,6 +1221,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
           <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: 14 }}>
             {order.customer_name != null && <LV label="Customer" v={order.customer_name} />}
             {order.customer_name != null && <LV label="Contact" v={order.customer_contact || "—"} />}
+            {order.customer_name != null && <LV label="Address" v={order.delivery_address || "—"} />}
             <LV label="Priority" v={
               canRoute
                 ? <select value={order.priority || "normal"} onChange={(e) => setPriority(e.target.value)} style={{ padding: "5px 9px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13.5, fontWeight: 700, color: order.priority === "urgent" ? C.danger : C.text2 }}><option value="normal" style={{ background: C.bg2, color: C.text }}>Normal</option><option value="urgent" style={{ background: C.bg2, color: C.text }}>Urgent</option></select>
@@ -1172,9 +1237,8 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
             <LV label="Expiry" v={order.expiry_date ? fmtDay(order.expiry_date) : "—"} />
             <LV label="Person in charge" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />
             <LV label="Source" v={order.source === "sql_account" ? "Auto-imported" : "Manual entry"} />
-            {delivery && <LV label="Courier" v={delivery.delivery_man_name || "Not scheduled yet"} />}
+            {delivery && <LV label="Driver" v={delivery.delivery_man_name || "Not assigned yet"} />}
             {delivery && delivery.scheduled_date && <LV label="Scheduled" v={fmtDay(delivery.scheduled_date)} />}
-            {delivery && delivery.tracking_no && <LV label="Tracking" v={<span style={{ fontFamily: MONO, fontSize: 13 }}>{delivery.tracking_no}</span>} />}
             {order.customer_name != null && delivery && delivery.address && <LV label="Delivery address" v={delivery.address} />}
           </div>
           <div style={{ marginTop: 18 }}>
@@ -1360,6 +1424,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose }) {
               {a.url
                 ? <a href={a.url} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: C.accent2, textDecoration: "none" }}>{a.original_name}</a>
                 : <span style={{ fontSize: 13, color: C.text }}>{a.original_name}</span>}
+              {a.kind === "pod" && <Pill color={C.ready} style={{ fontSize: 10 }}>Proof of delivery</Pill>}
               {a.size != null && <span style={{ fontSize: 11, color: C.text3 }}>{a.size >= 1048576 ? (a.size / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(a.size / 1024)) + " KB"}</span>}
               <span style={{ fontSize: 11.5, color: C.text3, marginLeft: "auto" }}>{a.uploaded_by_name}</span>
               {canMove && <button onClick={() => removeAttachment(a.id)} title="Remove" style={{ background: "#3a1a1a", border: "none", borderRadius: 6, color: "#fca5a5", cursor: "pointer", width: 24, height: 24, flexShrink: 0 }}>×</button>}
@@ -1433,7 +1498,7 @@ function LV({ label, v }) {
 
 // ─── Create order ──────────────────────────────────────────────────────────────
 function CreateOrderForm({ onCreated, onClose }) {
-  const [f, setF] = useState({ invoice_number: "", customer_name: "", customer_contact: "", required_delivery_date: "", expiry_date: "", priority: "normal", importance: "standard", skip_production: false, notes: "" });
+  const [f, setF] = useState({ invoice_number: "", customer_name: "", customer_contact: "", delivery_address: "", required_delivery_date: "", expiry_date: "", priority: "normal", importance: "standard", skip_production: false, notes: "" });
   const [items, setItems] = useState([{ sku: "", name: "", quantity: 1, unit: "pcs" }]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -1464,6 +1529,7 @@ function CreateOrderForm({ onCreated, onClose }) {
         <Field label="Importance" value={f.importance} onChange={(v) => set("importance", v)} options={IMPORTANCE_OPTS} />
         <Field label="Customer Name" value={f.customer_name} onChange={(v) => set("customer_name", v)} required />
         <Field label="Contact" value={f.customer_contact} onChange={(v) => set("customer_contact", v)} placeholder="01X-XXXXXXX" />
+        <Field label="Delivery address" value={f.delivery_address} onChange={(v) => set("delivery_address", v)} placeholder="Where it ships to (optional — dispatch sees this)" />
         <Field label="Required Delivery Date" type="date" value={f.required_delivery_date} onChange={(v) => set("required_delivery_date", v)} required />
         <Field label="Expiry Date" type="date" value={f.expiry_date} onChange={(v) => set("expiry_date", v)} />
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: C.text2, marginTop: 26 }}>
@@ -2028,7 +2094,7 @@ function Reports({ user }) {
   const TAB_DESC = {
     production: "Throughput, on-time rate and reworks in production",
     packing: "Packing throughput and turnaround time",
-    delivery: "Deliveries completed, on-time rate and couriers",
+    delivery: "Deliveries completed, on-time rate and drivers",
     efficiency: "Cycle time, bottleneck stage and aging orders",
     mistakes: "Amendments, late / failed deliveries, holds",
     orders: "Per-order progress, cycle time and customer rollup",
@@ -2082,7 +2148,7 @@ function Reports({ user }) {
       for (const key of tabsForRole.filter((k) => metricDefs[k])) {
         const dd = data[key] || {};
         rows.push([META[key]], ["Metric", "Value"], ...kpiRows(key, dd));
-        if ((dd.by_delivery_man || []).length) rows.push([], ["Courier", "Deliveries", "On time"], ...dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
+        if ((dd.by_delivery_man || []).length) rows.push([], ["Driver", "Deliveries", "On time"], ...dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
         if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
         rows.push([]);
       }
@@ -2099,7 +2165,7 @@ function Reports({ user }) {
       for (const key of tabsForRole.filter((k) => metricDefs[k])) {
         const dd = data[key] || {};
         const rows = [[`${META[key]} — ${rangeLabel}`], [], ["Metric", "Value"], ...kpiRows(key, dd)];
-        if ((dd.by_delivery_man || []).length) rows.push([], ["Courier", "Deliveries", "On time"], ...dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
+        if ((dd.by_delivery_man || []).length) rows.push([], ["Driver", "Deliveries", "On time"], ...dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
         if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), META[key]);
       }
@@ -2209,7 +2275,7 @@ function Reports({ user }) {
         heading(META[key]);
         kpiCards(metricDefs[key](dd));
         trendChart(dd.daily_trend, key === "delivery" ? "line" : "bar", key === "delivery" ? G.green : G.accent);
-        if ((dd.by_delivery_man || []).length) darkTable(["Courier", "Deliveries", "On time"], dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
+        if ((dd.by_delivery_man || []).length) darkTable(["Driver", "Deliveries", "On time"], dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
       }
       if (data._staff && data._staff.length) { heading("Staff productivity"); darkTable(["Name", "Role", "Done", "Items", "Reworks"], data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks])); }
       if (data._pics && data._pics.length) { heading("Person in charge"); darkTable(["Name", "Role", "Open", "Overdue", "On hold", "Completed"], data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed])); }
@@ -2266,9 +2332,9 @@ function Reports({ user }) {
       )}
       {tab === "delivery" && (d.by_delivery_man || []).length > 0 && (
         <Card style={{ marginTop: 18 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>By courier</h3>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>By driver</h3>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead><tr>{["Courier", "Deliveries", "On-time"].map((h) => <th key={h} style={{ textAlign: "left", padding: "7px 8px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
+            <thead><tr>{["Driver", "Deliveries", "On-time"].map((h) => <th key={h} style={{ textAlign: "left", padding: "7px 8px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
             <tbody>
               {d.by_delivery_man.map((x) => (
                 <tr key={x.id} style={{ borderBottom: `1px solid ${C.border}` }}>
@@ -2414,13 +2480,13 @@ function Delivery({ user, onOpenOrder }) {
   const [show, setShow] = useState(false);
   const [allCompleted, setAllCompleted] = useState(false);
   const [confirmDeliver, setConfirmDeliver] = useState(null);
-  const [form, setForm] = useState({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "", tracking_no: "" });
+  const [form, setForm] = useState({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "" });
   const [newDeliverer, setNewDeliverer] = useState({ name: "", phone: "" });
   const [otherCourier, setOtherCourier] = useState("");
   const [editDelivery, setEditDelivery] = useState(null);
-  const [editForm, setEditForm] = useState({ deliverer_id: "", scheduled_date: "", address: "", notes: "", tracking_no: "" });
+  const [editForm, setEditForm] = useState({ deliverer_id: "", scheduled_date: "", address: "", notes: "" });
   const [editOther, setEditOther] = useState("");
-  const [showCouriers, setShowCouriers] = useState(false);
+  const [showCouriers, setShowCouriers] = useState(true);
   const [q, setQ] = useState("");
   const canAssign = ["super_admin", "operations_controller", "delivery_team", "admin"].includes(user.role);
   const canDeliver = ["super_admin", "operations_controller", "delivery_team", "admin"].includes(user.role);
@@ -2445,31 +2511,63 @@ function Delivery({ user, onOpenOrder }) {
     try {
       let payload = form;
       if (form.deliverer_id === "__other__") {
-        if (!otherCourier.trim()) { alert("Type the other courier's name, or pick one from the list."); return; }
+        if (!otherCourier.trim()) { alert("Type the new driver's name, or pick one from the list."); return; }
         const dl = await api("POST", "/delivery/deliverers", { name: otherCourier.trim() });
         payload = { ...form, deliverer_id: dl.id };
       }
       await api("POST", "/delivery", payload);
-      setShow(false); setForm({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "", tracking_no: "" }); setOtherCourier("");
+      setShow(false); setForm({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "" }); setOtherCourier("");
       load();
     } catch (e) { alert(e.message); }
   }
   async function markDelivered(id) { try { await api("POST", `/delivery/${id}/deliver`, {}); setConfirmDeliver(null); load(); } catch (e) { alert(e.message); } }
-  function scheduleFor(orderId) { setForm((f) => ({ ...f, order_id: orderId })); setShow(true); }
+  // One-tap deliver straight from Ready (no Schedule step), and its undo.
+  async function markDeliveredDirect(orderId) { try { await api("POST", "/delivery/quick-deliver", { order_id: orderId }); load(); } catch (e) { alert(e.message); } }
+  async function reopenDelivery(deliveryId) {
+    if (!deliveryId) { alert("No delivery record to undo."); return; }
+    if (!confirm("Reopen this order? It goes back to Ready for Delivery so you can re-deliver it.")) return;
+    try { await api("POST", `/delivery/${deliveryId}/reopen`, {}); load(); } catch (e) { alert(e.message); }
+  }
+  async function addAddress(o) {
+    const a = prompt(`Delivery address for ${o.invoice_number}:`, o.delivery_address || "");
+    if (a == null) return;
+    try { await api("PATCH", `/orders/${o.id}`, { delivery_address: a.trim() }); load(); } catch (e) { alert(e.message); }
+  }
+  // Proof of delivery: a photo of the signed doc / parcel, uploaded as a kind='pod'
+  // attachment on the order (camera opens directly on a phone). Reconciled by admin.
+  async function uploadProof(orderId, file) {
+    if (!file) return;
+    try { const fd = new FormData(); fd.append("file", file); fd.append("kind", "pod"); await api("POST", `/orders/${orderId}/attachments`, fd, true); load(); }
+    catch (e) { alert(e.message); }
+  }
+  // Print the Delivery Order (driver's signable paper). Fetches the full order for
+  // its line items; the batch version prints every scheduled note in one dialog.
+  async function printOneDO(orderId) {
+    const o = await api("GET", `/orders/${orderId}`).catch(() => null);
+    const dv = (list || []).find((x) => x.order_id === orderId && x.status !== "delivered");
+    if (o) printDeliveryOrders([{ order: o, delivery: dv }]);
+  }
+  async function printAllDOs() {
+    const active = (list || []).filter((x) => x.status !== "delivered");
+    const entries = [];
+    for (const dv of active) { const o = await api("GET", `/orders/${dv.order_id}`).catch(() => null); if (o) entries.push({ order: o, delivery: dv }); }
+    if (entries.length) printDeliveryOrders(entries); else alert("Nothing scheduled to print.");
+  }
+  function scheduleFor(orderId) { const o = ready.find((x) => x.id === orderId); setForm((f) => ({ ...f, order_id: orderId, address: (o && o.delivery_address) || "" })); setShow(true); }
   async function addDeliverer() {
     if (!newDeliverer.name.trim()) return;
     try { await api("POST", "/delivery/deliverers", newDeliverer); setNewDeliverer({ name: "", phone: "" }); load(); } catch (e) { alert(e.message); }
   }
   async function toggleDeliverer(dl) { try { await api("PATCH", `/delivery/deliverers/${dl.id}`, { is_active: !dl.is_active }); load(); } catch (e) { alert(e.message); } }
   function openEdit(dv) {
-    setEditForm({ deliverer_id: dv.deliverer_id || "", scheduled_date: dv.scheduled_date || "", address: dv.address || "", notes: dv.notes || "", tracking_no: dv.tracking_no || "" });
+    setEditForm({ deliverer_id: dv.deliverer_id || "", scheduled_date: dv.scheduled_date || "", address: dv.address || "", notes: dv.notes || "" });
     setEditOther(""); setEditDelivery(dv);
   }
   async function saveEdit() {
     try {
       let payload = editForm;
       if (editForm.deliverer_id === "__other__") {
-        if (!editOther.trim()) { alert("Type the other courier's name, or pick one from the list."); return; }
+        if (!editOther.trim()) { alert("Type the new driver's name, or pick one from the list."); return; }
         const dl = await api("POST", "/delivery/deliverers", { name: editOther.trim() });
         payload = { ...editForm, deliverer_id: dl.id };
       }
@@ -2488,6 +2586,7 @@ function Delivery({ user, onOpenOrder }) {
   // distinct from it. in_transit blue, delivered grey, failed red.
   const tone = { pending: C.packing, in_transit: C.order, delivered: C.text3, failed: C.danger };
   const statusLabel = { pending: "Pending", in_transit: "In transit", delivered: "Delivered", failed: "Failed" };
+  const proofBtn = { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, padding: "6px 11px", borderRadius: 8, border: `1px solid ${C.border2}`, background: C.surface2, color: C.text2, cursor: "pointer", whiteSpace: "nowrap" };
   const active = list.filter((x) => x.status !== "delivered");
   const delByOrder = {};
   for (const dv of list) delByOrder[dv.order_id] = dv;
@@ -2524,9 +2623,15 @@ function Delivery({ user, onOpenOrder }) {
                 </>}
                 rows={[
                   ["Customer", o.customer_name || "—"],
+                  ["Where", o.delivery_address ? o.delivery_address : <button onClick={() => addAddress(o)} style={{ background: "none", border: 0, padding: 0, color: C.hold, cursor: "pointer", textDecoration: "underline", font: "inherit" }}>＋ Add address</button>],
+                  ["Phone", o.customer_contact || "—"],
                   ["Due", <span style={{ color: countdown(o.required_delivery_date).tone }}>{fmtDay(o.required_delivery_date)}</span>],
                 ]}
-                actions={<Btn size="lg" style={{ width: "100%", justifyContent: "center" }} onClick={() => scheduleFor(o.id)}>Schedule →</Btn>}
+                actions={<>
+                  {canDeliver && <Btn size="lg" variant="success" style={{ flex: 2, justifyContent: "center" }} onClick={() => markDeliveredDirect(o.id)}>✓ Delivered</Btn>}
+                  <Btn size="lg" variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => scheduleFor(o.id)}>Schedule</Btn>
+                  <Btn size="lg" variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => printOneDO(o.id)}>🖨 DO</Btn>
+                </>}
               />
             ))
           ) : (
@@ -2538,10 +2643,22 @@ function Delivery({ user, onOpenOrder }) {
                 {fReady.map((o) => (
                   <tr key={o.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                     <td style={{ padding: "11px 16px", fontFamily: MONO }}><button onClick={() => onOpenOrder && onOpenOrder(o.id)} title="Open order details" style={{ background: "none", border: 0, padding: 0, fontFamily: MONO, fontSize: "inherit", color: C.accent, cursor: "pointer", textAlign: "left" }}>{o.invoice_number}</button></td>
-                    <td style={{ padding: "11px 16px", color: C.text2 }}>{o.customer_name}</td>
+                    <td style={{ padding: "11px 16px", color: C.text2 }}>
+                      <div>{o.customer_name}</div>
+                      <div style={{ fontSize: 11.5, color: C.text3, marginTop: 2 }}>
+                        {o.delivery_address ? `📍 ${o.delivery_address}` : <button onClick={() => addAddress(o)} style={{ background: "none", border: 0, padding: 0, color: C.hold, cursor: "pointer", textDecoration: "underline", font: "inherit" }}>📍 Add address</button>}
+                        {o.customer_contact ? ` · 📞 ${o.customer_contact}` : ""}
+                      </div>
+                    </td>
                     <td style={{ padding: "11px 16px", color: countdown(o.required_delivery_date).tone }}>{fmtDay(o.required_delivery_date)}</td>
                     <td style={{ padding: "11px 16px" }}><Pill color={C.ready}>Ready for Delivery</Pill></td>
-                    <td style={{ padding: "11px 16px" }}><Btn size="sm" onClick={() => scheduleFor(o.id)}>Schedule →</Btn></td>
+                    <td style={{ padding: "11px 16px" }}>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {canDeliver && <Btn size="sm" variant="success" onClick={() => markDeliveredDirect(o.id)}>✓ Delivered</Btn>}
+                        <Btn size="sm" variant="soft" onClick={() => scheduleFor(o.id)}>Schedule</Btn>
+                        <Btn size="sm" variant="soft" onClick={() => printOneDO(o.id)}>🖨 DO</Btn>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2551,10 +2668,14 @@ function Delivery({ user, onOpenOrder }) {
         </div>
       )}
 
+      {fActive.length > 0 && (
       <div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Pending · {fActive.length}</h3>
-          {fActive.length > 0 && <Btn variant="soft" size="sm" onClick={() => printRouteList(fActive)}>Print route list</Btn>}
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Scheduled · {fActive.length}</h3>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn variant="soft" size="sm" onClick={() => printRouteList(fActive)}>Print route list</Btn>
+            <Btn variant="soft" size="sm" onClick={printAllDOs}>🖨 Print delivery orders</Btn>
+          </div>
         </div>
         {stacked ? (
           fActive.length === 0 ? <Empty label={noMatch || "Nothing pending. Schedule a Ready-for-Delivery order above."} />
@@ -2566,19 +2687,20 @@ function Delivery({ user, onOpenOrder }) {
               </>}
               rows={[
                 ["Customer", dv.customer_name || "—"],
-                ["Courier", dv.delivery_man_name || "—"],
+                ["Driver", dv.delivery_man_name || "—"],
                 ["Due", <span style={{ color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</span>],
               ]}
               actions={<>
                 {canAssign && <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => openEdit(dv)}>Edit</Btn>}
                 {canDeliver && <Btn variant="success" style={{ flex: 2, justifyContent: "center" }} onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
+                <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => printOneDO(dv.order_id)}>🖨 DO</Btn>
               </>}
             />
           ))
         ) : (
         <Card style={{ padding: 0, overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Courier", "Scheduled", "Due", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Driver", "Scheduled", "Due", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
               {fActive.length === 0 && <tr><td colSpan={7}><Empty label={noMatch || "Nothing pending. Schedule a Ready-for-Delivery order above."} /></td></tr>}
               {fActive.map((dv) => (
@@ -2593,6 +2715,7 @@ function Delivery({ user, onOpenOrder }) {
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       {canAssign && <Btn size="sm" variant="soft" onClick={() => openEdit(dv)}>Edit</Btn>}
                       {canDeliver && <Btn size="sm" variant="success" onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
+                      <Btn size="sm" variant="soft" onClick={() => printOneDO(dv.order_id)}>🖨 DO</Btn>
                     </div>
                   </td>
                 </tr>
@@ -2602,6 +2725,7 @@ function Delivery({ user, onOpenOrder }) {
         </Card>
         )}
       </div>
+      )}
 
       <div>
         <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 12 }}>Completed orders · {fCompleted.length}</h3>
@@ -2618,14 +2742,19 @@ function Delivery({ user, onOpenOrder }) {
                 rows={[
                   ["Customer", o.customer_name || "—"],
                   ["Delivered", dv && dv.delivered_at ? fmtDateTime(dv.delivered_at) : "Delivered"],
+                  ["Proof", dv && dv.has_pod ? <span style={{ color: C.ready }}>✓ Attached</span> : <span style={{ color: C.hold }}>⚠ None yet</span>],
                 ]}
+                actions={<div style={{ display: "flex", gap: 8, width: "100%" }}>
+                  {canDeliver && <label style={{ ...proofBtn, flex: 1, justifyContent: "center" }}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(o.id, f); }} /></label>}
+                  {canDeliver && dv && <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => reopenDelivery(dv.id)}>↩ Undo</Btn>}
+                </div>}
               />
             );
           })
         ) : (
         <Card style={{ padding: 0, overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Courier", "Delivered", "Due"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Driver", "Delivered", "Due", ""].map((h, i) => <th key={i} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
               {fCompleted.length === 0 && <tr><td colSpan={5}><Empty label={noMatch || "No completed orders yet."} /></td></tr>}
               {shownCompleted.map((o) => {
@@ -2635,8 +2764,17 @@ function Delivery({ user, onOpenOrder }) {
                     <td style={{ padding: "11px 16px", fontFamily: MONO }}><button onClick={() => onOpenOrder && onOpenOrder(o.id)} title="Open order details" style={{ background: "none", border: 0, padding: 0, fontFamily: MONO, fontSize: "inherit", color: C.accent, cursor: "pointer", textAlign: "left" }}>{o.invoice_number}</button></td>
                     <td style={{ padding: "11px 16px", color: C.text2 }}>{o.customer_name}</td>
                     <td style={{ padding: "11px 16px", color: C.text2 }}>{dv && dv.delivery_man_name ? dv.delivery_man_name : "—"}</td>
-                    <td style={{ padding: "11px 16px", color: C.ready }}>{dv && dv.delivered_at ? fmtDateTime(dv.delivered_at) : "Delivered"}</td>
+                    <td style={{ padding: "11px 16px", color: C.ready }}>
+                      <div>{dv && dv.delivered_at ? fmtDateTime(dv.delivered_at) : "Delivered"}</div>
+                      <div style={{ marginTop: 3 }}>{dv && dv.has_pod ? <Pill color={C.ready} style={{ fontSize: 10 }}>✓ Proof</Pill> : <Pill color={C.hold} style={{ fontSize: 10 }}>⚠ No proof</Pill>}</div>
+                    </td>
                     <td style={{ padding: "11px 16px", color: C.text3 }}>{fmtDay(o.required_delivery_date)}</td>
+                    <td style={{ padding: "11px 16px" }}>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                        {canDeliver && <label style={proofBtn}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(o.id, f); }} /></label>}
+                        {canDeliver && dv && <Btn size="sm" variant="soft" onClick={() => reopenDelivery(dv.id)}>↩ Undo</Btn>}
+                      </div>
+                    </td>
                   </tr>
                 );
               })}
@@ -2650,17 +2788,17 @@ function Delivery({ user, onOpenOrder }) {
       {canAssign && (
         <div>
           <button onClick={() => setShowCouriers((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", cursor: "pointer", padding: 0 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Manage couriers · {deliverers.length}</h3>
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Drivers · {deliverers.length}</h3>
             <span style={{ color: C.text3, fontSize: 13 }}>{showCouriers ? "▲" : "▼"}</span>
           </button>
-          {!showCouriers && <div style={{ fontSize: 12.5, color: C.text3, marginTop: 4 }}>Tip: you can just type a courier when scheduling — it's saved here automatically. Open this only to disable or rename one.</div>}
+          {!showCouriers && <div style={{ fontSize: 12.5, color: C.text3, marginTop: 4 }}>Your in-house delivery team. Add a driver here, or just type one when scheduling — it's saved automatically.</div>}
           {showCouriers && (
             <>
               <Card style={{ padding: 0, overflowX: "auto", marginTop: 12 }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
                   <thead><tr style={{ background: C.bg2 }}>{["Name", "Phone", "Status", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
                   <tbody>
-                    {deliverers.length === 0 && <tr><td colSpan={4}><Empty label="No couriers yet. Type one when scheduling, or add below." /></td></tr>}
+                    {deliverers.length === 0 && <tr><td colSpan={4}><Empty label="No drivers yet. Add your in-house drivers below." /></td></tr>}
                     {deliverers.map((dl) => (
                       <tr key={dl.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                         <td style={{ padding: "11px 16px", color: C.text }}>{dl.name}</td>
@@ -2673,9 +2811,9 @@ function Delivery({ user, onOpenOrder }) {
                 </table>
               </Card>
               <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
-                <input placeholder="Courier name (e.g. J&T, SPX)" value={newDeliverer.name} onChange={(e) => setNewDeliverer((p) => ({ ...p, name: e.target.value }))} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5 }} />
+                <input placeholder="Driver name (e.g. Ahmad, Faiz)" value={newDeliverer.name} onChange={(e) => setNewDeliverer((p) => ({ ...p, name: e.target.value }))} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5 }} />
                 <input placeholder="Phone (optional)" value={newDeliverer.phone} onChange={(e) => setNewDeliverer((p) => ({ ...p, phone: e.target.value }))} style={{ padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5 }} />
-                <Btn size="sm" onClick={addDeliverer} disabled={!newDeliverer.name.trim()}><Icon name="plus" size={14} /> Add courier</Btn>
+                <Btn size="sm" onClick={addDeliverer} disabled={!newDeliverer.name.trim()}><Icon name="plus" size={14} /> Add driver</Btn>
               </div>
             </>
           )}
@@ -2685,12 +2823,11 @@ function Delivery({ user, onOpenOrder }) {
       <Modal open={show} onClose={() => setShow(false)} title="Schedule delivery">
         <Field label="Order (ready for delivery)" value={form.order_id} onChange={(v) => setForm((f) => ({ ...f, order_id: v }))}
           options={[{ value: "", label: "Select order…" }, ...ready.map((o) => ({ value: o.id, label: `${o.invoice_number} — ${o.customer_name}` }))]} />
-        <Field label="Courier" value={form.deliverer_id} onChange={(v) => setForm((f) => ({ ...f, deliverer_id: v }))}
-          options={[{ value: "", label: deliverers.filter((d) => d.is_active).length ? "Unassigned" : "No couriers yet — add one below" }, ...deliverers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name })), { value: "__other__", label: "+ Other courier (not in the list)" }]} />
+        <Field label="Driver" value={form.deliverer_id} onChange={(v) => setForm((f) => ({ ...f, deliverer_id: v }))}
+          options={[{ value: "", label: deliverers.filter((d) => d.is_active).length ? "Unassigned" : "No drivers yet — add one below" }, ...deliverers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name })), { value: "__other__", label: "+ Add a new driver" }]} />
         {form.deliverer_id === "__other__" && (
-          <Field label="Other courier name" value={otherCourier} onChange={setOtherCourier} placeholder="e.g. Lalamove, GDex, own driver…" required />
+          <Field label="New driver name" value={otherCourier} onChange={setOtherCourier} placeholder="e.g. Ahmad" required />
         )}
-        <Field label="Tracking number" value={form.tracking_no} onChange={(v) => setForm((f) => ({ ...f, tracking_no: v }))} placeholder="Courier tracking no (optional)" />
         <Field label="Scheduled date" type="date" value={form.scheduled_date} onChange={(v) => setForm((f) => ({ ...f, scheduled_date: v }))} />
         <Field label="Delivery address" value={form.address} onChange={(v) => setForm((f) => ({ ...f, address: v }))} placeholder="Street, city, postcode…" />
         <Field label="Notes" value={form.notes} onChange={(v) => setForm((f) => ({ ...f, notes: v }))} placeholder="Optional…" />
@@ -2706,11 +2843,10 @@ function Delivery({ user, onOpenOrder }) {
             <div style={{ fontSize: 14, marginBottom: 8 }}><span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{confirmDeliver.invoice_number}</span> <span style={{ color: C.text2 }}>· {confirmDeliver.customer_name}</span></div>
             <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.8, marginBottom: 12 }}>
               {confirmDeliver.address && <div><span style={{ color: C.text3 }}>Address: </span>{confirmDeliver.address}</div>}
-              <div><span style={{ color: C.text3 }}>Courier: </span>{confirmDeliver.delivery_man_name || "Unassigned"}</div>
-              {confirmDeliver.tracking_no && <div><span style={{ color: C.text3 }}>Tracking: </span>{confirmDeliver.tracking_no}</div>}
+              <div><span style={{ color: C.text3 }}>Driver: </span>{confirmDeliver.delivery_man_name || "Unassigned"}</div>
               <div><span style={{ color: C.text3 }}>Scheduled: </span>{confirmDeliver.scheduled_date ? fmtDay(confirmDeliver.scheduled_date) : "—"}</div>
             </div>
-            <div style={{ fontSize: 12.5, color: C.text3, marginBottom: 16 }}>This marks the order delivered and moves it out of Pending. This can't be undone.</div>
+            <div style={{ fontSize: 12.5, color: C.text3, marginBottom: 16 }}>This marks the order delivered. You can undo it from Completed if you mark it by mistake.</div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <Btn variant="ghost" onClick={() => setConfirmDeliver(null)}>Cancel</Btn>
               <Btn variant="success" onClick={() => markDelivered(confirmDeliver.id)}><Icon name="check" size={15} /> Confirm delivered</Btn>
@@ -2723,12 +2859,11 @@ function Delivery({ user, onOpenOrder }) {
         {editDelivery && (
           <>
             <div style={{ fontSize: 14, marginBottom: 12 }}><span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{editDelivery.invoice_number}</span> <span style={{ color: C.text2 }}>· {editDelivery.customer_name}</span></div>
-            <Field label="Courier" value={editForm.deliverer_id} onChange={(v) => setEditForm((f) => ({ ...f, deliverer_id: v }))}
-              options={[{ value: "", label: "Unassigned" }, ...deliverers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name })), { value: "__other__", label: "+ Other courier (not in the list)" }]} />
+            <Field label="Driver" value={editForm.deliverer_id} onChange={(v) => setEditForm((f) => ({ ...f, deliverer_id: v }))}
+              options={[{ value: "", label: "Unassigned" }, ...deliverers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name })), { value: "__other__", label: "+ Add a new driver" }]} />
             {editForm.deliverer_id === "__other__" && (
-              <Field label="Other courier name" value={editOther} onChange={setEditOther} placeholder="e.g. Lalamove, GDex, own driver…" required />
+              <Field label="New driver name" value={editOther} onChange={setEditOther} placeholder="e.g. Ahmad" required />
             )}
-            <Field label="Tracking number" value={editForm.tracking_no} onChange={(v) => setEditForm((f) => ({ ...f, tracking_no: v }))} placeholder="Courier tracking no (optional)" />
             <Field label="Scheduled date" type="date" value={editForm.scheduled_date} onChange={(v) => setEditForm((f) => ({ ...f, scheduled_date: v }))} />
             <Field label="Delivery address" value={editForm.address} onChange={(v) => setEditForm((f) => ({ ...f, address: v }))} placeholder="Street, city, postcode…" />
             <Field label="Notes" value={editForm.notes} onChange={(v) => setEditForm((f) => ({ ...f, notes: v }))} placeholder="Optional…" />
