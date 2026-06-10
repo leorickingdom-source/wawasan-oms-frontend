@@ -844,11 +844,12 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
                   <>
                     {(() => {
                       // Calm the tier scaffolding: hide empty tiers at rest (they come back
-                      // while dragging so you can still drop into one), and drop the tier
-                      // headers when a column only has one tier in play. Per-column helper
-                      // text removed — the ⓘ in the toolbar explains drag/▲▼.
+                      // while dragging so you can still drop into one). The tier header always
+                      // shows when the column has cards, so staff can read a card's priority
+                      // even when it's the only order in the column. Per-column helper text
+                      // removed — the ⓘ in the toolbar explains drag/▲▼.
                       const nonEmpty = TIER_ORDER.filter((t) => orders.some((o) => (o.importance || "standard") === t)).length;
-                      const showHeaders = nonEmpty > 1 || !!dragId;
+                      const showHeaders = nonEmpty > 0 || !!dragId;
                       return TIER_ORDER.map((tier) => {
                         const group = orders.filter((o) => (o.importance || "standard") === tier);
                         if (group.length === 0 && !dragId) return null;
@@ -1201,7 +1202,6 @@ function FloorDisplay({ onExit }) {
                 <div style={{ height: 5, background: C.surface2, borderRadius: 4, overflow: "hidden", marginTop: 12 }}>
                   <div style={{ height: "100%", width: `${((spotIdx % pool.length) + 1) / pool.length * 100}%`, background: C.accent, transition: "width .4s" }} />
                 </div>
-                <div style={{ fontSize: 12, color: C.text3, marginTop: 7 }}>auto-advances every 10s</div>
               </div>
             </>
           )}
@@ -1229,8 +1229,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
   const [notesSaved, setNotesSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false); // Details "More" expander — keep the wall collapsed
-  const [notesEditOpen, setNotesEditOpen] = useState(false); // Notes collapsed until opened — tidier for higher roles
+  const [moreOpen, setMoreOpen] = useState(false); // Details "More" expander — keep the wall collapsed; Internal Notes live inside
   const canMove = ["super_admin"].includes(user.role);
   // Back-office Admin (deputy) may route an order — set PIC + priority/importance —
   // but not move stages, hold/flag, or cancel (those stay canMove = Boss/Ops).
@@ -1401,38 +1400,33 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
           </div>
           <button onClick={() => setMoreOpen((o) => !o)} style={{ marginTop: 14, background: "none", border: `1px solid ${C.border2}`, color: C.text2, borderRadius: 8, fontSize: 12.5, padding: "7px 12px", cursor: "pointer" }}>{moreOpen ? "Hide details ▴" : "More details ▾"}</button>
           {moreOpen && (
-            <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: 14, marginTop: 14 }}>
-              {order.customer_name != null && <LV label="Contact" v={order.customer_contact || "—"} />}
-              {order.customer_name != null && <LV label="Address" v={order.delivery_address || "—"} />}
-              <LV label="Order date" v={order.order_date ? fmtDay(order.order_date) : "—"} />
-              <LV label="Expiry" v={order.expiry_date ? fmtDay(order.expiry_date) : "—"} />
-              <LV label="Source" v={order.source === "sql_account" ? "Auto-imported" : "Manual entry"} />
-              {delivery && <LV label="Driver" v={delivery.delivery_man_name || "Not assigned yet"} />}
-              {delivery && delivery.scheduled_date && <LV label="Scheduled" v={fmtDay(delivery.scheduled_date)} />}
-              {order.customer_name != null && delivery && delivery.address && <LV label="Delivery address" v={delivery.address} />}
-            </div>
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: 14, marginTop: 14 }}>
+                {order.customer_name != null && <LV label="Contact" v={order.customer_contact || "—"} />}
+                {order.customer_name != null && <LV label="Address" v={order.delivery_address || "—"} />}
+                <LV label="Order date" v={order.order_date ? fmtDay(order.order_date) : "—"} />
+                <LV label="Expiry" v={order.expiry_date ? fmtDay(order.expiry_date) : "—"} />
+                <LV label="Source" v={order.source === "sql_account" ? "Auto-imported" : "Manual entry"} />
+                {delivery && <LV label="Driver" v={delivery.delivery_man_name || "Not assigned yet"} />}
+                {delivery && delivery.scheduled_date && <LV label="Scheduled" v={fmtDay(delivery.scheduled_date)} />}
+                {order.customer_name != null && delivery && delivery.address && <LV label="Delivery address" v={delivery.address} />}
+              </div>
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontSize: 11, color: C.text3, fontWeight: 600, marginBottom: 6, letterSpacing: 0.4 }}>INTERNAL NOTES</div>
+                {canMove ? (
+                  <>
+                    <textarea value={notes} onChange={(e) => { setNotes(e.target.value); setNotesSaved(false); }} rows={2} placeholder="Internal notes (not shown to the customer)…" style={{ width: "100%", padding: "10px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 14, resize: "vertical", lineHeight: 1.5, boxSizing: "border-box" }} />
+                    <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}>
+                      <Btn size="sm" onClick={saveNotes} disabled={notesBusy}>{notesBusy ? "Saving…" : "Save notes"}</Btn>
+                      {notesSaved && <span style={{ color: C.ready, fontSize: 12.5 }}>Saved ✓</span>}
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 14, color: order.notes ? C.text2 : C.text3, whiteSpace: "pre-wrap" }}>{order.notes || "—"}</div>
+                )}
+              </div>
+            </>
           )}
-          <div style={{ marginTop: 18 }}>
-            {canMove ? (
-              !notesEditOpen ? (
-                <button onClick={() => setNotesEditOpen(true)} style={{ background: "none", border: `1px solid ${C.border2}`, color: order.notes ? C.text2 : C.text3, borderRadius: 8, fontSize: 13, padding: "8px 12px", cursor: "pointer", maxWidth: "100%", textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {order.notes ? `✎ Note: ${order.notes}` : "✎ Add internal note"}
-                </button>
-              ) : (
-                <>
-                  <div style={{ fontSize: 11, color: C.text3, fontWeight: 600, marginBottom: 6, letterSpacing: 0.4 }}>INTERNAL NOTES</div>
-                  <textarea autoFocus value={notes} onChange={(e) => { setNotes(e.target.value); setNotesSaved(false); }} rows={3} placeholder="Internal notes (not shown to the customer)…" style={{ width: "100%", padding: "10px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 14, resize: "vertical", lineHeight: 1.5, boxSizing: "border-box" }} />
-                  <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 10 }}>
-                    <Btn size="sm" onClick={saveNotes} disabled={notesBusy}>{notesBusy ? "Saving…" : "Save notes"}</Btn>
-                    <Btn size="sm" variant="ghost" onClick={() => setNotesEditOpen(false)}>Done ▴</Btn>
-                    {notesSaved && <span style={{ color: C.ready, fontSize: 12.5 }}>Saved ✓</span>}
-                  </div>
-                </>
-              )
-            ) : (
-              order.notes ? <><div style={{ fontSize: 11, color: C.text3, fontWeight: 600, marginBottom: 6, letterSpacing: 0.4 }}>INTERNAL NOTES</div><div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{order.notes}</div></> : null
-            )}
-          </div>
         </div>
       )}
       {tab === "timeline" && (() => {
@@ -1612,7 +1606,6 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
       {!canMove && canAdvanceStage(user.role, order.stage) && !order.on_hold && (
         <div style={{ marginTop: 22, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
           <Btn size="lg" style={{ width: "100%", justifyContent: "center" }} onClick={() => setConfirmAdv(true)} disabled={busy}>{ADVANCE_LABEL[order.stage] || "Mark complete"} →</Btn>
-          <p style={{ fontSize: 12, color: C.text3, marginTop: 8, textAlign: "center" }}>Marks your stage done and moves the order to the next stage.</p>
         </div>
       )}
       {confirmAdv && (
@@ -1624,7 +1617,6 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
       {isLead && (
         <div style={{ marginTop: 22, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, marginBottom: 8 }}>Lead actions</div>
-          <input placeholder="Reason / note (optional)" value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text, marginBottom: 10 }} />
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Btn variant="soft" size="sm" onClick={() => setFlag({ on_hold: !order.on_hold, reason: reason || undefined })} disabled={busy}>{order.on_hold ? "Release hold" : "Put on hold"}</Btn>
             <Btn variant="soft" size="sm" onClick={() => setFlag({ waiting_stock: !order.waiting_stock })} disabled={busy}>{order.waiting_stock ? "Clear waiting stock" : "Flag waiting stock"}</Btn>
@@ -1642,11 +1634,9 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
               {order.pic_id && !picUsers.some((u) => u.id === order.pic_id) && <option value={order.pic_id} style={{ background: C.bg2 }}>{order.pic_name || "Current PIC"}</option>}
               {picUsers.map((u) => <option key={u.id} value={u.id} style={{ background: C.bg2 }}>{u.name} — {ROLE_LABELS[u.role] || u.role}</option>)}
             </select>
-            <span style={{ fontSize: 11.5, color: C.text3 }}>Saved automatically</span>
           </div>
           {canMove && (
             <>
-              <input placeholder="Reason / note (optional) — applies to the hold or cancel you choose" value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text, marginBottom: 12 }} />
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <Btn variant="soft" size="sm" onClick={() => setFlag({ on_hold: !order.on_hold, reason: reason || undefined })} disabled={busy}>{order.on_hold ? "Release hold" : "Put on hold"}</Btn>
                 <Btn variant="soft" size="sm" onClick={() => setFlag({ waiting_stock: !order.waiting_stock })} disabled={busy}>{order.waiting_stock ? "Clear waiting stock" : "Flag waiting stock"}</Btn>
@@ -1654,7 +1644,6 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
               </div>
             </>
           )}
-          {!canMove && <p style={{ fontSize: 11.5, color: C.text3, marginTop: 10 }}>As Admin you route this order — set who's in charge, and adjust Priority / Importance above. Stage moves, holds and cancels stay with Ops.</p>}
         </div>
       )}
     </div>
