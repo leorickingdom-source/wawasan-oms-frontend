@@ -891,7 +891,7 @@ function FloorDisplay({ onExit }) {
                     const late = (cd.n ?? 0) < 0, urgent = o.priority === "urgent";
                     const dtag = deliveryTag(o);
                     return (
-                      <div key={o.id} style={{ background: C.surface, border: `1px solid ${urgent || late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${cfg.color}`, borderRadius: 9, padding: "9px 11px" }}>
+                      <div key={o.id} style={{ background: urgent ? C.danger + "1A" : C.surface, border: `1px solid ${urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${cfg.color}`, borderRadius: 9, padding: "9px 11px" }}>
                         <div style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 5 }}>
                           {urgent && <Pill color={C.danger} style={{ fontSize: 9.5, padding: "1px 6px" }}>Urgent</Pill>}
@@ -1894,17 +1894,143 @@ function TrendChart({ data, kind = "bar", color = C.accent, label = "Count" }) {
   );
 }
 
+// Efficiency lens: end-to-end cycle time, on-time rate, the bottleneck stage and
+// aging WIP. Backed by /reports/efficiency. Boss/Ops only.
+function EfficiencyReport({ period, from, to }) {
+  const [d, setD] = useState(null);
+  useEffect(() => { setD(null); api("GET", `/reports/efficiency?${reportQuery(period, from, to)}`).then(setD).catch(() => setD(false)); }, [period, from, to]);
+  if (d == null) return <Loading label="Loading efficiency…" />;
+  if (d === false) return <Empty label="Could not load efficiency." />;
+  const secT = { fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".5px", color: C.text3, margin: "18px 2px 9px" };
+  const STG = { order: "Order → Prod", production: "Production", packing: "Packing", ready_for_delivery: "Ready → Out" };
+  const STG_COLOR = { order: C.order, production: C.production, packing: C.packing, ready_for_delivery: C.ready };
+  const hrs = (h) => h == null ? "—" : (Number(h) >= 48 ? Math.round(Number(h) / 24) + "d" : Number(h).toFixed(1) + "h");
+  const order = ["order", "production", "packing", "ready_for_delivery"];
+  const dwell = (d.stage_dwell || []).slice().sort((a, b) => order.indexOf(a.stage) - order.indexOf(b.stage));
+  const maxH = Math.max(1, ...dwell.map((s) => Number(s.avg_hours) || 0));
+  const aging = d.aging || [];
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14 }}>
+        <MetricCard label={`Avg cycle · order→delivered${d.cycle_n ? ` (${d.cycle_n})` : ""}`} value={hrs(d.avg_cycle_hours)} tone={C.accent} />
+        <MetricCard label="On-time delivery" value={d.on_time_rate == null ? "—" : `${d.on_time_rate}%`} tone={C.ready} />
+        <MetricCard label="Bottleneck stage" value={d.bottleneck ? (STG[d.bottleneck.stage] || d.bottleneck.stage) : "—"} tone={C.danger} />
+      </div>
+
+      {dwell.length > 0 && (<>
+        <div style={secT}>Average time in each stage</div>
+        <Card>
+          {dwell.map((s) => {
+            const w = Math.round((Number(s.avg_hours) / maxH) * 100);
+            const isBn = d.bottleneck && d.bottleneck.stage === s.stage;
+            return (
+              <div key={s.stage} style={{ display: "grid", gridTemplateColumns: "110px 1fr 56px", gap: 10, alignItems: "center", padding: "5px 0" }}>
+                <span style={{ fontSize: 12.5, color: C.text2 }}>{STG[s.stage] || s.stage}</span>
+                <div style={{ height: 8, borderRadius: 5, background: C.surface2, overflow: "hidden" }}><div style={{ width: `${w}%`, height: "100%", borderRadius: 5, background: isBn ? C.danger : (STG_COLOR[s.stage] || C.accent) }} /></div>
+                <span style={{ textAlign: "right", fontFamily: MONO, fontWeight: 700, fontSize: 12.5, color: isBn ? C.danger : C.text }}>{hrs(s.avg_hours)}</span>
+              </div>
+            );
+          })}
+          <div style={{ fontSize: 11.5, color: C.text3, marginTop: 8 }}>Longest bar = where orders pile up.</div>
+        </Card>
+      </>)}
+
+      <div style={secT}>Aging — oldest open orders</div>
+      <Card style={{ padding: 0, overflowX: "auto" }}>
+        {aging.length === 0 ? <Empty label="Nothing aging — all open orders are fresh." /> : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Stage", "Days open", "Days late"].map((h, i) => <th key={h} style={{ textAlign: i > 1 ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {aging.map((o) => (
+                <tr key={o.invoice_number} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "9px 14px", fontFamily: MONO, color: C.accent2 }}>{o.invoice_number}</td>
+                  <td style={{ padding: "9px 14px", color: C.text2, textTransform: "capitalize" }}>{STG[o.stage] || String(o.stage).replace(/_/g, " ")}</td>
+                  <td style={{ padding: "9px 14px", textAlign: "right", color: C.text, fontWeight: 700 }}>{o.days_open}</td>
+                  <td style={{ padding: "9px 14px", textAlign: "right" }}>{o.days_late > 0 ? <Pill color={C.danger}>+{o.days_late}</Pill> : <span style={{ color: C.text3 }}>on time</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// Mistakes lens: amendments, late / failed deliveries, cancellations, holds and
+// waiting-stock — the errors nothing aggregated before. Backed by /reports/mistakes.
+function MistakesReport({ period, from, to }) {
+  const [d, setD] = useState(null);
+  useEffect(() => { setD(null); api("GET", `/reports/mistakes?${reportQuery(period, from, to)}`).then(setD).catch(() => setD(false)); }, [period, from, to]);
+  if (d == null) return <Loading label="Loading mistakes…" />;
+  if (d === false) return <Empty label="Could not load mistakes." />;
+  const secT = { fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".5px", color: C.text3, margin: "18px 2px 9px" };
+  const fmtWhen = (s) => s ? new Date(s).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+  const cards = [
+    ["Amendments", d.amendments.count, C.danger], ["Late deliveries", d.late.count, C.danger], ["Failed deliveries", d.failed_count, C.danger],
+    ["Cancelled", d.cancelled_count, C.hold], ["On hold now", d.on_hold_count, C.hold], ["Waiting stock", d.waiting_stock_count, C.hold],
+  ];
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 14 }}>
+        {cards.map(([l, v, tone]) => <MetricCard key={l} label={l} value={v} tone={tone} />)}
+      </div>
+
+      <div style={secT}>Amendments — orders corrected after placement</div>
+      <Card style={{ padding: 0, overflowX: "auto" }}>
+        {d.amendments.list.length === 0 ? <Empty label="No amendments this period." /> : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "By", "Change", "When"].map((h) => <th key={h} style={{ textAlign: "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {d.amendments.list.map((a, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "9px 14px", fontFamily: MONO, color: C.accent2 }}>{a.invoice_number || "—"}</td>
+                  <td style={{ padding: "9px 14px", color: C.text2 }}>{a.user_name || "—"}</td>
+                  <td style={{ padding: "9px 14px", color: C.text }}>{a.details || "edited"}</td>
+                  <td style={{ padding: "9px 14px", color: C.text3, whiteSpace: "nowrap" }}>{fmtWhen(a.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+
+      {d.late.list.length > 0 && (<>
+        <div style={secT}>Late deliveries</div>
+        <Card style={{ padding: 0, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Days late", "Driver"].map((h, i) => <th key={h} style={{ textAlign: i === 1 ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {d.late.list.map((o, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "9px 14px", fontFamily: MONO, color: C.accent2 }}>{o.invoice_number}</td>
+                  <td style={{ padding: "9px 14px", textAlign: "right" }}><Pill color={C.danger}>+{o.days_late}</Pill></td>
+                  <td style={{ padding: "9px 14px", color: C.text2 }}>{o.driver || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      </>)}
+
+      {d.trend && d.trend.length > 0 && (<><div style={secT}>Amendments — last 8 weeks</div><TrendChart data={d.trend} color={C.danger} label="Amendments" /></>)}
+    </div>
+  );
+}
+
 // ─── Reports ─────────────────────────────────────────────────────────────────
 function Reports({ user }) {
   const tabsForRole = user.role === "production_lead" ? ["production", "packing", "staff", "pic"]
-    : ["production", "packing", "delivery", "orders", "staff", "pic"];
-  const CUSTOM = ["orders", "staff", "pic"]; // tabs with their own table component (no metric cards/trend)
-  const TAB_LABEL = { staff: "Staff", pic: "Person in charge" }; // friendlier than the capitalized id
+    : ["production", "packing", "delivery", "efficiency", "mistakes", "orders", "staff", "pic"];
+  const CUSTOM = ["orders", "staff", "pic", "efficiency", "mistakes"]; // tabs with their own component (no metric cards/trend)
+  const TAB_LABEL = { staff: "Staff", pic: "Person in charge", efficiency: "Efficiency", mistakes: "Mistakes" };
   const PERIOD_LABEL = { daily: "Today", weekly: "This week", monthly: "This month" };
   const TAB_DESC = {
     production: "Throughput, on-time rate and reworks in production",
     packing: "Packing throughput and turnaround time",
     delivery: "Deliveries completed, on-time rate and couriers",
+    efficiency: "Cycle time, bottleneck stage and aging orders",
+    mistakes: "Amendments, late / failed deliveries, holds",
     orders: "Per-order progress, cycle time and customer rollup",
     staff: "What each person finished this period",
     pic: "Live workload per person in charge",
@@ -2128,6 +2254,8 @@ function Reports({ user }) {
       {tab === "orders" && <OrdersReport period={period} from={from} to={to} />}
       {tab === "staff" && <StaffReport period={period} from={from} to={to} staffId={staffId} />}
       {tab === "pic" && <PicReport period={period} from={from} to={to} staffId={staffId} />}
+      {tab === "efficiency" && <EfficiencyReport period={period} from={from} to={to} />}
+      {tab === "mistakes" && <MistakesReport period={period} from={from} to={to} />}
       {!CUSTOM.includes(tab) && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 18 }}>
           {(metrics[tab] || []).map(([label, value]) => <MetricCard key={label} label={label} value={value} tone={metricTone(label)} />)}
