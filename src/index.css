@@ -66,3 +66,5 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 @keyframes wws-spin { to { transform: rotate(360deg); } }
 @keyframes wws-pulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
 @keyframes wws-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes wws-ring { 0% { box-shadow: 0 0 0 0 rgba(249,115,22,.5); } 70% { box-shadow: 0 0 0 9px rgba(249,115,22,0); } 100% { box-shadow: 0 0 0 0 rgba(249,115,22,0); } }
+@keyframes wws-toastin { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }

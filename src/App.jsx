@@ -504,7 +504,7 @@ function StackCard({ head, rows, actions }) {
 }
 
 // ─── Kanban card (board) ───────────────────────────────────────────────────────
-function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown, reorderable, rank, onSetTier }) {
+function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown, reorderable, rank, onSetTier, unread }) {
   const stage = STAGES[order.stage] || { color: C.text3 };
   const [picker, setPicker] = useState(false); // tier-change picker open on the pill
   const rBtn = (dis) => ({ cursor: dis ? "default" : "pointer", opacity: dis ? 0.3 : 1, lineHeight: 1, fontSize: 10, padding: "2px 6px", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 5, color: C.text2 });
@@ -523,9 +523,10 @@ function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown
   const next = BOARD_STAGES[BOARD_STAGES.indexOf(order.stage) + 1] || "delivered";
   return (
     <div onClick={() => onOpen(order)}
-      style={{ background: cardBg, border: `1px solid ${urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "12px 13px", cursor: "pointer", transition: "background .12s" }}
+      style={{ position: "relative", background: cardBg, border: `1px solid ${unread ? C.accent : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "12px 13px", cursor: "pointer", transition: "background .12s", boxShadow: unread ? `0 0 0 2px ${C.accent}` : "none", animation: unread ? "wws-ring 1.5s ease infinite" : "none" }}
       onMouseEnter={(e) => (e.currentTarget.style.background = cardBgHover)}
       onMouseLeave={(e) => (e.currentTarget.style.background = cardBg)}>
+      {unread && <span style={{ position: "absolute", top: -8, right: -8, display: "inline-flex", alignItems: "center", gap: 3, background: C.accent, color: "#1a1410", fontSize: 9.5, fontWeight: 800, borderRadius: 20, padding: "2px 7px", boxShadow: "0 2px 8px rgba(0,0,0,.4)" }}>● NEW</span>}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           {rank != null && <span title="Priority order in this group" style={{ flexShrink: 0, width: 22, height: 22, borderRadius: 7, background: C.accent, color: C.bg, fontWeight: 800, fontSize: 12, display: "grid", placeItems: "center" }}>{rank}</span>}
@@ -645,7 +646,7 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
     </Modal>
   );
 }
-function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refreshKey, onCount }) {
+function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refreshKey, onCount, unreadIds }) {
   const [board, setBoard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -784,7 +785,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                 {!canReorder ? (
                   <>
-                    {orders.map((o) => <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} />)}
+                    {orders.map((o) => <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} unread={unreadIds && unreadIds.has(o.id)} />)}
                     {orders.length === 0 && <Empty label="No orders" />}
                   </>
                 ) : (
@@ -813,7 +814,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
                                   onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) {} }}
                                   onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverZone(null); dropOnCard(s, o.id); }}
                                   style={{ cursor: "grab", opacity: dragId === o.id ? 0.4 : 1, marginBottom: 9 }}>
-                                  <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} reorderable rank={i + 1}
+                                  <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} reorderable rank={i + 1} unread={unreadIds && unreadIds.has(o.id)}
                                     onReorderUp={i > 0 ? () => reorderMove(s, o.id, -1) : null}
                                     onReorderDown={i < group.length - 1 ? () => reorderMove(s, o.id, 1) : null}
                                     onSetTier={(t) => setTier(s, o.id, t)} />
@@ -3337,6 +3338,9 @@ export default function App() {
   const [showCreate, setShowCreate] = useState(false);
   const [showNotifs, setShowNotifs] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [unreadIds, setUnreadIds] = useState(() => new Set());
+  const [toasts, setToasts] = useState([]);
+  const prevUnreadRef = useRef(-1);
   const [boardKey, setBoardKey] = useState(0);
   const [boardCount, setBoardCount] = useState(null);
   const vw = useViewport();
@@ -3350,10 +3354,31 @@ export default function App() {
     _token = t;
     api("GET", "/auth/me").then((d) => setUser(d.user)).catch(() => { _token = ""; localStorage.removeItem("oms_token"); }).finally(() => setBooting(false));
   }, []);
+  function pushToast(n) {
+    const id = (n && n.id) || `${Date.now()}-${Math.random()}`;
+    setToasts((t) => [...t, { id, title: n.title, orderId: n.order_id }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4500);
+  }
+  // Opening an order clears its board glow — mark that order's notifications read.
+  async function openOrder(id) {
+    setSelectedOrder(id);
+    if (unreadIds.has(id)) {
+      setUnreadIds((s) => { const n = new Set(s); n.delete(id); return n; });
+      setUnread((u) => Math.max(0, u - 1));
+      try { const d = await api("GET", "/notifications?unread_only=1"); await Promise.all((d.notifications || []).filter((n) => n.order_id === id).map((n) => api("PATCH", `/notifications/${n.id}/read`))); } catch (e) { /* best effort */ }
+    }
+  }
   useEffect(() => {
     if (!user) return;
-    const poll = () => api("GET", "/notifications?unread_only=1").then((d) => setUnread(d.unread_count || 0)).catch(() => {});
-    poll(); const t = setInterval(poll, 30000); return () => clearInterval(t);
+    const poll = () => api("GET", "/notifications?unread_only=1").then((d) => {
+      const list = d.notifications || [], count = d.unread_count || 0;
+      setUnread(count);
+      setUnreadIds(new Set(list.filter((n) => n.order_id).map((n) => n.order_id)));
+      // Pop a toast only on a real increase (not the first load), so something new can't be missed.
+      if (prevUnreadRef.current >= 0 && count > prevUnreadRef.current && list[0]) pushToast(list[0]);
+      prevUnreadRef.current = count;
+    }).catch(() => {});
+    poll(); const t = setInterval(poll, 10000); return () => clearInterval(t);
   }, [user]);
 
   // Keep the active page valid for the current role; otherwise fall back to the board.
@@ -3432,9 +3457,10 @@ export default function App() {
               </div>
             )}
             {canCreate && <Btn onClick={() => setShowCreate(true)}><Icon name="plus" size={15} /> New Order</Btn>}
-            <button onClick={() => { setShowNotifs((s) => !s); }} style={{ position: "relative", width: 38, height: 38, display: "grid", placeItems: "center", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, cursor: "pointer", color: C.text2 }}>
-              <Icon name="bell" size={17} color={C.text2} />
-              {unread > 0 && <span style={{ position: "absolute", top: -5, right: -5, minWidth: 17, height: 17, padding: "0 4px", background: C.danger, color: "#fff", borderRadius: 9, fontSize: 10.5, fontWeight: 700, display: "grid", placeItems: "center" }}>{unread}</span>}
+            <button onClick={() => { setShowNotifs((s) => !s); }} title="Notifications"
+              style={{ position: "relative", height: 38, minWidth: 38, padding: unread > 0 ? "0 12px" : 0, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, background: unread > 0 ? C.danger + "22" : C.surface, border: `1px solid ${unread > 0 ? C.danger : C.border2}`, borderRadius: 9, cursor: "pointer", color: unread > 0 ? C.danger : C.text2, fontWeight: 700, fontSize: 13, animation: unread > 0 ? "wws-ring 1.4s ease 2" : "none" }}>
+              <Icon name="bell" size={17} color={unread > 0 ? C.danger : C.text2} />
+              {unread > 0 && <span>{unread} new</span>}
             </button>
             <div style={{ display: "flex", alignItems: "center", gap: 9, paddingLeft: 12, borderLeft: `1px solid ${C.border}` }}>
               <Avatar name={user.name} color={user.avatar_color} size={32} />
@@ -3442,6 +3468,22 @@ export default function App() {
             </div>
           </div>
         </header>
+
+        {toasts.length > 0 && (
+          <div style={{ position: "fixed", top: 70, right: 18, zIndex: 1400, display: "flex", flexDirection: "column", gap: 9, width: 320, maxWidth: "calc(100vw - 36px)" }}>
+            {toasts.map((t) => (
+              <div key={t.id} onClick={() => { if (t.orderId) openOrder(t.orderId); setToasts((a) => a.filter((x) => x.id !== t.id)); }}
+                style={{ background: C.bg2, border: `1px solid ${C.order}`, borderRadius: 11, padding: "11px 13px", display: "flex", gap: 10, alignItems: "flex-start", boxShadow: "0 14px 40px rgba(0,0,0,.5)", cursor: "pointer", animation: "wws-toastin .25s ease" }}>
+                <Icon name="bell" size={17} color={C.order} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{t.title}</div>
+                  <div style={{ fontSize: 11.5, color: C.text3, marginTop: 2 }}>just now · tap to open</div>
+                </div>
+                <button onClick={(e) => { e.stopPropagation(); setToasts((a) => a.filter((x) => x.id !== t.id)); }} style={{ background: "none", border: "none", color: C.text3, cursor: "pointer", fontSize: 15, lineHeight: 1 }}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
 
         {view === "board" && (
           <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", padding: isMobile ? "12px 14px 0" : "12px 26px 0" }}>
@@ -3459,9 +3501,9 @@ export default function App() {
         )}
 
         <main style={{ flex: 1, padding: isMobile ? "16px 14px 32px" : "20px 26px 40px", overflowX: "auto" }}>
-          {view === "board" && <OrderBoard user={user} search={search} weekOnly={weekOnly} statusFilter={statusFilter} refreshKey={boardKey} onOpenOrder={(o) => setSelectedOrder(o.id)} onCount={setBoardCount} />}
-          {view === "dashboard" && <Dashboard onOpenOrder={(id) => setSelectedOrder(id)} />}
-          {view === "delivery" && <Delivery user={user} onOpenOrder={(id) => setSelectedOrder(id)} />}
+          {view === "board" && <OrderBoard user={user} search={search} weekOnly={weekOnly} statusFilter={statusFilter} refreshKey={boardKey} onOpenOrder={(o) => openOrder(o.id)} onCount={setBoardCount} unreadIds={unreadIds} />}
+          {view === "dashboard" && <Dashboard onOpenOrder={(id) => openOrder(id)} />}
+          {view === "delivery" && <Delivery user={user} onOpenOrder={(id) => openOrder(id)} />}
           {view === "reports" && <Reports user={user} />}
           {view === "messages" && <Messages user={user} />}
           {view === "remarks" && <Remarks user={user} />}
