@@ -1182,6 +1182,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
   const [notesSaved, setNotesSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false); // Details "More" expander — keep the wall collapsed
   const canMove = ["super_admin"].includes(user.role);
   // Back-office Admin (deputy) may route an order — set PIC + priority/importance —
   // but not move stages, hold/flag, or cancel (those stay canMove = Boss/Ops).
@@ -1331,10 +1332,10 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
 
       {tab === "details" && (
         <div>
+          {/* Need-to-know first; the rest tucks behind "More" so Details isn't a wall. */}
           <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: 14 }}>
             {order.customer_name != null && <LV label="Customer" v={order.customer_name} />}
-            {order.customer_name != null && <LV label="Contact" v={order.customer_contact || "—"} />}
-            {order.customer_name != null && <LV label="Address" v={order.delivery_address || "—"} />}
+            <LV label="Delivery" v={<span style={{ color: countdown(order.required_delivery_date).tone }}>{fmtDay(order.required_delivery_date)} · {countdown(order.required_delivery_date).text}</span>} />
             <LV label="Priority" v={
               canRoute
                 ? <select value={order.priority || "normal"} onChange={(e) => setPriority(e.target.value)} style={{ padding: "5px 9px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13.5, fontWeight: 700, color: order.priority === "urgent" ? C.danger : C.text2 }}><option value="normal" style={{ background: C.bg2, color: C.text }}>Normal</option><option value="urgent" style={{ background: C.bg2, color: C.text }}>Urgent</option></select>
@@ -1345,15 +1346,21 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
                 ? <select value={order.importance || "standard"} onChange={(e) => setImportance(e.target.value)} style={{ padding: "5px 9px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13.5, fontWeight: 700, color: impCfg(order.importance).color }}>{IMPORTANCE_OPTS.map((o) => <option key={o.value} value={o.value} style={{ background: C.bg2, color: C.text }}>{o.label}</option>)}</select>
                 : <Pill color={impCfg(order.importance).color}>{impCfg(order.importance).label}</Pill>
             } />
-            <LV label="Order date" v={order.order_date ? fmtDay(order.order_date) : "—"} />
-            <LV label="Delivery" v={<span style={{ color: countdown(order.required_delivery_date).tone }}>{fmtDay(order.required_delivery_date)} · {countdown(order.required_delivery_date).text}</span>} />
-            <LV label="Expiry" v={order.expiry_date ? fmtDay(order.expiry_date) : "—"} />
             <LV label="Person in charge" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />
-            <LV label="Source" v={order.source === "sql_account" ? "Auto-imported" : "Manual entry"} />
-            {delivery && <LV label="Driver" v={delivery.delivery_man_name || "Not assigned yet"} />}
-            {delivery && delivery.scheduled_date && <LV label="Scheduled" v={fmtDay(delivery.scheduled_date)} />}
-            {order.customer_name != null && delivery && delivery.address && <LV label="Delivery address" v={delivery.address} />}
           </div>
+          <button onClick={() => setMoreOpen((o) => !o)} style={{ marginTop: 14, background: "none", border: `1px solid ${C.border2}`, color: C.text2, borderRadius: 8, fontSize: 12.5, padding: "7px 12px", cursor: "pointer" }}>{moreOpen ? "Hide details ▴" : "More details ▾"}</button>
+          {moreOpen && (
+            <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: 14, marginTop: 14 }}>
+              {order.customer_name != null && <LV label="Contact" v={order.customer_contact || "—"} />}
+              {order.customer_name != null && <LV label="Address" v={order.delivery_address || "—"} />}
+              <LV label="Order date" v={order.order_date ? fmtDay(order.order_date) : "—"} />
+              <LV label="Expiry" v={order.expiry_date ? fmtDay(order.expiry_date) : "—"} />
+              <LV label="Source" v={order.source === "sql_account" ? "Auto-imported" : "Manual entry"} />
+              {delivery && <LV label="Driver" v={delivery.delivery_man_name || "Not assigned yet"} />}
+              {delivery && delivery.scheduled_date && <LV label="Scheduled" v={fmtDay(delivery.scheduled_date)} />}
+              {order.customer_name != null && delivery && delivery.address && <LV label="Delivery address" v={delivery.address} />}
+            </div>
+          )}
           <div style={{ marginTop: 18 }}>
             <div style={{ fontSize: 11, color: C.text3, fontWeight: 600, marginBottom: 6, letterSpacing: 0.4 }}>INTERNAL NOTES</div>
             {canMove ? (
