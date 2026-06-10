@@ -91,6 +91,13 @@ const NON_ADMIN_ROLES = ["super_admin", "operations_controller", "production_lea
 // them — listed just below Delivery in the nav.)
 const BOARD_ROLES = NON_ADMIN_ROLES.filter((r) => r !== "delivery_team");
 
+// Reward scorecard / leaderboard — built 2026-06-10, parked for future. Flip to
+// true to re-enable: the Reports "Scoreboard" tab, the Floor Display Board/Scoreboard
+// toggle, and the System Settings weight editor all come back. The components
+// (ScoreboardReport, FloorScoreboard), the weight settings code and the backend
+// /reports/scorecard + system_settings weights stay in place, just unreachable.
+const REWARD_SYSTEM_ENABLED = false;
+
 // Customer importance tiers — mirrors the backend `importance` column (low → high).
 // Production-floor roles see this in place of the customer name. To rename a tier,
 // change the label here (and the CHECK values in schema.sql if you add/remove one).
@@ -975,12 +982,14 @@ function FloorDisplay({ onExit }) {
             <span style={{ color: C.text }}>WAWASAN </span><span style={{ color: C.accent }}>{view === "scoreboard" ? "SCOREBOARD" : "PRODUCTION FLOOR"}</span>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4 }}>
-          {[["board", "Board"], ["scoreboard", "Scoreboard"]].map(([k, lbl]) => {
-            const on = view === k;
-            return <button key={k} onClick={() => setView(k)} style={{ background: on ? C.surface2 : "transparent", border: "none", borderRadius: 7, padding: "9px 16px", cursor: "pointer", fontSize: 14, fontWeight: on ? 800 : 600, color: on ? C.accent : C.text2 }}>{lbl}</button>;
-          })}
-        </div>
+        {REWARD_SYSTEM_ENABLED && (
+          <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4 }}>
+            {[["board", "Board"], ["scoreboard", "Scoreboard"]].map(([k, lbl]) => {
+              const on = view === k;
+              return <button key={k} onClick={() => setView(k)} style={{ background: on ? C.surface2 : "transparent", border: "none", borderRadius: 7, padding: "9px 16px", cursor: "pointer", fontSize: 14, fontWeight: on ? 800 : 600, color: on ? C.accent : C.text2 }}>{lbl}</button>;
+            })}
+          </div>
+        )}
         <StatCard label="Completed today" value={stats.completed_today} color={C.green} />
         <StatCard label="Active orders" value={stats.active} color={C.accent} />
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginLeft: 6 }}>
@@ -1003,7 +1012,7 @@ function FloorDisplay({ onExit }) {
 
       {/* Body */}
       <div style={{ flex: 1, display: "flex", gap: 16, minHeight: 0 }}>
-        {view === "scoreboard" && <FloorScoreboard />}
+        {REWARD_SYSTEM_ENABLED && view === "scoreboard" && <FloorScoreboard />}
         {view === "board" && (<>
         <div style={{ flex: 1, display: "grid", gridTemplateColumns: `repeat(${cols.length}, 1fr)`, gap: 14, minHeight: 0 }}>
           {cols.map((s) => {
@@ -2335,8 +2344,9 @@ function MoMReport() {
 
 // ─── Reports ─────────────────────────────────────────────────────────────────
 function Reports({ user }) {
-  const tabsForRole = user.role === "production_lead" ? ["production", "packing", "staff", "pic", "scorecard"]
-    : ["production", "packing", "delivery", "efficiency", "mistakes", "scorecard", "trend", "orders", "staff", "pic"];
+  const tabsForRole = user.role === "production_lead"
+    ? ["production", "packing", "staff", "pic", ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : [])]
+    : ["production", "packing", "delivery", "efficiency", "mistakes", ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : []), "trend", "orders", "staff", "pic"];
   const CUSTOM = ["orders", "staff", "pic", "efficiency", "mistakes", "scorecard", "trend"]; // tabs with their own component (no metric cards/trend)
   const TAB_LABEL = { staff: "Staff", pic: "Person in charge", efficiency: "Efficiency", mistakes: "Mistakes", scorecard: "Scoreboard", trend: "Trend" };
   const PERIOD_LABEL = { daily: "Today", weekly: "This week", monthly: "This month" };
@@ -3502,6 +3512,7 @@ function Settings() {
         </div>
       </Card>
 
+      {REWARD_SYSTEM_ENABLED && (
       <Card>
         <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 6 }}>Reward scoreboard weights</h3>
         <p style={{ fontSize: 12.5, color: C.text3, marginBottom: 14 }}>How the monthly reward score is blended for the Scoreboard report and the Floor Display. Drag to set what matters most — the shares re-balance to 100% automatically.</p>
@@ -3527,6 +3538,7 @@ function Settings() {
           </>
         )}
       </Card>
+      )}
 
       <Card>
         <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 6 }}>Holiday calendar</h3>
