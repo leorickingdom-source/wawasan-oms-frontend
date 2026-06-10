@@ -1666,8 +1666,105 @@ function OrdersReport({ period, from, to }) {
 }
 
 // Per-person productivity: who finished stages / made items this period.
+// Deep drill-down for ONE person, opened from the Staff table. Volume / speed /
+// reliability — the two headline volume numbers are benchmarked against the team
+// average so a count actually reads as good/bad — plus a recent-activity feed and
+// a per-staff CSV for the analyst/accounting crowd. Backed by /reports/staff/:id.
+function StaffDetail({ staffId, period, from, to, onClose }) {
+  const [d, setD] = useState(null);
+  useEffect(() => {
+    setD(null);
+    api("GET", `/reports/staff/${staffId}?${reportQuery(period, from, to)}`).then(setD).catch(() => setD(false));
+  }, [staffId, period, from, to]);
+
+  const secT = { fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".5px", color: C.text3, margin: "16px 2px 8px" };
+  const fmtWhen = (s) => s ? new Date(s).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+  function benchNode(value, avg) {
+    if (!avg || avg <= 0) return null;
+    const pct = Math.round(((value - avg) / avg) * 100);
+    const up = pct >= 0;
+    return <div style={{ fontSize: 11.5, fontWeight: 700, marginTop: 4, color: up ? C.green : C.danger }}>{up ? "▲ +" : "▼ "}{pct}% vs team avg {avg}</div>;
+  }
+  function exportCsv() {
+    if (!d || !d.staff) return;
+    const rows = [
+      ["Staff", d.staff.name], ["Role", ROLE_LABELS[d.staff.role] || d.staff.role], ["Period", d.period], [],
+      ["VOLUME"],
+      ["Stages completed", d.volume.completions], ["Team avg stages", d.benchmark.avg_completions],
+      ["Items made", d.volume.items_made], ["Items packed", d.volume.items_packed], ["Items total", d.volume.items_total], ["Team avg items", d.benchmark.avg_items],
+      ["Produced", d.volume.breakdown.produced], ["Packed", d.volume.breakdown.packed], ["Delivered", d.volume.breakdown.delivered], ["Routed", d.volume.breakdown.routed], [],
+      ["SPEED"], ["Active days", d.speed.active_days], ["Items per active day", d.speed.items_per_active_day], [],
+      ["RELIABILITY"], ["On-time rate %", d.reliability.on_time_rate ?? "—"], ["On-time / total", `${d.reliability.on_time_count}/${d.reliability.on_time_total}`],
+      ["Reworks (sent back)", d.reliability.reworks], ["Amendments made", d.reliability.amendments], [],
+      ["WORKLOAD (live)"], ["Active as PIC", d.workload.active], ["Overdue", d.workload.overdue], ["On hold", d.workload.on_hold],
+    ];
+    downloadCsv(`staff-${String(d.staff.name).replace(/\s+/g, "-").toLowerCase()}-${d.period}.csv`, rows);
+  }
+
+  return (
+    <Modal open onClose={onClose} title={d && d.staff ? d.staff.name : "Staff detail"} width={660}>
+      {d == null && <Loading label="Loading staff detail…" />}
+      {d === false && <Empty label="Could not load this person." />}
+      {d && d.staff && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+            <Avatar name={d.staff.name} color={d.staff.avatar_color} size={42} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: C.text }}>{d.staff.name}</div>
+              <div style={{ fontSize: 12.5, color: C.text2 }}>{ROLE_LABELS[d.staff.role] || d.staff.role}</div>
+            </div>
+            <Btn variant="soft" size="sm" onClick={exportCsv}>Export CSV</Btn>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+            <Pill color={C.order}>{d.workload.active} active as PIC</Pill>
+            {d.workload.overdue > 0 && <Pill color={C.danger}>{d.workload.overdue} overdue</Pill>}
+            {d.workload.on_hold > 0 && <Pill color={C.hold}>{d.workload.on_hold} on hold</Pill>}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
+            <div><MetricCard label="Stages completed" value={d.volume.completions} tone={C.accent} />{benchNode(d.volume.completions, d.benchmark.avg_completions)}</div>
+            <div><MetricCard label="Items made + packed" value={d.volume.items_total} tone={C.production} />{benchNode(d.volume.items_total, d.benchmark.avg_items)}</div>
+            <MetricCard label="On-time delivery" value={d.reliability.on_time_rate == null ? "—" : `${d.reliability.on_time_rate}%`} tone={C.ready} />
+          </div>
+
+          <div style={secT}>Breakdown — stages moved</div>
+          <Card style={{ padding: 14 }}>
+            {[["Produced → packing", d.volume.breakdown.produced], ["Packed → ready", d.volume.breakdown.packed], ["Delivered", d.volume.breakdown.delivered], ["Routed → production", d.volume.breakdown.routed]].map(([l, v]) => (
+              <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: 13, color: C.text2 }}><span>{l}</span><span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{v}</span></div>
+            ))}
+            <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 6, paddingTop: 8, fontSize: 12.5, color: C.text3 }}>{d.speed.active_days} active days · {d.speed.items_per_active_day} items/day</div>
+          </Card>
+
+          <div style={secT}>Quality flags</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Pill color={d.reliability.reworks > 0 ? C.hold : C.text3}>{d.reliability.reworks} reworks</Pill>
+            <Pill color={d.reliability.amendments > 0 ? C.hold : C.text3}>{d.reliability.amendments} amendments</Pill>
+            <Pill color={C.text2}>{d.reliability.on_time_count}/{d.reliability.on_time_total} on time</Pill>
+          </div>
+
+          {d.trend && d.trend.length > 0 && (<><div style={secT}>Daily output — 14 days</div><TrendChart data={d.trend} color={C.accent} label="Completed" /></>)}
+
+          <div style={secT}>Recent activity</div>
+          <Card style={{ padding: 6 }}>
+            {(!d.activity || d.activity.length === 0)
+              ? <Empty label="No recent activity." />
+              : d.activity.map((a, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "7px 10px", borderBottom: i < d.activity.length - 1 ? `1px solid ${C.border}` : "none", fontSize: 12.5 }}>
+                  <span style={{ color: C.text }}>{a.details || a.action}</span>
+                  {a.invoice_number && <span style={{ fontFamily: MONO, color: C.accent2 }}>{a.invoice_number}</span>}
+                  <span style={{ marginLeft: "auto", color: C.text3, whiteSpace: "nowrap" }}>{fmtWhen(a.created_at)}</span>
+                </div>
+              ))}
+          </Card>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function StaffReport({ period, from, to, staffId }) {
   const [raw, setRaw] = useState(null);
+  const [openId, setOpenId] = useState(null);
   useEffect(() => { setRaw(null); api("GET", `/reports/staff?${reportQuery(period, from, to)}`).then((d) => setRaw(d.staff || [])).catch(() => setRaw([])); }, [period, from, to]);
   const data = raw == null ? null : (staffId ? raw.filter((s) => s.id === staffId) : raw);
   function exportCsv() {
@@ -1680,25 +1777,28 @@ function StaffReport({ period, from, to, staffId }) {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-        <span style={{ fontSize: 13, color: C.text3 }}>{data.length} people · work each person finished this period</span>
+        <span style={{ fontSize: 13, color: C.text3 }}>{data.length} people · tap a name for full detail</span>
         <Btn variant="soft" size="sm" onClick={exportCsv}>Export staff CSV</Btn>
       </div>
       <Card style={{ padding: 0, overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead><tr style={{ background: C.bg2 }}>{["Name", "Role", "Stages completed", "Items done", "Reworks"].map((h, i) => <th key={h} style={{ textAlign: i > 1 ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+          <thead><tr style={{ background: C.bg2 }}>{["Name", "Role", "Stages completed", "Items done", "Reworks"].map((h, i) => <th key={h} style={{ textAlign: i > 1 ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}<th style={{ borderBottom: `1px solid ${C.border}` }} /></tr></thead>
           <tbody>
             {data.map((s) => (
-              <tr key={s.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+              <tr key={s.id} onClick={() => setOpenId(s.id)} title="View full detail" style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = C.surface2)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                 <td style={{ padding: "9px 14px", color: C.text }}><span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}><Avatar name={s.name} color={s.avatar_color} size={24} />{s.name}</span></td>
                 <td style={{ padding: "9px 14px", color: C.text2 }}>{ROLE_LABELS[s.role] || s.role}</td>
                 <td style={{ padding: "9px 14px", textAlign: "right", color: C.text, fontWeight: 700 }}>{s.completions}</td>
                 <td style={{ padding: "9px 14px", textAlign: "right", color: C.text2 }}>{s.items_done}</td>
                 <td style={{ padding: "9px 14px", textAlign: "right", color: s.reworks > 0 ? C.danger : C.text3 }}>{s.reworks}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", color: C.accent2, fontFamily: MONO }}>›</td>
               </tr>
             ))}
           </tbody>
         </table>
       </Card>
+      {openId && <StaffDetail staffId={openId} period={period} from={from} to={to} onClose={() => setOpenId(null)} />}
     </div>
   );
 }
