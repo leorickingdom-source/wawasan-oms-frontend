@@ -232,13 +232,13 @@ function printPickingSlip(order) {
   const rows = (order.items || []).map((it) =>
     `<tr><td class="m">${escHtml(it.sku)}</td><td>${escHtml(it.name)}</td><td class="q">${Math.round(it.quantity)}</td><td>${escHtml(it.unit || "pcs")}</td><td class="chk">&#9744;</td></tr>`
   ).join("");
-  const flame = '<svg viewBox="0 0 24 24" width="27" height="27" fill="none" stroke="#231304" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5c.5 3-1.8 4.7-3 6.2C7.7 10.4 7 11.9 7 13.6A5 5 0 0 0 17 14c0-2-1-3.7-2.5-5 .3 1.4-.3 2.4-1 2.9.6-2.4-.8-4.6-1.5-5.4-.2 1.5-1 2.2-1.7 2.8.5-2.3.7-4.7 1.7-6.8z"/></svg>';
+  const flame = `<img src="${location.origin}/logo.png" alt="WAWASAN LTS TRADING SDN BHD" style="height:44px;width:auto;display:block"/>`;
   const html = (`<!doctype html><html><head><meta charset="utf-8"><title>Picking Slip ${escHtml(order.invoice_number)}</title>
 <style>
   *{box-sizing:border-box} body{font:15.5px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;color:#111;margin:30px}
   .lh{display:flex;align-items:center;gap:14px;margin-bottom:6px}
-  .mark{width:46px;height:46px;border-radius:13px;background:linear-gradient(145deg,#fb923c,#f97316);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.2);flex-shrink:0}
-  .brand{font-size:23px;font-weight:800;letter-spacing:.5px} .doc{font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#888}
+  .mark{width:44px;height:44px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .brand{font-size:17px;font-weight:800;letter-spacing:.3px} .doc{font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#888}
   .inv{margin-left:auto;text-align:right;font-family:ui-monospace,Consolas,monospace;font-size:18px;font-weight:700}
   .rule{border:none;border-top:2px solid #f97316;margin:10px 0 18px}
   .meta{display:flex;gap:36px;flex-wrap:wrap;margin-bottom:16px} .meta div{font-size:15px} .meta b{display:block;color:#888;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.4px;margin-bottom:1px}
@@ -248,7 +248,7 @@ function printPickingSlip(order) {
   .sign{display:flex;gap:34px;margin-top:46px} .sign>div{flex:1} .sl{border-bottom:1.5px solid #999;height:34px;margin-bottom:7px} .lbl{font-size:12px;color:#666;font-weight:600}
   @media print{body{margin:12mm}}
 </style></head><body>
-  <div class="lh"><div class="mark">${flame}</div><div><div class="brand">WAWASAN CANDLE</div><div class="doc">Order Picking Slip</div></div><div class="inv">${escHtml(order.invoice_number)}</div></div>
+  <div class="lh"><div class="mark">${flame}</div><div><div class="brand">WAWASAN LTS TRADING SDN BHD</div><div class="doc">Order Picking Slip</div></div><div class="inv">${escHtml(order.invoice_number)}</div></div>
   <hr class="rule"/>
   <div class="meta">
     <div><b>Customer</b>${escHtml(order.customer_name || impCfg(order.importance).label)}</div>
@@ -288,7 +288,7 @@ function printRouteList(deliveries) {
   th{font-size:11px;text-transform:uppercase;color:#888} .m{font-family:ui-monospace,Consolas,monospace;color:#555} .n{color:#888;width:26px} .chk{width:30px;text-align:center;font-size:17px}
   @media print{body{margin:12mm}}
 </style></head><body>
-  <h1>Delivery Route List</h1><div class="sub">Wawasan Candle — ${escHtml(new Date().toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "short", year: "numeric" }))} · ${(deliveries || []).length} stops</div>
+  <h1>Delivery Route List</h1><div class="sub">WAWASAN LTS TRADING SDN BHD — ${escHtml(new Date().toLocaleDateString("en-GB", { weekday: "long", day: "2-digit", month: "short", year: "numeric" }))} · ${(deliveries || []).length} stops</div>
   <table><thead><tr><th>#</th><th>Invoice</th><th>Customer</th><th>Address</th><th>Driver</th><th>Done</th></tr></thead>
   <tbody>${rows || '<tr><td colspan="6">No deliveries scheduled.</td></tr>'}</tbody></table>
   <p style="margin-top:22px;color:#888;font-size:12px">Printed ${escHtml(new Date().toLocaleString())}</p>
@@ -408,15 +408,14 @@ function Icon({ name, size = 18, color = "currentColor", strokeWidth = 1.9, styl
 }
 
 // ─── Primitives ──────────────────────────────────────────────────────────────
+// WAWASAN LTS TRADING SDN BHD brand mark — the client's logo (public/logo.png).
+// Its exterior white is already keyed to transparent, so no clip is needed;
+// objectFit:contain keeps the flame tongues that extend past the circle.
 function Logo({ size = 38 }) {
   return (
-    <div style={{
-      width: size, height: size, borderRadius: size * 0.28, display: "grid", placeItems: "center",
-      background: `linear-gradient(145deg, ${C.accent2}, ${C.accent})`,
-      boxShadow: `0 0 18px ${C.accent}55, 0 4px 10px rgba(0,0,0,.45)`, flexShrink: 0,
-    }}>
-      <Icon name="flame" size={size * 0.56} color="#231304" strokeWidth={1.6} />
-    </div>
+    <img src="/logo.png" alt="WAWASAN LTS TRADING SDN BHD" width={size} height={size}
+      style={{ flexShrink: 0, display: "block", objectFit: "contain",
+        filter: "drop-shadow(0 2px 5px rgba(0,0,0,.45))" }} />
   );
 }
 function Avatar({ name = "?", color = C.accent, size = 30 }) {
@@ -1046,7 +1045,7 @@ function FloorDisplay({ onExit }) {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <Logo size={46} />
           <div style={{ fontSize: 36, fontWeight: 800, letterSpacing: 0.5 }}>
-            <span style={{ color: C.text }}>WAWASAN </span><span style={{ color: C.accent }}>{view === "scoreboard" ? "SCOREBOARD" : "PRODUCTION FLOOR"}</span>
+            <span style={{ color: C.text }}>WAWASAN LTS </span><span style={{ color: C.accent }}>{view === "scoreboard" ? "SCOREBOARD" : "PRODUCTION FLOOR"}</span>
           </div>
         </div>
         {REWARD_SYSTEM_ENABLED && (
@@ -2478,7 +2477,7 @@ function Reports({ user }) {
     setBusy("csv");
     try {
       const data = await fetchReportData();
-      const rows = [["Wawasan Candle — Reports"], ["Range", rangeLabel], []];
+      const rows = [["WAWASAN LTS TRADING SDN BHD — Reports"], ["Range", rangeLabel], []];
       for (const key of tabsForRole.filter((k) => metricDefs[k])) {
         const dd = data[key] || {};
         rows.push([META[key]], ["Metric", "Value"], ...kpiRows(key, dd));
@@ -2531,7 +2530,7 @@ function Reports({ user }) {
       const need = (h) => { if (y + h > PH - M) newPage(); };
       paintBg();
       doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(...G.text);
-      doc.text("Wawasan Candle - Reports", M, y + 5);
+      doc.text("WAWASAN LTS TRADING SDN BHD - Reports", M, y + 5);
       doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(...G.text3);
       doc.text(`Department performance  -  ${ascii(rangeLabel)}`, M, y + 11);
       y += 20;
@@ -3735,10 +3734,10 @@ function LoginPage({ onLogin }) {
       <form onSubmit={submit} style={{ width: 380, background: C.bg2, border: `1px solid ${C.border2}`, borderRadius: 18, padding: "36px 34px", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 26 }}>
           <Logo size={52} />
-          <div style={{ fontSize: 21, fontWeight: 800, color: C.text, marginTop: 14 }}>Wawasan Candle</div>
-          <div style={{ fontSize: 13, color: C.text3, marginTop: 2 }}>Order Management System</div>
+          <div style={{ fontSize: 16.5, fontWeight: 800, color: C.text, marginTop: 14, letterSpacing: 0.3, textAlign: "center" }}>WAWASAN LTS TRADING SDN BHD</div>
+          <div style={{ fontSize: 13, color: C.text3, marginTop: 3 }}>Order Management System</div>
         </div>
-        <Field label="Email" type="email" name="email" autoComplete="username" value={email} onChange={setEmail} required placeholder="you@wawasancandle.com" />
+        <Field label="Email" type="email" name="email" autoComplete="username" value={email} onChange={setEmail} required placeholder="you@email.com" />
         <Field label="Password" type="password" name="current-password" autoComplete="current-password" value={password} onChange={setPassword} required />
         <p style={{ fontSize: 12, color: C.text3, margin: "-2px 0 14px" }}>Forgot your password? Ask your manager (Boss or Ops) to reset it for you.</p>
         {err && <p style={{ color: "#fca5a5", fontSize: 13, margin: "-4px 0 12px" }}>{err}</p>}
@@ -3855,7 +3854,7 @@ export default function App() {
       <aside style={{ width: 248, background: C.bg2, borderRight: `1px solid ${C.border}`, display: "flex", flexDirection: "column", ...(isMobile ? { position: "fixed", top: 0, left: 0, height: "100dvh", zIndex: 1300, transform: navOpen ? "translateX(0)" : "translateX(-110%)", transition: "transform .22s ease", boxShadow: navOpen ? "0 0 50px rgba(0,0,0,.6)" : "none" } : { position: "sticky", top: 0, height: "100vh" }) }}>
         <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "20px 20px 18px" }}>
           <Logo size={38} />
-          <div><div style={{ fontSize: 15, fontWeight: 800, color: C.text, letterSpacing: 0.4 }}>WAWASAN</div><div style={{ fontSize: 10.5, fontWeight: 600, color: C.text3, letterSpacing: 1.5 }}>CANDLE</div></div>
+          <div><div style={{ fontSize: 15, fontWeight: 800, color: C.text, letterSpacing: 0.4 }}>WAWASAN LTS</div><div style={{ fontSize: 9.5, fontWeight: 700, color: C.text3, letterSpacing: 1.2 }}>TRADING SDN BHD</div></div>
         </div>
         {nav.some((n) => n.id === "floor") && (
           <button onClick={() => { setPage("floor"); setNavOpen(false); }} title="Open the full-screen production wall display"
