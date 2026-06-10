@@ -3030,8 +3030,10 @@ function Delivery({ user, onOpenOrder }) {
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"}</td>
                   <td style={{ padding: "11px 16px", color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</td>
                   <td style={{ padding: "11px 16px" }}>
-                    <Pill color={tone[dv.status] || C.text3}>{statusLabel[dv.status] || dv.status}</Pill>
-                    <div style={{ marginTop: 4 }}>{proofCell(dv, true)}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <Pill color={tone[dv.status] || C.text3}>{statusLabel[dv.status] || dv.status}</Pill>
+                      {proofCell(dv, true)}
+                    </div>
                   </td>
                   <td style={{ padding: "11px 16px" }}>
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
