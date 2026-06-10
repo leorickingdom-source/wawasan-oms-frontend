@@ -517,7 +517,7 @@ function StackCard({ head, rows, actions }) {
 }
 
 // ─── Kanban card (board) ───────────────────────────────────────────────────────
-function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown, reorderable, rank, onSetTier, unread }) {
+function KanbanCard({ order, user, onOpen, onAdvance, onMoveBack, onReorderUp, onReorderDown, reorderable, rank, onSetTier, unread }) {
   const stage = STAGES[order.stage] || { color: C.text3 };
   const [picker, setPicker] = useState(false); // tier-change picker open on the pill
   const rBtn = (dis) => ({ cursor: dis ? "default" : "pointer", opacity: dis ? 0.3 : 1, lineHeight: 1, fontSize: 10, padding: "2px 6px", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 5, color: C.text2 });
@@ -599,6 +599,7 @@ function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown
               <button onClick={() => onReorderDown && onReorderDown()} disabled={!onReorderDown} style={rBtn(!onReorderDown)} aria-label="Move down">▼</button>
             </div>
           )}
+          {onMoveBack && ((user.role === "super_admin" && order.stage !== "order") || (user.role === "production_lead" && order.stage === "packing")) && !order.on_hold && <button onClick={() => onMoveBack(order)} title="Move back a stage…" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: 9, background: "#2a1414", border: `1px solid #5b2526`, color: C.danger, cursor: "pointer", fontSize: 16, lineHeight: 1 }}>↩</button>}
           {canAdvanceStage(user.role, order.stage) && !order.on_hold && <IconBtn icon="arrowRight" onClick={() => onAdvance(order, next)} title={(user.role === "super_admin") ? `Advance to ${(STAGE_LABELS[next] || {}).label || next}` : (ADVANCE_LABEL[order.stage] || "Advance")} color={C.ready} bg="#13301f" border="#1f5036" />}
           <IconBtn icon="dots" onClick={() => onOpen(order)} title="Details & actions" />
         </div>
@@ -659,11 +660,43 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
     </Modal>
   );
 }
+// Reverse a card to an earlier stage — prompted from the board's red ↩ arrow.
+// Forward is the green arrow; reversing asks WHICH earlier stage + WHY (timeline).
+function MoveBackModal({ order, user, onConfirm, onClose }) {
+  const idx = BOARD_STAGES.indexOf(order.stage);
+  let opts = idx > 0 ? BOARD_STAGES.slice(0, idx) : [];
+  if (user.role === "production_lead") opts = order.stage === "packing" ? ["production"] : [];
+  const [to, setTo] = useState(opts.length ? opts[opts.length - 1] : "");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function go() { if (!to || !reason.trim()) return; setBusy(true); try { await onConfirm(to, reason.trim()); } finally { setBusy(false); } }
+  return (
+    <Modal open onClose={onClose} title="Move order back" width={460}>
+      <div style={{ fontSize: 14, marginBottom: 14 }}>
+        <span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{order.invoice_number}</span>
+        <span style={{ color: C.text2 }}> · now in {(STAGE_LABELS[order.stage] || {}).label || order.stage}</span>
+      </div>
+      <div style={{ fontSize: 12, color: C.text3, fontWeight: 600, marginBottom: 6, letterSpacing: 0.3 }}>MOVE BACK TO</div>
+      <select value={to} onChange={(e) => setTo(e.target.value)} style={{ width: "100%", padding: "10px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text, marginBottom: 14 }}>
+        {opts.length === 0 && <option value="">No earlier stage</option>}
+        {opts.map((s) => <option key={s} value={s} style={{ background: C.bg2 }}>{(STAGE_LABELS[s] || {}).label || s}</option>)}
+      </select>
+      <div style={{ fontSize: 12, color: C.text3, fontWeight: 600, marginBottom: 6, letterSpacing: 0.3 }}>REASON <span style={{ color: C.danger }}>*</span></div>
+      <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Why is it going back? (saved to the timeline)" style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text, marginBottom: 18 }} />
+      <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn variant="danger" onClick={go} disabled={!to || !reason.trim() || busy}>{busy ? "Moving…" : `↩ Move back${to ? ` to ${(STAGE_LABELS[to] || {}).label}` : ""}`}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refreshKey, onCount, unreadIds }) {
   const [board, setBoard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [confirmAdv, setConfirmAdv] = useState(null);
+  const [moveBack, setMoveBack] = useState(null); // order being reversed via the red ↩ arrow
   const [dragId, setDragId] = useState(null); // card being dragged
   const [dragOverZone, setDragOverZone] = useState(null); // tier drop-zone hovered (key "stage:tier")
   const canReorder = ["super_admin", "admin", "production_lead"].includes(user.role);
@@ -688,6 +721,12 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
   async function doAdvance() {
     const { order, to } = confirmAdv;
     try { await api("POST", `/orders/${order.id}/move`, { to_stage: to }); setConfirmAdv(null); load(); }
+    catch (e) { alert(e.message); }
+  }
+  function reverse(order) { setMoveBack(order); }
+  async function doReverse(to, reason) {
+    const o = moveBack; if (!o || !to) return;
+    try { await api("POST", `/orders/${o.id}/move`, { to_stage: to, reason: reason || undefined }); setMoveBack(null); load(); }
     catch (e) { alert(e.message); }
   }
   // Each column is grouped into priority tiers (VIP > Priority > Standard); within a tier the
@@ -798,7 +837,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                 {!canReorder ? (
                   <>
-                    {orders.map((o) => <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} unread={unreadIds && unreadIds.has(o.id)} />)}
+                    {orders.map((o) => <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} onMoveBack={reverse} unread={unreadIds && unreadIds.has(o.id)} />)}
                     {orders.length === 0 && <Empty label="No orders" />}
                   </>
                 ) : (
@@ -836,7 +875,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
                                     onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) {} }}
                                     onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverZone(null); dropOnCard(s, o.id); }}
                                     style={{ cursor: "grab", opacity: dragId === o.id ? 0.4 : 1, marginBottom: 9 }}>
-                                    <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} reorderable rank={i + 1} unread={unreadIds && unreadIds.has(o.id)}
+                                    <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} onMoveBack={reverse} reorderable rank={i + 1} unread={unreadIds && unreadIds.has(o.id)}
                                       onReorderUp={i > 0 ? () => reorderMove(s, o.id, -1) : null}
                                       onReorderDown={i < group.length - 1 ? () => reorderMove(s, o.id, 1) : null}
                                       onSetTier={(t) => setTier(s, o.id, t)} />
@@ -854,6 +893,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
         })}
       </div>
       {confirmAdv && <AdvanceConfirmModal order={confirmAdv.order} to={confirmAdv.to} user={user} onConfirm={doAdvance} onClose={() => setConfirmAdv(null)} />}
+      {moveBack && <MoveBackModal order={moveBack} user={user} onConfirm={doReverse} onClose={() => setMoveBack(null)} />}
     </div>
   );
 }
@@ -1326,10 +1366,12 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
       )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <span style={{ fontSize: 13, color: C.text3 }}>{order.created_by_name ? `Created by ${order.created_by_name}` : ""} {order.order_date ? `· ${fmtDay(order.order_date)}` : ""}</span>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Btn variant="ghost" size="sm" onClick={() => printPickingSlip(order)}>Print picking slip</Btn>
-          <Btn variant="ghost" size="sm" onClick={() => printDeliveryOrders([{ order, delivery }])}>Print delivery order</Btn>
-        </div>
+        {!isFloor && (
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn variant="ghost" size="sm" onClick={() => printPickingSlip(order)}>Print picking slip</Btn>
+            <Btn variant="ghost" size="sm" onClick={() => printDeliveryOrders([{ order, delivery }])}>Print delivery order</Btn>
+          </div>
+        )}
       </div>
 
       <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${C.border}`, marginBottom: 16 }}>
@@ -1586,7 +1628,6 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Btn variant="soft" size="sm" onClick={() => setFlag({ on_hold: !order.on_hold, reason: reason || undefined })} disabled={busy}>{order.on_hold ? "Release hold" : "Put on hold"}</Btn>
             <Btn variant="soft" size="sm" onClick={() => setFlag({ waiting_stock: !order.waiting_stock })} disabled={busy}>{order.waiting_stock ? "Clear waiting stock" : "Flag waiting stock"}</Btn>
-            {order.stage === "packing" && <Btn variant="danger" size="sm" onClick={() => doMove("production", reason || "Sent back for rework")} disabled={busy}>Send back to production</Btn>}
           </div>
         </div>
       )}
@@ -1605,14 +1646,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
           </div>
           {canMove && (
             <>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
-                <select value={moveStage} onChange={(e) => setMoveStage(e.target.value)} style={{ flex: 1, minWidth: 170, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }}>
-                  <option value="" style={{ background: C.bg2 }}>Move to…</option>
-                  {Object.keys(STAGE_LABELS).filter((k) => k !== order.stage && k !== "on_hold" && k !== "cancelled" && k !== "delivered").map((k) => <option key={k} value={k} style={{ background: C.bg2 }}>{STAGE_LABELS[k].label}</option>)}
-                </select>
-                <Btn onClick={() => doMove(moveStage, reason)} disabled={!moveStage || busy}>{moveStage ? `Move to ${STAGE_LABELS[moveStage].label}` : "Move"}</Btn>
-              </div>
-              <input placeholder="Reason / note (optional) — applies to the move, hold or cancel you choose" value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text, marginBottom: 12 }} />
+              <input placeholder="Reason / note (optional) — applies to the hold or cancel you choose" value={reason} onChange={(e) => setReason(e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text, marginBottom: 12 }} />
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <Btn variant="soft" size="sm" onClick={() => setFlag({ on_hold: !order.on_hold, reason: reason || undefined })} disabled={busy}>{order.on_hold ? "Release hold" : "Put on hold"}</Btn>
                 <Btn variant="soft" size="sm" onClick={() => setFlag({ waiting_stock: !order.waiting_stock })} disabled={busy}>{order.waiting_stock ? "Clear waiting stock" : "Flag waiting stock"}</Btn>
