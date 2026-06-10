@@ -3770,7 +3770,8 @@ export default function App() {
       setUnread(count);
       setUnreadIds(new Set(list.filter((n) => n.order_id).map((n) => n.order_id)));
       // Pop a toast only on a real increase (not the first load), so something new can't be missed.
-      if (prevUnreadRef.current >= 0 && count > prevUnreadRef.current && list[0]) pushToast(list[0]);
+      // Toast only for LOUD events; quiet ones (date/tier tweaks, scheduled, all-clears) still land in the bell + card glow.
+      if (prevUnreadRef.current >= 0 && count > prevUnreadRef.current && list[0] && list[0].loud !== false) pushToast(list[0]);
       prevUnreadRef.current = count;
     }).catch(() => {});
     poll(); const t = setInterval(poll, 10000); return () => clearInterval(t);
