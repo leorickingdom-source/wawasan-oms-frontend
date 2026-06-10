@@ -2924,12 +2924,9 @@ function Delivery({ user, onOpenOrder }) {
                   ["Phone", o.customer_contact || "—"],
                   ["Due", <span style={{ color: countdown(o.required_delivery_date).tone }}>{fmtDay(o.required_delivery_date)}</span>],
                 ]}
-                actions={<>
-                  {canDeliver && <label style={{ ...proofBtn, flex: 1, justifyContent: "center", padding: "11px" }}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(o.id, f); }} /></label>}
-                  {canDeliver && <Btn size="lg" variant="success" style={{ flex: 2, justifyContent: "center" }} onClick={() => markDeliveredDirect(o.id)}>✓ Delivered</Btn>}
-                  <Btn size="lg" variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => scheduleFor(o.id)}>Schedule</Btn>
-                  <Btn size="lg" variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => printOneDO(o.id)}>🖨 DO</Btn>
-                </>}
+                actions={
+                  <Btn size="lg" style={{ width: "100%", justifyContent: "center" }} onClick={() => scheduleFor(o.id)}>Schedule delivery</Btn>
+                }
               />
             ))
           ) : (
@@ -2952,10 +2949,7 @@ function Delivery({ user, onOpenOrder }) {
                     <td style={{ padding: "11px 16px" }}><Pill color={C.ready}>Ready for Delivery</Pill></td>
                     <td style={{ padding: "11px 16px" }}>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {canDeliver && <label style={proofBtn}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(o.id, f); }} /></label>}
-                        {canDeliver && <Btn size="sm" variant="success" onClick={() => markDeliveredDirect(o.id)}>✓ Delivered</Btn>}
-                        <Btn size="sm" variant="soft" onClick={() => scheduleFor(o.id)}>Schedule</Btn>
-                        <Btn size="sm" variant="soft" onClick={() => printOneDO(o.id)}>🖨 DO</Btn>
+                        <Btn size="sm" onClick={() => scheduleFor(o.id)}>Schedule</Btn>
                       </div>
                     </td>
                   </tr>
