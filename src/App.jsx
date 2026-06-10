@@ -47,10 +47,10 @@ const MAX_UPLOAD_MB = 5;
 const FORWARD_STAGE = { order: "production", production: "packing", packing: "ready_for_delivery", ready_for_delivery: "delivered" };
 const ADVANCE_LABEL = { order: "Send to production", production: "Mark production complete", packing: "Mark packed", ready_for_delivery: "Mark delivered" };
 // Which roles can be the PIC at each stage (shown in the PIC picker).
-const STAGE_PIC_ROLES = { order: ["operations_controller"], production: ["production_lead", "production_staff"], packing: ["packing_staff"], ready_for_delivery: ["delivery_team"] };
+const STAGE_PIC_ROLES = { order: ["production_lead", "production_staff"], production: ["production_lead", "production_staff"], packing: ["packing_staff"], ready_for_delivery: ["delivery_team"] };
 function canAdvanceStage(role, stage) {
   if (stage === "ready_for_delivery") return false; // completion happens in the Delivery workspace
-  if (role === "super_admin" || role === "operations_controller") return true;
+  if (role === "super_admin") return true;
   if (role === "production_lead" && (stage === "production" || stage === "packing")) return true;
   if (stage === "production" && role === "production_staff") return true;
   if (stage === "packing" && role === "packing_staff") return true;
@@ -60,7 +60,7 @@ function canAdvanceStage(role, stage) {
 // mirrors the backend gate so staff don't see buttons that would only error.
 // Managers anytime; staff only on the stage they own.
 function canMarkStage(role, stage) {
-  if (role === "super_admin" || role === "operations_controller") return true;
+  if (role === "super_admin") return true;
   if (role === "production_lead") return stage === "production" || stage === "packing";
   if (role === "production_staff") return stage === "production";
   if (role === "packing_staff") return stage === "packing";
@@ -71,19 +71,19 @@ function visibleStages(role) {
   if (role === "production_staff") return ["production"];
   if (role === "packing_staff") return ["packing"];
   if (role === "delivery_team") return ["ready_for_delivery"];
-  return BOARD_STAGES; // super_admin, operations_controller, production_lead
+  return BOARD_STAGES; // super_admin, production_lead
 }
 const STAGE_LABELS = {
   ...STAGES, on_hold: { label: "On Hold", color: C.hold },
   delivered: { label: "Delivered", color: C.text3 }, cancelled: { label: "Cancelled", color: "#6b7280" },
 };
 const ROLE_LABELS = {
-  super_admin: "Boss", admin: "Admin", operations_controller: "Ops",
+  super_admin: "Boss", admin: "Admin",
   production_lead: "Production Head", production_staff: "Production Staff",
   packing_staff: "Packing Staff", delivery_team: "Delivery Coordinator",
 };
 // Every role except the system-only Admin — for nav pages Admin shouldn't see.
-const NON_ADMIN_ROLES = ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff", "delivery_team"];
+const NON_ADMIN_ROLES = ["super_admin", "production_lead", "production_staff", "packing_staff", "delivery_team"];
 // The Order Board kanban is for the production-floor roles. The Delivery
 // Coordinator works the Delivery workspace; on the board they would only see a
 // single, non-actionable "Ready for Delivery" column that duplicates it, so they
@@ -131,11 +131,11 @@ function deliveryTag(o) {
 
 const NAV = [
   { id: "board", label: "Order Board", icon: "board", roles: [...BOARD_ROLES, "admin"] },
-  { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "operations_controller", "admin"] },
-  { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "operations_controller", "delivery_team", "admin"] },
+  { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "admin"] },
+  { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "delivery_team", "admin"] },
   { id: "floor", label: "Floor Display", icon: "display" }, // every role; rendered as a distinct launch button, not a workspace tab
-  { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "operations_controller", "production_lead"] },
-  { id: "messages", label: "Messages", icon: "message", roles: ["super_admin", "operations_controller"] },
+  { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "production_lead"] },
+  { id: "messages", label: "Messages", icon: "message", roles: ["super_admin"] },
   { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead"] },
   { id: "audit", label: "Audit Trail", icon: "audit", roles: ["super_admin", "admin"] },
   { id: "users", label: "User Management", icon: "users", roles: ["super_admin", "admin"] },
@@ -605,7 +605,7 @@ function KanbanCard({ order, user, onOpen, onAdvance, onReorderUp, onReorderDown
               <button onClick={() => onReorderDown && onReorderDown()} disabled={!onReorderDown} style={rBtn(!onReorderDown)} aria-label="Move down">▼</button>
             </div>
           )}
-          {canAdvanceStage(user.role, order.stage) && !order.on_hold && <IconBtn icon="arrowRight" onClick={() => onAdvance(order, next)} title={(user.role === "super_admin" || user.role === "operations_controller") ? `Advance to ${(STAGE_LABELS[next] || {}).label || next}` : (ADVANCE_LABEL[order.stage] || "Advance")} color={C.ready} bg="#13301f" border="#1f5036" />}
+          {canAdvanceStage(user.role, order.stage) && !order.on_hold && <IconBtn icon="arrowRight" onClick={() => onAdvance(order, next)} title={(user.role === "super_admin") ? `Advance to ${(STAGE_LABELS[next] || {}).label || next}` : (ADVANCE_LABEL[order.stage] || "Advance")} color={C.ready} bg="#13301f" border="#1f5036" />}
           <IconBtn icon="dots" onClick={() => onOpen(order)} title="Details & actions" />
         </div>
       </div>
@@ -672,7 +672,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
   const [confirmAdv, setConfirmAdv] = useState(null);
   const [dragId, setDragId] = useState(null); // card being dragged
   const [dragOverZone, setDragOverZone] = useState(null); // tier drop-zone hovered (key "stage:tier")
-  const canReorder = ["super_admin", "operations_controller", "admin", "production_lead"].includes(user.role);
+  const canReorder = ["super_admin", "admin", "production_lead"].includes(user.role);
   const [viewStage, setViewStageRaw] = useState(() => {
     const saved = (typeof localStorage !== "undefined" && localStorage.getItem("oms_board_stage")) || "all";
     return saved === "all" || visibleStages(user.role).includes(saved) ? saved : "all";
@@ -1178,11 +1178,11 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
   const [notesSaved, setNotesSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
-  const canMove = ["super_admin", "operations_controller"].includes(user.role);
+  const canMove = ["super_admin"].includes(user.role);
   // Back-office Admin (deputy) may route an order — set PIC + priority/importance —
   // but not move stages, hold/flag, or cancel (those stay canMove = Boss/Ops).
-  const canRoute = ["super_admin", "operations_controller", "admin"].includes(user.role);
-  const roleCanMark = ["super_admin", "operations_controller", "production_lead", "production_staff", "packing_staff"].includes(user.role);
+  const canRoute = ["super_admin", "admin"].includes(user.role);
+  const roleCanMark = ["super_admin", "production_lead", "production_staff", "packing_staff"].includes(user.role);
   const isLead = user.role === "production_lead";
   const isFloor = ["production_staff", "packing_staff"].includes(user.role); // pure floor worker — keep their view minimal
   const isDispatch = user.role === "delivery_team"; // delivery coordinator — keep their view delivery-focused
@@ -2770,8 +2770,8 @@ function Delivery({ user, onOpenOrder }) {
   const [editOther, setEditOther] = useState("");
   const [showCouriers, setShowCouriers] = useState(true);
   const [q, setQ] = useState("");
-  const canAssign = ["super_admin", "operations_controller", "delivery_team", "admin"].includes(user.role);
-  const canDeliver = ["super_admin", "operations_controller", "delivery_team", "admin"].includes(user.role);
+  const canAssign = ["super_admin", "delivery_team", "admin"].includes(user.role);
+  const canDeliver = ["super_admin", "delivery_team", "admin"].includes(user.role);
   const stacked = useViewport() < 1100; // phones + tablets (incl. iPad portrait) → cards, not a wide table
 
   async function load() {
@@ -3442,7 +3442,7 @@ function Users({ user }) {
     (!roleF || u.role === roleF)
   );
   // Neat order: by role seniority, then name. Active up top; disabled collapsed below.
-  const roleRank = { super_admin: 0, admin: 1, operations_controller: 2, production_lead: 3, production_staff: 4, packing_staff: 5, delivery_team: 6 };
+  const roleRank = { super_admin: 0, admin: 1, production_lead: 3, production_staff: 4, packing_staff: 5, delivery_team: 6 };
   const byRank = (a, b) => ((roleRank[a.role] ?? 9) - (roleRank[b.role] ?? 9)) || a.name.localeCompare(b.name);
   const activeUsers = filtered.filter((u) => u.is_active).sort(byRank);
   const disabledUsers = filtered.filter((u) => !u.is_active).sort(byRank);
@@ -3784,7 +3784,7 @@ export default function App() {
   // (e.g. delivery_team's default "board"), fall back to their first nav item so a
   // disallowed page never paints for a frame before the guard effect corrects state.
   const view = page === "floor" || nav.some((n) => n.id === page) ? page : (nav[0] ? nav[0].id : "board");
-  const canCreate = ["super_admin", "operations_controller"].includes(user.role);
+  const canCreate = ["super_admin"].includes(user.role);
   const [title, subtitle] = PAGE_META[view] || ["", ""];
 
   return (
