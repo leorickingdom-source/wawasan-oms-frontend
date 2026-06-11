@@ -1089,7 +1089,7 @@ function FloorDisplay({ onExit }) {
               <div key={s} style={{ background: C.bg2, border: `1px solid ${C.border}`, borderTop: `4px solid ${cfg.color}`, borderRadius: 14, padding: "16px 14px", display: "flex", flexDirection: "column", minHeight: 0 }}>
                 <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: 1, color: C.text3, textTransform: "uppercase" }}>{cfg.label}</div>
                 <div style={{ fontSize: 66, fontWeight: 800, color: cfg.color, lineHeight: 1, margin: "2px 0 14px" }}>{orders.length}</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 9, overflowY: "auto" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 9, overflowY: "hidden" }}>
                   {orders.map((o) => {
                     const cd = countdown(o.required_delivery_date);
                     const late = (cd.n ?? 0) < 0, urgent = o.priority === "urgent";
@@ -1137,7 +1137,7 @@ function FloorDisplay({ onExit }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <Pill color={spotStage.color} style={{ fontSize: 12, padding: "4px 10px" }}>● {spotStage.label}</Pill>
-                  {spot.priority === "urgent" && <Pill color={C.danger} style={{ fontSize: 12, padding: "4px 10px" }}>Urgent</Pill>}
+                  {spot.priority === "urgent" && <Pill color="#fff" bg={C.danger} border={C.danger} style={{ fontSize: 12, padding: "4px 10px" }}>Urgent</Pill>}
                   {spotDtag && <Pill color={spotDtag.color} style={{ fontSize: 12, padding: "4px 10px" }}>{spotDtag.label}</Pill>}
                 </div>
                 <span style={{ fontSize: 14, color: C.text3 }}>{(spotIdx % pool.length) + 1} / {pool.length}</span>
