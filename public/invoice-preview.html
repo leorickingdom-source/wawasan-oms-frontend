@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WAWASAN LTS — Invoice Automation Preview</title>
+<style>
+  :root{
+    --bg:#100e0c; --bg2:#16130f; --surface:#1c1813; --surface2:#241f18;
+    --border:#2c2620; --border2:#3a3329;
+    --text:#f5efe6; --text2:#b4aa9c; --text3:#7e7568;
+    --accent:#f97316; --accent2:#fb923c;
+    --order:#60a5fa; --production:#f97316; --packing:#f5b13a; --ready:#34d399;
+    --danger:#ef4444; --green:#34d399;
+    --mono:ui-monospace,'SF Mono','JetBrains Mono','Roboto Mono',Consolas,Menlo,monospace;
+    --sans:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:radial-gradient(1200px 600px at 15% -10%, #1a1510 0%, var(--bg) 55%) fixed, var(--bg);
+    color:var(--text); font-family:var(--sans); line-height:1.45;
+    min-height:100vh; padding:22px clamp(14px,3vw,40px) 60px;
+  }
+  /* ── Top bar ───────────────────────────────────────────── */
+  .top{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:6px}
+  .brand{display:flex; align-items:baseline; gap:10px}
+  .brand b{font-size:20px; letter-spacing:.14em; font-weight:800}
+  .brand .lts{color:var(--accent)}
+  .brand span{color:var(--text3); font-size:12px; letter-spacing:.18em; text-transform:uppercase}
+  .top .spacer{flex:1}
+  .pill{font-family:var(--mono); font-size:11px; padding:4px 9px; border-radius:999px; border:1px solid var(--border2); color:var(--text2); background:var(--surface)}
+  .pill.live{color:#fff; background:var(--danger); border-color:var(--danger); box-shadow:0 0 0 3px rgba(239,68,68,.18)}
+  .pill.sim{color:var(--order); border-color:#2b4a6b; background:#13202e}
+  .gear{cursor:pointer; user-select:none; font-size:12px; color:var(--text2); border:1px solid var(--border2); background:var(--surface); padding:5px 11px; border-radius:8px}
+  .gear:hover{color:var(--text); border-color:var(--accent)}
+  .lede{color:var(--text2); font-size:14px; margin:0 0 18px; max-width:900px}
+  .lede b{color:var(--text)}
+
+  /* ── Live settings drawer ──────────────────────────────── */
+  .drawer{display:none; gap:12px; flex-wrap:wrap; align-items:flex-end; background:var(--surface); border:1px solid var(--border2); border-radius:12px; padding:14px 16px; margin-bottom:18px}
+  .drawer.open{display:flex}
+  .drawer .fld{display:flex; flex-direction:column; gap:4px}
+  .drawer label{font-size:11px; color:var(--text3); text-transform:uppercase; letter-spacing:.08em}
+  .drawer input{font-family:var(--mono); font-size:13px; background:var(--bg2); border:1px solid var(--border2); color:var(--text); border-radius:8px; padding:8px 10px; min-width:240px}
+  .drawer input:focus{outline:none; border-color:var(--accent)}
+  .toggle{display:inline-flex; border:1px solid var(--border2); border-radius:8px; overflow:hidden}
+  .toggle button{font-family:var(--sans); font-size:12px; font-weight:600; padding:8px 14px; border:0; background:transparent; color:var(--text2); cursor:pointer}
+  .toggle button.on[data-m="sim"]{background:#13202e; color:var(--order)}
+  .toggle button.on[data-m="live"]{background:var(--danger); color:#fff}
+  .hint{font-size:11px; color:var(--text3); width:100%; margin-top:2px}
+  .hint code{color:var(--accent2); font-family:var(--mono)}
+
+  /* ── Stage: invoice → arrow → board ────────────────────── */
+  .stage{display:grid; grid-template-columns:minmax(320px,420px) 120px 1fr; gap:0; align-items:stretch}
+  @media(max-width:1080px){ .stage{grid-template-columns:1fr; gap:18px} .arrowcol{transform:rotate(90deg)} }
+
+  /* ── Invoice paper ─────────────────────────────────────── */
+  .paper{background:#fbf8f2; color:#2a2620; border-radius:12px; padding:20px 22px; box-shadow:0 18px 50px -20px rgba(0,0,0,.7); position:relative; overflow:hidden}
+  .paper::before{content:""; position:absolute; left:0; top:0; bottom:0; width:5px; background:linear-gradient(var(--accent),#c2410c)}
+  .sqlhdr{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #e7ddcb; padding-bottom:10px; margin-bottom:12px}
+  .sqlhdr .app{font-size:11px; letter-spacing:.12em; color:#9a8f7d; text-transform:uppercase}
+  .sqlhdr h2{margin:2px 0 0; font-size:18px; color:#1c1813}
+  .sqlhdr .doc{text-align:right; font-family:var(--mono); font-size:12px; color:#6b6155}
+  .sqlhdr .doc b{display:block; font-size:15px; color:#1c1813}
+  .row2{display:flex; gap:14px; margin-bottom:12px}
+  .row2 .f{flex:1; display:flex; flex-direction:column; gap:3px}
+  .row2 label{font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:#9a8f7d}
+  .row2 input,.row2 select{font-family:var(--sans); font-size:13px; color:#1c1813; background:#fff; border:1px solid #e0d6c4; border-radius:6px; padding:7px 8px}
+  .row2 input:focus,.row2 select:focus{outline:none; border-color:var(--accent)}
+  table.items{width:100%; border-collapse:collapse; font-size:12px; margin-top:4px}
+  table.items th{text-align:left; color:#9a8f7d; font-weight:600; text-transform:uppercase; font-size:10px; letter-spacing:.06em; border-bottom:1px solid #e7ddcb; padding:6px 6px}
+  table.items td{padding:7px 6px; border-bottom:1px solid #f0e9da; vertical-align:top}
+  table.items .sku{font-family:var(--mono); color:#b45309; white-space:nowrap}
+  table.items .qty{text-align:right; font-family:var(--mono); white-space:nowrap}
+  .paper .foot{display:flex; justify-content:space-between; align-items:center; margin-top:12px; font-size:11px; color:#9a8f7d}
+  .paper .foot .nodes{font-style:italic}
+  .stamp{position:absolute; right:16px; bottom:14px; font-family:var(--mono); font-size:10px; color:#bdb2a0; border:1px dashed #cabfa9; padding:2px 7px; border-radius:5px; transform:rotate(-6deg)}
+
+  /* ── Arrow + button column ─────────────────────────────── */
+  .arrowcol{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; position:relative}
+  .wire{position:relative; width:100%; height:3px; background:linear-gradient(90deg,transparent,var(--border2) 20%,var(--border2) 80%,transparent)}
+  .wire::after{content:"▶"; position:absolute; right:-2px; top:50%; transform:translateY(-50%); color:var(--border2); font-size:14px}
+  .packet{position:absolute; top:50%; left:0; width:12px; height:12px; margin-top:-6px; border-radius:50%; background:var(--accent); box-shadow:0 0 14px 3px var(--accent); opacity:0; pointer-events:none}
+  .go{font-family:var(--sans); font-weight:800; font-size:14px; letter-spacing:.02em; color:#fff; background:linear-gradient(var(--accent),#ea580c); border:0; border-radius:11px; padding:13px 18px; cursor:pointer; box-shadow:0 10px 26px -8px rgba(249,115,22,.7); white-space:nowrap; transition:transform .08s}
+  .go:hover{transform:translateY(-1px)}
+  .go:active{transform:translateY(1px)}
+  .go:disabled{opacity:.5; cursor:default; transform:none}
+  .gocap{font-size:11px; color:var(--text3); text-align:center; max-width:160px}
+  .reset{font-size:11px; color:var(--text3); background:none; border:0; cursor:pointer; text-decoration:underline dotted}
+  .reset:hover{color:var(--text2)}
+
+  /* ── Board ─────────────────────────────────────────────── */
+  .board{background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:14px 14px 18px; display:flex; flex-direction:column; min-width:0}
+  .board .bhdr{display:flex; align-items:center; gap:8px; margin-bottom:12px}
+  .board .bhdr b{font-size:13px; letter-spacing:.1em; text-transform:uppercase; color:var(--text2)}
+  .board .bhdr .dot{width:8px;height:8px;border-radius:50%;background:var(--green); box-shadow:0 0 8px var(--green)}
+  .cols{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; min-width:0}
+  @media(max-width:760px){ .cols{grid-template-columns:repeat(2,1fr)} }
+  .col{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px; min-height:230px; display:flex; flex-direction:column; gap:7px}
+  .col h3{margin:2px 2px 4px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; display:flex; align-items:center; gap:6px; color:var(--text2)}
+  .col h3 .tag{width:8px;height:8px;border-radius:2px}
+  .col h3 .ct{margin-left:auto; font-family:var(--mono); font-size:10px; color:var(--text3); background:var(--bg2); border:1px solid var(--border); border-radius:6px; padding:0 6px}
+  .card{background:var(--surface2); border:1px solid var(--border2); border-left:3px solid var(--order); border-radius:8px; padding:8px 9px; cursor:default}
+  .card .inv{font-family:var(--mono); font-size:11px; color:var(--text); font-weight:600}
+  .card .cust{font-size:12px; color:var(--text2); margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .card .li{font-size:10.5px; color:var(--text3); margin-top:5px; line-height:1.35}
+  .card .li .q{color:var(--accent2); font-family:var(--mono)}
+  .card .src{display:inline-block; margin-top:6px; font-size:9.5px; letter-spacing:.04em; text-transform:uppercase; color:#7fb0e8; background:#13202e; border:1px solid #2b4a6b; border-radius:5px; padding:1px 6px}
+  .card.enter{animation:drop .55s cubic-bezier(.2,.9,.25,1.05)}
+  .card.flash{box-shadow:0 0 0 0 rgba(249,115,22,.8); animation:flash 2.2s ease-out}
+  @keyframes drop{from{opacity:0; transform:translateY(-16px) scale(.96)} to{opacity:1; transform:none}}
+  @keyframes flash{0%{box-shadow:0 0 0 2px var(--accent),0 0 18px 2px rgba(249,115,22,.6)} 100%{box-shadow:0 0 0 0 transparent}}
+  .justin{font-size:9.5px; color:var(--accent2); margin-top:5px; display:flex; align-items:center; gap:4px}
+
+  /* ── Toast ─────────────────────────────────────────────── */
+  .toast{position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(20px); background:var(--surface2); border:1px solid var(--border2); border-left:4px solid var(--green); color:var(--text); padding:12px 16px; border-radius:10px; box-shadow:0 16px 40px -12px rgba(0,0,0,.8); font-size:13px; opacity:0; pointer-events:none; transition:.3s; max-width:90vw; z-index:50}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0); pointer-events:auto}
+  .toast.err{border-left-color:var(--danger)}
+  .toast b{color:#fff}
+  .toast a{color:var(--accent2)}
+  .toast .x{margin-left:10px; color:var(--text3); cursor:pointer}
+</style>
+</head>
+<body>
+
+  <div class="top">
+    <div class="brand"><b>WAWASAN <span class="lts">LTS</span></b><span>Order Management</span></div>
+    <span class="pill" id="modePill">Simulation</span>
+    <div class="spacer"></div>
+    <div class="gear" id="gear">⚙ Demo settings</div>
+  </div>
+
+  <p class="lede">
+    <b>What the client sees:</b> the moment an invoice is saved in <b>SQL&nbsp;Account</b>, it becomes a live job on the
+    production board here — <b>no re-typing, no missed orders, no double entry.</b> Click the orange button to watch it happen.
+  </p>
+
+  <div class="drawer" id="drawer">
+    <div class="fld">
+      <label>Mode</label>
+      <div class="toggle" id="toggle">
+        <button data-m="sim" class="on">▶ Simulation (safe)</button>
+        <button data-m="live">● Live (real board)</button>
+      </div>
+    </div>
+    <div class="fld liveonly" style="display:none">
+      <label>Webhook secret</label>
+      <input id="secret" type="password" placeholder="SQL_ACCOUNT_WEBHOOK_SECRET" autocomplete="off" />
+    </div>
+    <div class="fld liveonly" style="display:none">
+      <label>Webhook URL</label>
+      <input id="hookurl" value="https://wawasan-oms-backend.vercel.app/api/orders/webhook/sql-account" />
+    </div>
+    <div class="fld liveonly" style="display:none">
+      <label>Open-board link</label>
+      <input id="boardurl" value="https://wawasan-oms-frontend.vercel.app" />
+    </div>
+    <button class="reset" id="remember" style="display:none">Remember on this PC</button>
+    <div class="hint" id="liveHint" style="display:none">
+      ⚠ <b>Live</b> creates a <b>real</b> order (number <code>DEMO-…</code>) on the board — paste the secret first, then <b>Send REAL invoice</b>.
+      Works from this hosted link, or via <code>Serve-Live-Demo.cmd</code> on localhost. Clean up after on the board (<b>Cancel order</b>).
+      Don't tick <b>Remember</b> on a shared/client PC.
+    </div>
+    <div class="hint">Simulation needs nothing — just this file. Nothing leaves the page.</div>
+  </div>
+
+  <div class="stage">
+
+    <!-- Invoice paper -->
+    <div class="paper">
+      <div class="sqlhdr">
+        <div>
+          <div class="app">SQL Account · Sales Invoice</div>
+          <h2>Tax Invoice</h2>
+        </div>
+        <div class="doc">No.<b id="docno">SI-2026-00872</b><span id="docdate">11/06/2026</span></div>
+      </div>
+      <div class="row2">
+        <div class="f" style="flex:2">
+          <label>Customer</label>
+          <input id="cust" value="Kedai Runcit Sejahtera Sdn Bhd" />
+        </div>
+        <div class="f">
+          <label>Terms</label>
+          <select id="terms">
+            <option>C.O.D.</option>
+            <option selected>30 Days</option>
+            <option>60 Days</option>
+            <option>Cash</option>
+          </select>
+        </div>
+      </div>
+      <table class="items" id="itemsTbl">
+        <thead><tr><th>Code</th><th>Description</th><th class="qty">Qty</th><th>UOM</th></tr></thead>
+        <tbody><!-- filled by JS --></tbody>
+      </table>
+      <div class="foot">
+        <span class="nodes">Prices &amp; tax stay in SQL Account.</span>
+        <span>Page 1 of 1</span>
+      </div>
+      <div class="stamp">SAMPLE — demo only</div>
+    </div>
+
+    <!-- Arrow + button -->
+    <div class="arrowcol">
+      <div class="wire"><div class="packet" id="packet"></div></div>
+      <button class="go" id="go">Save &amp; Send&nbsp;to&nbsp;OMS&nbsp;▶</button>
+      <div class="gocap">Same click your team does in SQL Account every day.</div>
+      <button class="reset" id="reset">↺ Reset board</button>
+    </div>
+
+    <!-- Board -->
+    <div class="board">
+      <div class="bhdr"><span class="dot"></span><b>WAWASAN LTS — Order Board</b></div>
+      <div class="cols">
+        <div class="col" data-stage="order">
+          <h3><span class="tag" style="background:var(--order)"></span>Order <span class="ct">0</span></h3>
+        </div>
+        <div class="col" data-stage="production">
+          <h3><span class="tag" style="background:var(--production)"></span>Production <span class="ct">0</span></h3>
+        </div>
+        <div class="col" data-stage="packing">
+          <h3><span class="tag" style="background:var(--packing)"></span>Packing <span class="ct">0</span></h3>
+        </div>
+        <div class="col" data-stage="ready_for_delivery">
+          <h3><span class="tag" style="background:var(--ready)"></span>Ready for Delivery <span class="ct">0</span></h3>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+  var STAGE_COLORS = {order:'var(--order)',production:'var(--production)',packing:'var(--packing)',ready_for_delivery:'var(--ready)'};
+  var DEFAULT_HOOK = "https://wawasan-oms-backend.vercel.app/api/orders/webhook/sql-account";
+
+  // Sample invoice line items — real STK master codes/names.
+  var ITEMS = [
+    {sku:"STK006", name:"FIRE CHICKEN FIRESTARTER (40BIJI) - 72 BOX/CTN", quantity:20, unit:"CTN"},
+    {sku:"STK035", name:"SERAI LILIN ANTI INSECTS CANDLES - 2PCS/PACK", quantity:8, unit:"CTN"},
+    {sku:"STK088", name:"TEALIGHTS 37 X 15 - 30'S (WHITE)", quantity:15, unit:"CTN"},
+    {sku:"STK280", name:"SZENT RADIANZE GLASS CANDLE (WHITE UNSCENTED)", quantity:5, unit:"CTN"}
+  ];
+  // Cards already on the board, so it looks like a live system (not empty).
+  var SEED = [
+    {stage:"production", inv:"SI-2026-00869", cust:"Restoran Cahaya Maju", items:[{q:30,unit:"CTN",name:"PIALA EMAS FIRE STARTER 30'S"}]},
+    {stage:"packing", inv:"SI-2026-00865", cust:"Pasaraya Hijau Segar", items:[{q:12,unit:"CTN",name:"TEALIGHTS 37X15 30'S WHITE"}]},
+    {stage:"ready_for_delivery", inv:"SI-2026-00861", cust:"Kedai Borong Aman", items:[{q:6,unit:"CTN",name:"SZENT RADIANZE GLASS CANDLE"}]}
+  ];
+
+  var $ = function(s){return document.querySelector(s)};
+  var mode = "sim", seq = 872, created = 0;
+
+  // ── render invoice items ──
+  (function(){
+    var tb = $("#itemsTbl tbody"), h="";
+    for(var i=0;i<ITEMS.length;i++){var it=ITEMS[i];
+      h += '<tr><td class="sku">'+it.sku+'</td><td>'+esc(it.name)+'</td><td class="qty">'+it.quantity+'</td><td>'+it.unit+'</td></tr>';
+    }
+    tb.innerHTML = h;
+  })();
+
+  function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+
+  // ── board helpers ──
+  function colFor(stage){return document.querySelector('.col[data-stage="'+stage+'"]')}
+  function recount(){
+    document.querySelectorAll('.col').forEach(function(c){
+      var n = c.querySelectorAll('.card').length;
+      c.querySelector('.ct').textContent = n;
+    });
+  }
+  function makeCard(o, fresh){
+    var d = document.createElement('div');
+    d.className = 'card' + (fresh?' enter flash':'');
+    d.style.borderLeftColor = STAGE_COLORS[o.stage] || 'var(--order)';
+    var li = o.items.map(function(it){
+      return '<div class="li"><span class="q">'+ (it.q||it.quantity) +' '+(it.unit||'')+'</span> · '+esc(it.name)+'</div>';
+    }).join('');
+    d.innerHTML =
+      '<div class="inv">'+esc(o.inv)+'</div>'+
+      '<div class="cust">'+esc(o.cust)+'</div>'+ li +
+      (fresh ? '<span class="src">⟵ from SQL Account</span><div class="justin">● just arrived — production can start</div>'
+             : '');
+    return d;
+  }
+  function seed(){
+    SEED.forEach(function(o){ colFor(o.stage).appendChild(makeCard(o,false)); });
+    recount();
+  }
+
+  // ── the action ──
+  function flyPacket(cb){
+    var p = $("#packet");
+    p.style.transition='none'; p.style.left='0'; p.style.opacity='1';
+    requestAnimationFrame(function(){
+      p.style.transition='left .55s ease-in, opacity .55s';
+      p.style.left='100%';
+      setTimeout(function(){ p.style.opacity='0'; if(cb)cb(); }, 540);
+    });
+  }
+  function addToOrder(o){
+    var col = colFor('order');
+    var card = makeCard(o, true);
+    var h3 = col.querySelector('h3');
+    col.insertBefore(card, h3.nextSibling);
+    recount();
+    // drop the "just arrived" line after a moment so repeats stay clean
+    setTimeout(function(){ var j=card.querySelector('.justin'); if(j) j.remove(); }, 6000);
+  }
+
+  function nextDoc(){ seq++; return "SI-2026-00"+seq; }
+  function demoNo(){
+    var d=new Date(), p=function(n){return (n<10?'0':'')+n};
+    return "DEMO-"+d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+"-"+p(d.getHours())+p(d.getMinutes())+p(d.getSeconds());
+  }
+
+  function fire(){
+    var btn=$("#go"); btn.disabled=true;
+    var cust = $("#cust").value.trim() || "Sample Customer Sdn Bhd";
+    var terms = $("#terms").value;
+    var inv = (mode==="live") ? demoNo() : nextDoc();
+    $("#docno").textContent = inv;
+    var order = {stage:"order", inv:inv, cust:cust, items:ITEMS.map(function(it){return {q:it.quantity,unit:it.unit,name:it.name}})};
+
+    flyPacket(function(){
+      if(mode==="live"){
+        sendLive(inv, cust, terms, function(ok, msg, link){
+          btn.disabled=false;
+          if(ok){ addToOrder(order); toast('<b>Live order created:</b> '+inv+'. '+(link?'<a href="'+link+'" target="_blank">Open the real board ↗</a>':'Open your OMS board to see it.'), false); }
+          else { toast('<b>Did not send.</b> '+msg, true); }
+        });
+      } else {
+        addToOrder(order);
+        created++;
+        btn.disabled=false;
+        toast('<b>Order '+inv+'</b> landed in the <b>Order</b> column — straight from the invoice. ('+created+' this demo)', false);
+      }
+    });
+  }
+
+  // ── live webhook ──
+  function sendLive(inv, cust, terms, cb){
+    var secret = ($("#secret").value||"").trim();
+    var url = ($("#hookurl").value||"").trim() || DEFAULT_HOOK;
+    var board = ($("#boardurl").value||"").trim();
+    if(!secret){ cb(false,"Enter the webhook secret in ⚙ Demo settings first.",null); return; }
+    var payload = {
+      invoice_number: inv, customer_name: cust,
+      order_date: new Date().toISOString().slice(0,10),
+      payment_terms: terms, notes: "Client preview demo — safe to cancel",
+      items: ITEMS.map(function(it){return {sku:it.sku,name:it.name,quantity:it.quantity,unit:it.unit}})
+    };
+    fetch(url,{method:"POST",headers:{"Content-Type":"application/json","x-webhook-secret":secret},body:JSON.stringify(payload)})
+      .then(function(r){
+        if(r.status===201){ cb(true,"",board||null); return; }
+        if(r.status===401){ cb(false,"Wrong webhook secret.",null); return; }
+        if(r.status===409){ cb(false,"That invoice already exists — click again for a new number.",null); return; }
+        if(r.status===400){ cb(false,"A required field was missing.",null); return; }
+        cb(false,"Server returned HTTP "+r.status+".",null);
+      })
+      .catch(function(){ cb(false,"Could not reach the OMS. Open this page via Serve-Live-Demo.cmd (it must run on localhost), and check the internet.",null); });
+  }
+
+  // ── toast ──
+  var toastT;
+  function toast(html, isErr){
+    var t=$("#toast"); clearTimeout(toastT);
+    t.className = "toast show" + (isErr?" err":"");
+    t.innerHTML = html + '<span class="x" onclick="this.parentNode.className=\'toast\'">✕</span>';
+    toastT = setTimeout(function(){ t.className="toast"; }, isErr?9000:7000);
+  }
+
+  // ── settings / mode ──
+  function setMode(m){
+    mode = m;
+    var live = m==="live";
+    $("#modePill").textContent = live?"LIVE — real board":"Simulation";
+    $("#modePill").className = "pill " + (live?"live":"sim");
+    document.querySelectorAll(".liveonly").forEach(function(e){ e.style.display = live?"":"none"; });
+    $("#liveHint").style.display = live?"":"none";
+    $("#remember").style.display = live?"":"none";
+    document.querySelectorAll("#toggle button").forEach(function(b){ b.classList.toggle("on", b.dataset.m===m); });
+    var btn=$("#go");
+    btn.textContent = live ? "● Send REAL invoice ▶" : "Save & Send to OMS ▶";
+    btn.style.background = live ? "linear-gradient(var(--danger),#b91c1c)" : "";
+  }
+
+  // load remembered live settings
+  try{
+    var saved = JSON.parse(localStorage.getItem("wlts_demo")||"{}");
+    if(saved.url) $("#hookurl").value = saved.url;
+    if(saved.board) $("#boardurl").value = saved.board;
+    if(saved.secret) $("#secret").value = saved.secret;
+  }catch(e){}
+
+  $("#gear").onclick = function(){ $("#drawer").classList.toggle("open"); };
+  $("#toggle").onclick = function(e){ var b=e.target.closest("button"); if(b) setMode(b.dataset.m); };
+  $("#remember").onclick = function(){
+    try{
+      localStorage.setItem("wlts_demo", JSON.stringify({url:$("#hookurl").value,board:$("#boardurl").value,secret:$("#secret").value}));
+      toast("Saved on this PC — you won't need to retype the secret.", false);
+    }catch(e){ toast("Could not save in this browser.", true); }
+  };
+  $("#go").onclick = fire;
+  $("#reset").onclick = function(){
+    document.querySelectorAll(".card").forEach(function(c){c.remove()});
+    seq=872; created=0; $("#docno").textContent="SI-2026-00872";
+    seed(); toast("Board reset.", false);
+  };
+
+  seed();
+})();
+</script>
+</body>
+</html>
