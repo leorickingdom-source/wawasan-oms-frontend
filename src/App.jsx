@@ -132,6 +132,7 @@ function deliveryTag(o) {
 const NAV = [
   { id: "board", label: "Order Board", icon: "board", roles: [...BOARD_ROLES, "admin"] },
   { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "admin"] },
+  { id: "import", label: "Import Invoices", icon: "upload", roles: ["super_admin"] },
   { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "delivery_team", "admin"] },
   { id: "floor", label: "Floor Display", icon: "display" }, // every role; rendered as a distinct launch button, not a workspace tab
   { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "production_lead"] },
@@ -144,6 +145,7 @@ const NAV = [
 const PAGE_META = {
   board: ["Order Board", ""],
   dashboard: ["Dashboard", "Operations overview"],
+  import: ["Import from SQL Account", "Upload a CSV export — new invoices become orders"],
   delivery: ["Delivery", "Schedule and dispatch"],
   reports: ["Reports", "Department performance"],
   messages: ["Messages", "WhatsApp customer updates & morning brief"],
@@ -396,6 +398,7 @@ const ICONS = {
   alert: '<path d="M10.3 3.9 1.9 18a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4.5M12 17h.01"/>',
   chevron: '<path d="M6 9.5 12 15l6-5.5"/>',
   menu: '<path d="M3 6h18M3 12h18M3 18h18"/>',
+  upload: '<path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/><path d="M12 15.5V4M7.5 8.5 12 4l4.5 4.5"/>',
 };
 function Icon({ name, size = 18, color = "currentColor", strokeWidth = 1.9, style }) {
   const filled = name === "dots";
@@ -1784,6 +1787,124 @@ function CreateOrderForm({ onCreated, onClose, onOpenExisting }) {
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
         <Btn onClick={submit} disabled={busy || !!dup}>{busy ? "Creating…" : "Create order"}</Btn>
       </div>
+    </div>
+  );
+}
+
+// ─── Import from SQL Account (CSV → orders, all server-side) ────────────────────
+function ImportInvoices({ onImported, onOpenOrder }) {
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);   // { total, new_count, duplicate_count, invoices:[{invoice_number,customer_name,item_count,exists}] }
+  const [results, setResults] = useState(null);   // after commit: { created, duplicate, failed, results:[{invoice_number,status,id}] }
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [over, setOver] = useState(false);
+  const inputId = "import-csv-input";
+
+  function sendFile(f, commit) {
+    const fd = new FormData();
+    fd.append("file", f);
+    fd.append("commit", commit ? "true" : "false");
+    return api("POST", "/orders/import", fd, true);
+  }
+  async function loadFile(f) {
+    if (!f) return;
+    if (!/\.csv$/i.test(f.name)) { setErr("Please choose a .csv export (SQL Account → Export → CSV)."); return; }
+    setErr(""); setResults(null); setPreview(null); setFile(f); setBusy(true);
+    try { setPreview(await sendFile(f, false)); }
+    catch (e) { setErr(e.message); setFile(null); }
+    finally { setBusy(false); }
+  }
+  async function doImport() {
+    if (!file || !preview || preview.new_count === 0) return;
+    setBusy(true); setErr("");
+    try { setResults(await sendFile(file, true)); onImported && onImported(); }
+    catch (e) { setErr(e.message); }
+    finally { setBusy(false); }
+  }
+  function reset() { setFile(null); setPreview(null); setResults(null); setErr(""); }
+
+  function badge(st) {
+    const map = {
+      new: { c: C.green, bg: "#10241a", b: "#2f5d44", t: "new" },
+      created: { c: C.green, bg: "#10241a", b: "#2f5d44", t: "created ✓" },
+      duplicate: { c: C.packing, bg: "#2a2210", b: "#5d4f2f", t: "already in system" },
+      failed: { c: "#fca5a5", bg: "#2a1714", b: "#6b2f2f", t: "failed" },
+    };
+    const m = map[st] || map.new;
+    return <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", padding: "2px 8px", borderRadius: 999, color: m.c, background: m.bg, border: `1px solid ${m.b}` }}>{m.t}</span>;
+  }
+  const th = { textAlign: "left", color: C.text3, fontWeight: 600, textTransform: "uppercase", fontSize: 10, letterSpacing: ".06em", borderBottom: `1px solid ${C.border}`, padding: "7px 8px" };
+  const td = { padding: "9px 8px", borderBottom: `1px solid ${C.border}` };
+
+  return (
+    <div style={{ maxWidth: 920 }}>
+      <p style={{ color: C.text2, fontSize: 14, margin: "0 0 16px", maxWidth: 760 }}>
+        Export your day's invoices from <b style={{ color: C.text }}>SQL Account</b> as CSV and drop the file here — every new invoice becomes a job on the board. Parsing and the duplicate-check run in the cloud, so <b style={{ color: C.text }}>nothing is installed on your PC</b>.
+      </p>
+
+      <div
+        onClick={() => document.getElementById(inputId).click()}
+        onDragEnter={(e) => { e.preventDefault(); setOver(true); }}
+        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+        onDragLeave={(e) => { e.preventDefault(); setOver(false); }}
+        onDrop={(e) => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadFile(f); }}
+        style={{ background: over ? "#231a12" : C.surface, border: `2px dashed ${over ? C.accent : C.border2}`, borderRadius: 14, padding: "30px 22px", textAlign: "center", cursor: "pointer", transition: ".15s" }}>
+        <Icon name="upload" size={30} color={C.text2} />
+        <div style={{ fontSize: 16, fontWeight: 700, color: C.text, marginTop: 8 }}>{file ? file.name : "Drop your SQL Account CSV here"}</div>
+        <div style={{ fontSize: 12.5, color: C.text3, marginTop: 3 }}>{busy && !preview && !results ? "Reading…" : "Sales-invoice export · one file, many invoices · or click to browse"}</div>
+        <input id={inputId} type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; loadFile(f); }} />
+      </div>
+      <div style={{ fontSize: 11.5, color: C.text3, marginTop: 6 }}>In SQL Account: <b style={{ color: C.text2 }}>Sales → Invoice → Print/Preview → Export → CSV</b>. Column names are matched automatically.</div>
+
+      {err && <p style={{ color: "#fca5a5", fontSize: 13, margin: "12px 0 0" }}>⚠ {err}</p>}
+
+      {preview && (
+        <div style={{ marginTop: 18, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 14, padding: 16 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+            {[["Invoices in file", preview.total, C.text],
+              [results ? "Created" : "New → board", results ? results.created : preview.new_count, C.green],
+              ["Already in system", results ? results.duplicate : preview.duplicate_count, C.packing],
+              ...(results && results.failed ? [["Failed", results.failed, C.danger]] : [])].map(([l, n, c], i) => (
+              <div key={i} style={{ background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 10, padding: "9px 14px", minWidth: 96 }}>
+                <div style={{ fontSize: 21, fontWeight: 800, fontFamily: MONO, color: c }}>{n}</div>
+                <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".06em", color: C.text3 }}>{l}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead><tr>{["Doc No", "Customer", "Items", "Status"].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {preview.invoices.map((inv) => {
+                  const hit = results ? (results.results || []).find((x) => x.invoice_number === inv.invoice_number) : null;
+                  const st = hit ? hit.status : (inv.exists ? "duplicate" : "new");
+                  const openable = hit && hit.status === "created" && hit.id && onOpenOrder;
+                  return (
+                    <tr key={inv.invoice_number}>
+                      <td style={{ ...td, fontFamily: MONO, fontWeight: 600, color: C.text }}>
+                        {openable
+                          ? <button onClick={() => onOpenOrder(hit.id)} style={{ background: "none", border: 0, padding: 0, fontFamily: MONO, fontWeight: 600, fontSize: "inherit", color: C.accent, cursor: "pointer" }}>{inv.invoice_number}</button>
+                          : inv.invoice_number}
+                      </td>
+                      <td style={{ ...td, color: C.text2 }}>{inv.customer_name || "—"}</td>
+                      <td style={{ ...td, color: C.text3, fontFamily: MONO }}>{inv.item_count}</td>
+                      <td style={td}>{badge(st)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 16, flexWrap: "wrap" }}>
+            {!results
+              ? <Btn onClick={doImport} disabled={busy || preview.new_count === 0}>{busy ? "Importing…" : `Import ${preview.new_count} new order${preview.new_count === 1 ? "" : "s"}`}</Btn>
+              : <Btn onClick={reset}>Import another file</Btn>}
+            <button onClick={reset} style={{ fontSize: 12, color: C.text3, background: "none", border: 0, cursor: "pointer", textDecoration: "underline dotted" }}>Clear</button>
+            {results && <span style={{ fontSize: 12.5, color: C.text2, marginLeft: "auto" }}>{results.created} created · {results.duplicate} skipped{results.failed ? ` · ${results.failed} failed` : ""} — duplicates auto-skipped.</span>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3991,6 +4112,7 @@ export default function App() {
         <main style={{ flex: 1, padding: isMobile ? "16px 14px 32px" : "20px 26px 40px", overflowX: "auto" }}>
           {view === "board" && <OrderBoard user={user} search={search} weekOnly={weekOnly} statusFilter={statusFilter} refreshKey={boardKey} onOpenOrder={(o) => openOrder(o.id)} onCount={setBoardCount} unreadIds={unreadIds} />}
           {view === "dashboard" && <Dashboard onOpenOrder={(id) => openOrder(id)} />}
+          {view === "import" && <ImportInvoices onImported={bumpBoard} onOpenOrder={(id) => openOrder(id)} />}
           {view === "delivery" && <Delivery user={user} onOpenOrder={(id) => openOrder(id)} />}
           {view === "reports" && <Reports user={user} />}
           {view === "messages" && <Messages user={user} />}
