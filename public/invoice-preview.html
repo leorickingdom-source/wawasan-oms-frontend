@@ -76,6 +76,20 @@
   .paper .foot{display:flex; justify-content:space-between; align-items:center; margin-top:12px; font-size:11px; color:#9a8f7d}
   .paper .foot .nodes{font-style:italic}
   .stamp{position:absolute; right:16px; bottom:14px; font-family:var(--mono); font-size:10px; color:#bdb2a0; border:1px dashed #cabfa9; padding:2px 7px; border-radius:5px; transform:rotate(-6deg)}
+  table.items th:last-child{width:20px}
+  table.items td.delc{width:20px; text-align:center; padding:4px 2px}
+  .delx{border:0; background:none; color:#c98b8b; cursor:pointer; font-size:16px; line-height:1; padding:0 3px}
+  .delx:hover{color:#b91c1c}
+  .additem{display:flex; gap:6px; margin-top:9px; align-items:center; flex-wrap:wrap}
+  .additem input{font-family:var(--sans); font-size:12px; color:#1c1813; background:#fff; border:1px solid #e0d6c4; border-radius:6px; padding:6px 8px}
+  .additem input:focus{outline:none; border-color:var(--accent)}
+  .additem #addSku{flex:1; min-width:150px}
+  .additem #addQty{width:54px; text-align:right}
+  .additem #addUnit{width:60px}
+  .additem #addBtn{font-family:var(--sans); font-weight:700; font-size:12px; color:#fff; background:linear-gradient(var(--accent),#ea580c); border:0; border-radius:6px; padding:7px 12px; cursor:pointer; white-space:nowrap}
+  .additem #addBtn:hover{filter:brightness(1.07)}
+  .additem-hint{font-size:10px; color:#9a8f7d; margin-top:5px}
+  .additem-hint b{color:#b45309}
 
   /* ── Arrow + button column ─────────────────────────────── */
   .arrowcol{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; position:relative}
@@ -193,9 +207,17 @@
         </div>
       </div>
       <table class="items" id="itemsTbl">
-        <thead><tr><th>Code</th><th>Description</th><th class="qty">Qty</th><th>UOM</th></tr></thead>
+        <thead><tr><th>Code</th><th>Description</th><th class="qty">Qty</th><th>UOM</th><th></th></tr></thead>
         <tbody><!-- filled by JS --></tbody>
       </table>
+      <div class="additem">
+        <input id="addSku" list="skulist" placeholder="Add item — type STK code or product name…" autocomplete="off" />
+        <datalist id="skulist"></datalist>
+        <input id="addQty" type="number" min="1" value="1" title="Qty" />
+        <input id="addUnit" placeholder="UOM" title="UOM" />
+        <button type="button" id="addBtn">＋ Add</button>
+      </div>
+      <div class="additem-hint">From the real product list — <b id="catCount">0</b> STK/RS codes. Search by code or name.</div>
       <div class="foot">
         <span class="nodes">Prices &amp; tax stay in SQL Account.</span>
         <span>Page 1 of 1</span>
@@ -240,13 +262,167 @@
   var STAGE_COLORS = {order:'var(--order)',production:'var(--production)',packing:'var(--packing)',ready_for_delivery:'var(--ready)'};
   var DEFAULT_HOOK = "https://wawasan-oms-backend.vercel.app/api/orders/webhook/sql-account";
 
-  // Sample invoice line items — real STK master codes/names.
-  var ITEMS = [
+  // ── Real product catalogue — the client's STK + RS stocklist (the master the OMS uses).
+  // The client adds invoice lines by picking from these; the picker filters by code or name.
+  var CATALOG = [
+    {s:"STK002",n:"LILIN CAP LIGHT HOUSE 6' (6X20X6)",u:"PACK"},
+    {s:"STK006",n:"FIRE CHICKEN FIRESTARTER (40BIJI) - 72 BOX/CTN",u:"CTN"},
+    {s:"STK008",n:"FLYING HORSE FIRE STARTER (40BIJI)",u:"PACK"},
+    {s:"STK014",n:"LILIN CAP PIALA EMAS MODEL:88",u:"CTN"},
+    {s:"STK017",n:"LILIN CAP PIALA EMAS (SHORT CANDLE)",u:"CTN"},
+    {s:"STK018",n:"FANTES SHORT CANDLE - 6X25X6",u:"PACK"},
+    {s:"STK019",n:"FANTES FIRESTARTER",u:"CTN"},
+    {s:"STK022",n:"KIBI BRAND FIRESTARTER",u:"CTN"},
+    {s:"STK025",n:"FLYING HORSE WHITE CANDLE (0066)",u:"CTN"},
+    {s:"STK026",n:"LILIN PIALA EMAS (ITEM NO:2288)",u:"CTN"},
+    {s:"STK033",n:"4 PCS FIRESTARTER PACKING",u:"UNIT"},
+    {s:"STK035",n:"SERAI LILIN ANTI INSECTS CANDLES - 2PCS/PACK - (66 PACKS/CTN)",u:"CTN"},
+    {s:"STK037",n:"METALLOGY FIRE STARTER",u:"CTN"},
+    {s:"STK038",n:"GREENLINK BIOTECH FIRE STARTER",u:"CTN"},
+    {s:"STK039",n:"TEALIGHTS 100 PCS - 37 X 10",u:"PACK"},
+    {s:"STK046",n:"TEALIGHTS 10PCS - 37X 10 - (144 PACK/CTN)",u:"PACK"},
+    {s:"STK060",n:"TEALIGHTS 100PCS - 37X 15",u:"CTN"},
+    {s:"STK061",n:"TEALIGHTS 50PCS - 37 X 24",u:"CTN"},
+    {s:"STK084",n:"QUICK LIGHT FIRE STARTER 5'S/PACK",u:"PACK"},
+    {s:"STK086",n:"SERAI ANTI LALAT (37X10) - 10'S",u:"CTN"},
+    {s:"STK088",n:"TEALIGHTS 37 X 15 - 30'S (WHITE)",u:"CTN"},
+    {s:"STK089",n:"TEALIGHTS 37 X 15 - 30'S (LEMON)",u:"PACK"},
+    {s:"STK090",n:"TEALIGHTS 37 X 15 - 30'S (LAVENDER)",u:"PACK"},
+    {s:"STK091",n:"TEALIGHTS 37 X 15 - 30'S (APPLE)",u:"PACK"},
+    {s:"STK103",n:"SERAI LILIN 37X10 (2H) - 50'S/PACK",u:"CTN"},
+    {s:"STK108",n:"TEALIGHTS (2H) 10'S PACK - YELLOW LEMON (144 PACKS/CTN)",u:"CTN"},
+    {s:"STK109",n:"TEALIGHTS (2H) 10'S PACK - PURPLE LAVENDER (144 PACKS/CTN)",u:"CTN"},
+    {s:"STK110",n:"TEALIGHTS (2H) 10'S PACK - GREEN APPLE (144 PACKS/CTN)",u:"CTN"},
+    {s:"STK120",n:"WHITE CANDLE 998 9.7 INCH (2'S) - 50 BOX/CTN",u:"CTN"},
+    {s:"STK131",n:"LILIN PIALA EMAS (ITEM NO:3399) - 6'S X 40 BOXES/CTN",u:"BOX"},
+    {s:"STK134",n:"TEALIGHT WHITE - 2H (50'S)",u:"CTN"},
+    {s:"STK141",n:"BUTTER LAMP TEALIGHT CANDLE - 4H YELLOW (100'S)",u:"CTN"},
+    {s:"STK142",n:"BUTTER LAMP TEALIGHT CANDLE - 4H RED (100'S)",u:"CTN"},
+    {s:"STK149",n:"INCENSE OIL BURNER + CANDLE TRAY + FREE 4 PCS TEALIGHT CANDLE (A)",u:"UNIT"},
+    {s:"STK152",n:"SERAI LILIN 37X15 - 30'S",u:"CTN"},
+    {s:"STK166",n:"3KG NATURAL CHARCOAL BEADS/BATU ARANG SEMULAJADI",u:"CTN"},
+    {s:"STK177",n:"WAX MELTS (6PCS PER PACK) LAVENDER",u:"PACK"},
+    {s:"STK181",n:"INCENSE OIL BURNER + CANDLE TRAY + FREE 4 PCS TEALIGHT CANDLE + FREE WAX MELTS",u:"UNIT"},
+    {s:"STK184",n:"INCENSE OIL BURNER + CANDLE TRAY + FREE 4 PCS TEALIGHT CANDLE (B)",u:"UNIT"},
+    {s:"STK185",n:"INCENSE OIL BURNER + CANDLE TRAY + FREE 4 PCS TEALIGHT CANDLE (C)",u:"UNIT"},
+    {s:"STK186",n:"INCENSE OIL BURNER + CANDLE TRAY + FREE 4 PCS TEALIGHT CANDLE (D)",u:"UNIT"},
+    {s:"STK187",n:"INCENSE OIL BURNER + CANDLE TRAY + FREE 4 PCS TEALIGHT CANDLE (E)",u:"UNIT"},
+    {s:"STK188",n:"INCENSE OIL BURNER + CANDLE TRAY + FREE 4 PCS TEALIGHT CANDLE (F)",u:"UNIT"},
+    {s:"STK189",n:"INCENSE OIL BURNER + CANDLE TRAY + FREE 4 PCS TEALIGHT CANDLE (G)",u:"UNIT"},
+    {s:"STK190",n:"INCENSE OIL BURNER + CANDLE TRAY + FREE 4 PCS TEALIGHT CANDLE (H)",u:"UNIT"},
+    {s:"STK191",n:"WAX MELTS (6 PCS PER PACK) LEMONGRASS",u:"PACK"},
+    {s:"STK203",n:"WAX MELTS (6 PCS PER PACK) ROSE",u:"PACK"},
+    {s:"STK222",n:"TEA LIGHTS (4h) - 30's (ROSE) (24 PACK/CTN)",u:"CTN"},
+    {s:"STK238",n:"GREEN BIG SIZE BURNER + CANDLE TRAY + 4 PCS TEALIGHT CANDLE",u:"UNIT"},
+    {s:"STK239",n:"ORANGE BIG SIZE BURNER + CANDLE TRAY + 4 PCS TEALIGHT CANDLE",u:"UNIT"},
+    {s:"STK240",n:"PINK BIG SIZE BURNER + CANDLE TRAY + 4 PCS TEALIGHT CANDLE",u:"UNIT"},
+    {s:"STK243",n:"GLASS CUP (60ML)",u:"CTN"},
+    {s:"STK244",n:"GLASS CUP (100ML)",u:"UNIT"},
+    {s:"STK245",n:"GLASS CUP (200ML) WITH LID",u:"UNIT"},
+    {s:"STK251",n:"MATTE JAR WITH LID (200ML)",u:"UNIT"},
+    {s:"STK253",n:"BOX (6 PCS )",u:"UNIT"},
+    {s:"STK268",n:"WAX MELTS (6 PCS PER PACK) LEMON",u:"UNIT"},
+    {s:"STK270",n:"WAX MELTS (6 PCS PER PACK) VANILLA",u:"UNIT"},
+    {s:"STK280",n:"SZENT RADIANZE BRAND GLASS CANDLE (WHITE UNSCENTED) 12HRS+/- (144PCS/CTN)",u:"CTN"},
+    {s:"STK281",n:"SZENT RADIANZE BRAND GLASS CANDLE (WHITE VANILLA SCENTED) 12HRS+/- (144PCS/CTN)",u:"CTN"},
+    {s:"STK282",n:"SZENT RADIANZE BRAND GLASS CANDLE (YELLOW UNSCENTED) 12HRS+/- (144PCS/CTN)",u:"CTN"},
+    {s:"STK283",n:"SZENT RADIANZE BRAND GLASS CANDLE (YELLOW LEMON SCENTED) 12HRS+/- (144PCS/CTN)",u:"CTN"},
+    {s:"STK284",n:"SZENT RADIANZE BRAND GLASS CANDLE (PINK UNSCENTED) 12HRS+/- (144PCS/CTN)",u:"CTN"},
+    {s:"STK285",n:"SZENT RADIANZE BRAND GLASS CANDLE (PINK ROSE SCENTED) 12HRS+/- (144PCS/CTN)",u:"CTN"},
+    {s:"STK286",n:"SZENT RADIANZE BRAND GLASS CANDLE (RED UNSCENTED) 12HRS+/- (144PCS/CTN)",u:"CTN"},
+    {s:"STK287",n:"SZENT RADIANZE BRAND GLASS CANDLE (RED BLOSSOM SCENTED) 12HRS+/- (144PCS/CTN)",u:"CTN"},
+    {s:"STK288",n:"SZENT RADIANZE BRAND GLASS CANDLE (PURPLE UNSCENTED) 12HRS+/- (144PCS/CTN)",u:"CTN"},
+    {s:"STK289",n:"SZENT RADIANZE BRAND GLASS CANDLE (PURPLE LAVENDER SCENTED) 12HRS+/- (144PCS/CTN)",u:"CTN"},
+    {s:"STK296",n:"SERAI LILIN ANTI LALAT (4H)-10'S (10 PACKS/BUNDLE) (10 BUNDLE/CTN)",u:"CTN"},
+    {s:"STK303",n:"ECO 7 INCH X 8 PCS LILIN (8pcs in a box) (40box/ctn)",u:"CTN"},
+    {s:"STK314",n:"ECO 2 PCS SERAI LILIN (57-22) 8H - 60 PACKS/CTN",u:"CTN"},
+    {s:"STK320",n:"PIALA EMAS BRAND FIRE STARTER 30'S (72BOX/CTN)",u:"CTN"},
+    {s:"STK327",n:"TEALIGHT CANDLE 25'S (6H)",u:"PACK"},
+    {s:"STK328",n:"2 PCS SERAI LILIN (57-22) 8H",u:"PACK"},
+    {s:"STK330",n:"TEA LIGHTS (2H) 10'S PACK - WHITE",u:"PACK"},
+    {s:"STK331",n:"PLASTIC TEALIGHT CUP (12/SET)",u:"SET"},
+    {s:"STK334",n:"FROSTED JAR - 200ML",u:"UNIT"},
+    {s:"STK335",n:"WHITE CANDLE 7.5\" (6'S) (50PACK/CTN)",u:"CTN"},
+    {s:"STK337",n:"ECO TEALIGHT CANDLE - WHITE 12pcs (2hr+/-) (120packs/ctn)",u:"CTN"},
+    {s:"STK338",n:"ECO TEALIGHT SERAI LILIN ANTI LALAT 12pcs (2hr+/-) (120packs/ctn)",u:"CTN"},
+    {s:"STK339",n:"ECO TEALIGHT CANDLE - LAVENDER 12pcs (2hr+/-) (120packs/ctn)",u:"CTN"},
+    {s:"STK340",n:"ECO TEALIGHT CANDLE - ROSE 12pcs (2hr+/-) (120packs/ctn)",u:"CTN"},
+    {s:"STK341",n:"ECO TEALIGHT CANDLE - VANILLA 12pcs (2hr+/-) (120packs/ctn)",u:"CTN"},
+    {s:"STK342",n:"ECO TEALIGHT CANDLE - LEMON 12pcs (2hr+/-) (120packs/ctn)",u:"CTN"},
+    {s:"STK343",n:"ECO TEALIGHT CANDLE - APPLE 12pcs (2hr+/-) (120packs/ctn)",u:"CTN"},
+    {s:"STK344",n:"ECO SHORT CANDLE - SERAI LILIN ANTI LALAT (4 INCH+/-) (6 PCS/PACK) (12 DOZ/CTN)",u:"CTN"},
+    {s:"STK345",n:"WAX MELTS (6 PCS PER PACK) FLORA ROMANCE",u:"PACK"},
+    {s:"STK347",n:"WAX MELTS (6 PCS PER PACK) BABY FANTASIA",u:"UNIT"},
+    {s:"STK348",n:"GLASS CANDLE WITH LID (100ML)",u:"UNIT"},
+    {s:"STK349",n:"SHORT CANDLE SERAI LILIN 4 INCH - 6 PCS/BOX (150 BOX/CTN)",u:"CTN"},
+    {s:"STK353",n:"SERAI LILIN ANTI LALAT SHORT CANDLE 6'S (150 BOX/CTN)",u:"CTN"},
+    {s:"STK356",n:"TUNGKU BAYI",u:"UNIT"},
+    {s:"STK372",n:"ECO LILIN 9 INCH X 5 PCS (50pack/ctn)",u:"CTN"},
+    {s:"STK379",n:"SERAI LILIN ANTI LALAT LONG CANDLE 6'S (50 BOX/CTN)",u:"CTN"},
+    {s:"STK380",n:"DINNER CANDLE-IVORY/PEACH- LONG 9\" (5'S X 50PACKS)",u:"CTN"},
+    {s:"STK381",n:"DINNER CANDLE-PINK- LONG 9\" (5'S X 50PACKS)",u:"CTN"},
+    {s:"STK382",n:"DINNER CANDLE-PURPLE- LONG 9\" (5'S X 50PACKS)",u:"CTN"},
+    {s:"STK387",n:"GLASS SCENTED CANDLE-VANILLA (12HOURS) (12/144)",u:"CTN"},
+    {s:"STK388",n:"GLASS SCENTED CANDLE-APPLE (12HOURS) (12/144)",u:"CTN"},
+    {s:"STK391",n:"WAX MELTS (6 PCS PER PACK) RED ROSY",u:"UNIT"},
+    {s:"STK392",n:"WAX MELTS (6 PCS PER PACK) GARDEN BLOOM",u:"UNIT"},
+    {s:"STK394",n:"TUNGKU IBU",u:"UNIT"},
+    {s:"STK400",n:"BUTTER LAMP TEALIGHT CANDLE-4H RED (10'S)",u:"UNIT"},
+    {s:"STK401",n:"TEALIGHT 50'S (8H)",u:"UNIT"},
+    {s:"STK406",n:"DINNER CANDLE BLUE 9INCH",u:"UNIT"},
+    {s:"STK407",n:"DINNER CANDLE RED 9INCH",u:"UNIT"},
+    {s:"STK408",n:"DINNER CANDLE GREEN 9INCH",u:"UNIT"},
+    {s:"STK409",n:"WAX MELTS YUZU",u:"UNIT"},
+    {s:"STK410",n:"WAX MELTS CITRONELLA",u:"UNIT"},
+    {s:"STK415",n:"PREMIUM SMALL BURNER + TL 100'S (2H)",u:"UNIT"},
+    {s:"STK437",n:"TL-10'S (4H)",u:"UNIT"},
+    {s:"STK439",n:"TEALIGHT 20'S (8H)",u:"UNIT"},
+    {s:"STK440",n:"WAX MELT - SWEET JOURNEY",u:"UNIT"},
+    {s:"STK441",n:"WAX MELT - PANDAN",u:"UNIT"},
+    {s:"STK442",n:"WAX MELT- SAKURA ROMEO",u:"UNIT"},
+    {s:"STK443",n:"WAX MELT LOVE STORY",u:"UNIT"},
+    {s:"STK444",n:"WAX MELT WISH UPON A STAR",u:"UNIT"},
+    {s:"STK445",n:"WAX MELT DANCING JOY",u:"UNIT"},
+    {s:"STK446",n:"WAX MELT ENCHANTED OCEAN",u:"UNIT"},
+    {s:"STK447",n:"WAX MELT TROPICAL PASSION",u:"UNIT"},
+    {s:"STK448",n:"WAX MELT COZY DREAM",u:"UNIT"},
+    {s:"STK449",n:"WAX MELT PLEASANT PEACE",u:"UNIT"},
+    {s:"STK455",n:"200ML MATTE BLACK JAR (H8.4CM, W7CM) WITH COVER",u:"UNIT"},
+    {s:"STK456",n:"WAX MELT-LOVE TO LOVE",u:"UNIT"},
+    {s:"STK457",n:"WAX MELT-SWEET DREAM DEAR",u:"UNIT"},
+    {s:"STK458",n:"WAX MELT-HEART TOGETHER",u:"UNIT"},
+    {s:"STK459",n:"WAX MELT-ETERNAL YOUTH",u:"UNIT"},
+    {s:"STK460",n:"WAX MELT-JOYFUL WAVES",u:"UNIT"},
+    {s:"STK461",n:"WAX MELT-DREAMY AGARWOOD",u:"UNIT"},
+    {s:"STK465",n:"TIN MERAH - EMERGENCY CANDLE (15H+/-)",u:"UNIT"},
+    {s:"STK466",n:"TIN HIJAU - CITRONELLA CANDLE (15H+/-)",u:"UNIT"},
+    {s:"STK467",n:"PREMIUM GLASS CANDLE HOLDER",u:"UNIT"},
+    {s:"STK469",n:"SIGNATURE BURNER",u:"UNIT"},
+    {s:"STK490",n:"TEALIGHT PURPLE LAVENDER 100'S (2H)",u:"PACK"},
+    {s:"STK491",n:"TEALIGHT PINK ROSE 100'S (2H)",u:"PACK"},
+    {s:"ST00494",n:"ROSE FLOWER AROMA CANDLE- WHITE FRANCE VANILLA",u:"PCS"},
+    {s:"ST00491",n:"ROSE FLOWER AROMA CANDLE- RED COCO CHANNEL",u:"PCS"},
+    {s:"ST00492",n:"ROSE FLOWER AROMA CANDLE- PURPLE SAGE",u:"PCS"},
+    {s:"ST00493",n:"ROSE FLOWER AROMA CANDLE- PINK SHANGRILA",u:"PCS"},
+    {s:"ST00495",n:"CHRYSANTHEMUM FLOWER AROMA CANDLE - WHITE FRANCE VANILLA",u:"PCS"},
+    {s:"ST00498",n:"CHRYSANTHEMUM FLOWER AROMA CANDLE - YELLOW CANG LAN",u:"PCS"},
+    {s:"ST00488",n:"PEONY FLOWER AROMA CANDLE (BIG)-YELLOW CANG LAN",u:"PCS"},
+    {s:"ST00490",n:"PEONY FLOWER AROMA CANDLE (BIG)-WHITE FRANCE VANILLA",u:"PCS"},
+    {s:"ST00489",n:"PEONY FLOWER AROMA CANDLE (BIG)-RED COCO CHANNEL",u:"PCS"},
+    {s:"ST00486",n:"PEONY FLOWER AROMA CANDLE (BIG)-PINK SHANGRILA",u:"PCS"},
+    {s:"ST00421",n:"WHITE CANDLE (1.58 X 18.5) 6PCS/PACK (50PACKS/CTN)",u:"CTN"}
+  ];
+  var CAT_BY_SKU = {};
+
+  // The invoice lines the client is building — starts as a sample order, fully editable.
+  var DEFAULT_ITEMS = [
     {sku:"STK006", name:"FIRE CHICKEN FIRESTARTER (40BIJI) - 72 BOX/CTN", quantity:20, unit:"CTN"},
     {sku:"STK035", name:"SERAI LILIN ANTI INSECTS CANDLES - 2PCS/PACK", quantity:8, unit:"CTN"},
     {sku:"STK088", name:"TEALIGHTS 37 X 15 - 30'S (WHITE)", quantity:15, unit:"CTN"},
     {sku:"STK280", name:"SZENT RADIANZE GLASS CANDLE (WHITE UNSCENTED)", quantity:5, unit:"CTN"}
   ];
+  function freshItems(){ return DEFAULT_ITEMS.map(function(x){ return {sku:x.sku,name:x.name,quantity:x.quantity,unit:x.unit}; }); }
+  var items = freshItems();
   // Cards already on the board, so it looks like a live system (not empty).
   var SEED = [
     {stage:"production", inv:"SI-2026-00869", cust:"Restoran Cahaya Maju", items:[{q:30,unit:"CTN",name:"PIALA EMAS FIRE STARTER 30'S"}]},
@@ -257,14 +433,42 @@
   var $ = function(s){return document.querySelector(s)};
   var mode = "sim", seq = 872, created = 0;
 
-  // ── render invoice items ──
-  (function(){
+  // ── invoice items: render, add (from catalogue), remove ──
+  function renderItems(){
     var tb = $("#itemsTbl tbody"), h="";
-    for(var i=0;i<ITEMS.length;i++){var it=ITEMS[i];
-      h += '<tr><td class="sku">'+it.sku+'</td><td>'+esc(it.name)+'</td><td class="qty">'+it.quantity+'</td><td>'+it.unit+'</td></tr>';
+    if(!items.length){ h='<tr><td colspan="5" style="color:#b9ac95;font-style:italic;padding:9px 6px">No items yet — add a product below.</td></tr>'; }
+    for(var i=0;i<items.length;i++){ var it=items[i];
+      h += '<tr><td class="sku">'+esc(it.sku)+'</td><td>'+esc(it.name)+'</td><td class="qty">'+esc(String(it.quantity))+'</td><td>'+esc(it.unit)+'</td>'+
+           '<td class="delc"><button type="button" class="delx" data-i="'+i+'" title="Remove">×</button></td></tr>';
     }
     tb.innerHTML = h;
-  })();
+  }
+  function fillCatalog(){
+    var dl=$("#skulist"), h="";
+    for(var i=0;i<CATALOG.length;i++){ var c=CATALOG[i]; CAT_BY_SKU[c.s.toUpperCase()]=c;
+      h += '<option value="'+esc(c.s+" — "+c.n)+'"></option>';
+    }
+    dl.innerHTML=h;
+    var cc=$("#catCount"); if(cc) cc.textContent=String(CATALOG.length);
+  }
+  function parsePick(v){
+    v=(v||"").trim(); if(!v) return null;
+    var parts=v.split(" — "), sku=parts[0].trim(), name=parts.length>1?parts.slice(1).join(" — ").trim():"";
+    var hit=CAT_BY_SKU[sku.toUpperCase()];
+    if(hit) return {sku:hit.s,name:hit.n,unit:hit.u};
+    var lo=v.toLowerCase();
+    for(var k in CAT_BY_SKU){ if(CAT_BY_SKU[k].n.toLowerCase()===lo){ var c=CAT_BY_SKU[k]; return {sku:c.s,name:c.n,unit:c.u}; } }
+    return {sku:(name?sku:(sku||"ITEM")), name:(name||sku), unit:""};   // accept free text too
+  }
+  function addItem(){
+    var p=parsePick($("#addSku").value);
+    if(!p){ toast("Type a product or STK code first.", true); $("#addSku").focus(); return; }
+    var qty=parseInt($("#addQty").value,10); if(!(qty>0)) qty=1;
+    var unit=($("#addUnit").value||"").trim() || p.unit || "CTN";
+    items.push({sku:p.sku,name:p.name,quantity:qty,unit:unit});
+    renderItems();
+    $("#addSku").value=""; $("#addQty").value="1"; $("#addUnit").value=""; $("#addSku").focus();
+  }
 
   function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 
@@ -322,12 +526,13 @@
   }
 
   function fire(){
+    if(!items.length){ toast("Add at least one item to the invoice first.", true); return; }
     var btn=$("#go"); btn.disabled=true;
     var cust = $("#cust").value.trim() || "Sample Customer Sdn Bhd";
     var terms = $("#terms").value;
     var inv = (mode==="live") ? demoNo() : nextDoc();
     $("#docno").textContent = inv;
-    var order = {stage:"order", inv:inv, cust:cust, items:ITEMS.map(function(it){return {q:it.quantity,unit:it.unit,name:it.name}})};
+    var order = {stage:"order", inv:inv, cust:cust, items:items.map(function(it){return {q:it.quantity,unit:it.unit,name:it.name}})};
 
     flyPacket(function(){
       if(mode==="live"){
@@ -355,7 +560,7 @@
       invoice_number: inv, customer_name: cust,
       order_date: new Date().toISOString().slice(0,10),
       payment_terms: terms, notes: "Client preview demo — safe to cancel",
-      items: ITEMS.map(function(it){return {sku:it.sku,name:it.name,quantity:it.quantity,unit:it.unit}})
+      items: items.map(function(it){return {sku:it.sku,name:it.name,quantity:it.quantity,unit:it.unit}})
     };
     fetch(url,{method:"POST",headers:{"Content-Type":"application/json","x-webhook-secret":secret},body:JSON.stringify(payload)})
       .then(function(r){
@@ -429,9 +634,18 @@
   $("#reset").onclick = function(){
     document.querySelectorAll(".card").forEach(function(c){c.remove()});
     seq=872; created=0; $("#docno").textContent="SI-2026-00872";
+    items = freshItems(); renderItems();
     seed(); toast("Board reset.", false);
   };
 
+  // Add-item controls — pick from the real catalogue, Enter or ＋ Add to add, × to remove.
+  $("#addBtn").onclick = addItem;
+  $("#addSku").addEventListener("keydown", function(e){ if(e.key==="Enter"){ e.preventDefault(); addItem(); } });
+  $("#addQty").addEventListener("keydown", function(e){ if(e.key==="Enter"){ e.preventDefault(); addItem(); } });
+  $("#addSku").addEventListener("input", function(){ var p=parsePick(this.value); if(p && p.unit && !$("#addUnit").value.trim()) $("#addUnit").value=p.unit; });
+  $("#itemsTbl tbody").addEventListener("click", function(e){ var b=e.target.closest(".delx"); if(b){ items.splice(parseInt(b.getAttribute("data-i"),10),1); renderItems(); } });
+
+  fillCatalog(); renderItems();
   seed();
 })();
 </script>
