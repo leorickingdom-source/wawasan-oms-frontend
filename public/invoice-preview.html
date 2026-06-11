@@ -134,6 +134,21 @@
   .toast b{color:#fff}
   .toast a{color:var(--accent2)}
   .toast .x{margin-left:10px; color:var(--text3); cursor:pointer}
+
+  /* ── Duplicate-guard demo ──────────────────────────────── */
+  .dupdemo{font-size:11px; color:var(--text2); background:var(--surface); border:1px solid var(--border2); border-radius:8px; padding:7px 11px; cursor:pointer; white-space:nowrap}
+  .dupdemo:hover{border-color:var(--danger); color:var(--text)}
+  .dupwrap{position:fixed; inset:0; background:rgba(8,6,4,.66); display:none; align-items:center; justify-content:center; padding:20px; z-index:60}
+  .dupwrap.show{display:flex}
+  .dupbox{background:var(--surface2); border:1px solid var(--danger); border-left:4px solid var(--danger); border-radius:14px; max-width:440px; padding:20px 22px; box-shadow:0 24px 60px -18px rgba(0,0,0,.85)}
+  .dupbox h4{margin:0 0 9px; font-size:15px; color:#fff; display:flex; align-items:center; gap:8px}
+  .dupbox p{margin:0 0 15px; font-size:13px; color:var(--text2); line-height:1.55}
+  .dupbox p .who{font-family:var(--mono); color:var(--accent2); font-weight:600}
+  .dupbox .acts{display:flex; gap:8px; flex-wrap:wrap}
+  .dupbox button{font-family:var(--sans); font-size:12.5px; font-weight:700; border-radius:8px; padding:9px 13px; cursor:pointer; border:1px solid var(--border2); background:var(--surface); color:var(--text)}
+  .dupbox button.open{background:linear-gradient(var(--accent),#ea580c); border:0; color:#fff}
+  .dupbox button.next{border-color:#2f5d44; color:var(--green); background:#10241a}
+  .dupbox button:hover{filter:brightness(1.08)}
 </style>
 </head>
 <body>
@@ -230,6 +245,7 @@
       <div class="wire"><div class="packet" id="packet"></div></div>
       <button class="go" id="go">Save &amp; Send&nbsp;to&nbsp;OMS&nbsp;▶</button>
       <div class="gocap">Same click your team does in SQL Account every day.</div>
+      <button class="dupdemo" id="dupDemo">⟳ Try a duplicate</button>
       <button class="reset" id="reset">↺ Reset board</button>
     </div>
 
@@ -252,6 +268,19 @@
       </div>
     </div>
 
+  </div>
+
+  <!-- Duplicate-guard overlay: what the OMS does when the same invoice arrives twice -->
+  <div class="dupwrap" id="dupwrap">
+    <div class="dupbox">
+      <h4>⚠ Duplicate invoice stopped</h4>
+      <p id="dupmsg"></p>
+      <div class="acts">
+        <button class="open" id="dupOpen">Open it</button>
+        <button class="next" id="dupNext">Use next free number</button>
+        <button id="dupEdit">Edit</button>
+      </div>
+    </div>
   </div>
 
   <div class="toast" id="toast"></div>
@@ -536,9 +565,10 @@
 
     flyPacket(function(){
       if(mode==="live"){
-        sendLive(inv, cust, terms, function(ok, msg, link){
+        sendLive(inv, cust, terms, function(ok, msg, link, dup){
           btn.disabled=false;
           if(ok){ addToOrder(order); toast('<b>Live order created:</b> '+inv+'. '+(link?'<a href="'+link+'" target="_blank">Open the real board ↗</a>':'Open your OMS board to see it.'), false); }
+          else if(dup){ showDup({inv:inv, live:true, board:link}); }
           else { toast('<b>Did not send.</b> '+msg, true); }
         });
       } else {
@@ -566,7 +596,7 @@
       .then(function(r){
         if(r.status===201){ cb(true,"",board||null); return; }
         if(r.status===401){ cb(false,"Wrong webhook secret.",null); return; }
-        if(r.status===409){ cb(false,"That invoice already exists — click again for a new number.",null); return; }
+        if(r.status===409){ cb(false,"",board||null,true); return; }
         if(r.status===400){ cb(false,"A required field was missing.",null); return; }
         cb(false,"Server returned HTTP "+r.status+".",null);
       })
@@ -644,6 +674,46 @@
   $("#addQty").addEventListener("keydown", function(e){ if(e.key==="Enter"){ e.preventDefault(); addItem(); } });
   $("#addSku").addEventListener("input", function(){ var p=parsePick(this.value); if(p && p.unit && !$("#addUnit").value.trim()) $("#addUnit").value=p.unit; });
   $("#itemsTbl tbody").addEventListener("click", function(e){ var b=e.target.closest(".delx"); if(b){ items.splice(parseInt(b.getAttribute("data-i"),10),1); renderItems(); } });
+
+  // ── duplicate-invoice demo ──
+  // Shows what the OMS does when the SAME invoice number is sent twice: it blocks
+  // the duplicate (no double job) and offers open / use-next-free / edit — mirroring
+  // the real New Order guard. In Live mode the backend's 409 routes here too.
+  var STAGE_LABEL = {order:'Order',production:'Production',packing:'Packing',ready_for_delivery:'Ready for Delivery'};
+  var dupTarget = null;
+  function pickExisting(){
+    var order=['production','packing','ready_for_delivery','order'];
+    for(var i=0;i<order.length;i++){
+      var c=document.querySelector('.col[data-stage="'+order[i]+'"] .card');
+      if(c){ var cu=c.querySelector('.cust'); return {el:c, inv:c.querySelector('.inv').textContent, cust:cu?cu.textContent:'', stage:order[i]}; }
+    }
+    return null;
+  }
+  function showDup(t){
+    dupTarget=t;
+    var where = t.live ? '' : ' — <b>'+esc(t.cust||'existing customer')+'</b> ('+(STAGE_LABEL[t.stage]||t.stage)+')';
+    $("#dupmsg").innerHTML = 'Invoice <span class="who">'+esc(t.inv)+'</span> is already in the system'+where+
+      '. The OMS blocks it, so the same order is never entered twice. You can:';
+    $("#dupOpen").textContent = t.live ? 'Open the real board ↗' : 'Open it';
+    $("#dupwrap").classList.add("show");
+  }
+  function hideDup(){ $("#dupwrap").classList.remove("show"); }
+  function dupDemo(){
+    var t=pickExisting();
+    if(!t){ toast("Send an order first, then try the duplicate test.", true); return; }
+    $("#docno").textContent=t.inv;            // SQL Account fires the SAME invoice number again
+    var btn=$("#go"); btn.disabled=true;
+    flyPacket(function(){ btn.disabled=false; showDup(t); });
+  }
+  $("#dupDemo").onclick = dupDemo;
+  $("#dupEdit").onclick = hideDup;
+  $("#dupOpen").onclick = function(){
+    if(dupTarget && dupTarget.live){ if(dupTarget.board) window.open(dupTarget.board,'_blank'); hideDup(); return; }
+    hideDup();
+    if(dupTarget && dupTarget.el){ var el=dupTarget.el; el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); el.scrollIntoView({behavior:'smooth',block:'center'}); }
+  };
+  $("#dupNext").onclick = function(){ hideDup(); fire(); };
+  $("#dupwrap").onclick = function(e){ if(e.target===this) hideDup(); };
 
   fillCatalog(); renderItems();
   seed();
