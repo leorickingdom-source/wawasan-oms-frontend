@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WAWASAN LTS — Split Order preview</title>
+<style>
+  :root{
+    --bg:#100e0c; --bg2:#16130f; --surface:#1c1813; --surface2:#241f18;
+    --border:#2c2620; --border2:#3a3329;
+    --text:#f5efe6; --text2:#b4aa9c; --text3:#7e7568;
+    --accent:#f97316; --order:#60a5fa; --production:#f97316; --packing:#f5b13a; --ready:#34d399;
+    --danger:#ef4444; --hold:#eab308;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;padding:20px 18px 60px}
+  h1{font-size:19px;margin:0 0 2px;letter-spacing:.2px}
+  .sub{color:var(--text2);font-size:13px;margin:0 0 16px}
+  .bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+  .barlbl{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--text3);font-weight:700}
+  .seg{display:inline-flex;background:var(--surface);border:1px solid var(--border2);border-radius:10px;padding:3px}
+  .seg button{appearance:none;border:0;background:transparent;color:var(--text2);
+    font-size:13px;font-weight:600;padding:7px 14px;border-radius:7px;cursor:pointer;transition:.15s}
+  .seg button.on{background:var(--accent);color:#1a1208}
+  .seg.role button.on{background:var(--order);color:#0a1422}
+  .reset{appearance:none;border:1px solid var(--border2);background:var(--surface);color:var(--text2);
+    font-size:12px;padding:7px 12px;border-radius:8px;cursor:pointer}
+  .reset:hover{color:var(--text);border-color:var(--text3)}
+  .note{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);
+    border-radius:8px;padding:11px 13px;font-size:13px;line-height:1.5;color:var(--text2);margin:8px 0 18px}
+  .note b{color:var(--text)}
+  .note .tag{color:var(--accent);font-weight:700}
+
+  .board{display:flex;gap:14px;overflow-x:auto;padding-bottom:8px}
+  .col{flex:1 0 250px;min-width:250px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:10px}
+  .col h2{font-size:12px;text-transform:uppercase;letter-spacing:.7px;margin:2px 4px 10px;
+    display:flex;align-items:center;gap:7px;color:var(--text2)}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .cnt{margin-left:auto;font-size:11px;color:var(--text3);font-weight:600;background:var(--surface);
+    border:1px solid var(--border);border-radius:20px;padding:1px 8px}
+  .role{font-size:10.5px;color:var(--text3);margin:0 4px 9px;font-weight:600;letter-spacing:.3px}
+
+  .card{background:var(--surface);border:1px solid var(--border2);border-left:3px solid var(--tie,#888);
+    border-radius:10px;padding:10px 11px;margin-bottom:9px;transition:box-shadow .12s}
+  .card.sib{box-shadow:0 0 0 1px var(--tie),0 6px 18px -6px rgba(0,0,0,.6)}
+  .chead{display:flex;align-items:center;gap:7px;margin-bottom:3px}
+  .code{font-family:ui-monospace,Consolas,monospace;font-size:13px;font-weight:700;letter-spacing:.3px}
+  .imp{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;padding:1px 6px;border-radius:5px}
+  .imp.vip{background:rgba(167,139,250,.18);color:#c4b5fd}
+  .imp.priority{background:rgba(249,115,22,.16);color:#fdba74}
+  .imp.standard{background:var(--surface2);color:var(--text3)}
+  .cust{font-size:11.5px;color:var(--text2);margin-bottom:8px}
+  .cust .due{color:var(--text3)}
+
+  .also{font-size:10.5px;color:var(--text3);margin:-3px 0 8px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+  .also .pill{background:var(--surface2);border:1px solid var(--border2);border-radius:20px;padding:1px 7px;color:var(--text2)}
+
+  .item{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--border)}
+  .item:first-of-type{border-top:0}
+  .item.waiting{opacity:.6}
+  .iqty{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--text3);min-width:30px}
+  .iname{font-size:12px;flex:1;line-height:1.25}
+  .isku{font-family:ui-monospace,Consolas,monospace;font-size:9.5px;color:var(--text3)}
+  .act{appearance:none;border:1px solid var(--border2);background:var(--surface2);color:var(--text);
+    font-size:11px;font-weight:600;padding:4px 9px;border-radius:7px;cursor:pointer;white-space:nowrap}
+  .act:hover{border-color:var(--accent);color:var(--accent)}
+  .donetag{font-size:10px;color:var(--ready);font-weight:700;display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
+  .donetag.wait{color:var(--text3)}
+
+  .gate{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:10.5px;font-weight:600;
+    color:var(--packing);background:rgba(245,177,58,.1);border:1px solid rgba(245,177,58,.25);border-radius:7px;padding:5px 8px}
+  .send{appearance:none;width:100%;margin-top:7px;border:1px solid var(--border2);background:var(--surface2);
+    color:var(--text);font-size:12px;font-weight:600;padding:7px;border-radius:8px;cursor:pointer}
+  .send:hover{border-color:var(--accent);color:var(--accent)}
+  .blocked{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;font-weight:600;
+    color:#fca5a5;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.25);border-radius:7px;padding:6px 8px}
+  .empty{font-size:11.5px;color:var(--text3);text-align:center;padding:18px 4px;opacity:.6}
+  .foot{margin-top:22px;font-size:12px;color:var(--text3);line-height:1.6;max-width:780px}
+  .foot b{color:var(--text2)}
+  kbd{font-family:ui-monospace,Consolas,monospace;background:var(--surface);border:1px solid var(--border2);
+    border-radius:4px;padding:0 5px;font-size:11px;color:var(--text2)}
+</style>
+</head>
+<body>
+  <h1>WAWASAN LTS &mdash; Split Order <span style="color:var(--text3);font-weight:400">/ concept preview</span></h1>
+  <p class="sub">One order, items at different stages, shown in every column at once &mdash; so production and packing work in parallel.</p>
+
+  <div class="bar">
+    <span class="barlbl">Board</span>
+    <div class="seg" id="seg">
+      <button data-mode="old">Today: order moves as one block</button>
+      <button data-mode="new" class="on">New: items flow on their own</button>
+    </div>
+    <button class="reset" id="reset">↺ Reset demo</button>
+  </div>
+  <div class="bar">
+    <span class="barlbl">View as</span>
+    <div class="seg role" id="roleseg">
+      <button data-role="lead" class="on">Lead / Boss</button>
+      <button data-role="production">Production</button>
+      <button data-role="packing">Packing</button>
+    </div>
+  </div>
+
+  <div class="note" id="note"></div>
+  <div class="board" id="board"></div>
+
+  <div class="foot">
+    <b>What you're looking at.</b> Hover any card &mdash; every copy of the same order glows (same colour stripe = same order).
+    Click <kbd>✓ Mark made</kbd> / <kbd>✓ Mark packed</kbd> to push one item forward and watch it hop columns.<br>
+    <b>Ready-for-Delivery gate.</b> A packed item whose order still has unpacked items <i>waits in Packing</i> (✓ packed · waiting).
+    The order only moves to Ready when <i>every</i> item is packed &mdash; then it lands there as one whole card. One order, one delivery.<br>
+    <b>View as.</b> <span style="color:var(--order)">Lead / Boss</span> see the <kbd>⇄ also in</kbd> tag (where else the order sits) and can act anywhere.
+    <span style="color:var(--text2)">Departments</span> only get the buttons for their own column and don't see the also-in tag &mdash; they just work their items.
+  </div>
+
+<script>
+const STAGES = [
+  {key:'order',       label:'Order',             color:'var(--order)',      role:'Operations'},
+  {key:'production',  label:'Production',         color:'var(--production)', role:'Production staff'},
+  {key:'packing',     label:'Packing',           color:'var(--packing)',    role:'Packing staff'},
+  {key:'ready',       label:'Ready for Delivery',color:'var(--ready)',      role:'Delivery team'},
+];
+const TIE = {p:'#a78bfa', b:'#60a5fa', g:'#2dd4bf', a:'#fbbf24'};
+const ROLES = {
+  lead:       {seeAlso:true,  acts:['production','packing'], release:true,  seeCust:true},
+  production: {seeAlso:false, acts:['production'],           release:false, seeCust:false},
+  packing:    {seeAlso:false, acts:['packing'],             release:false, seeCust:false},
+};
+const IMPLBL = {vip:'VIP customer', priority:'Priority customer', standard:'Standard order'};
+
+const SEED = () => ([
+  {code:'INV-1043', cust:'Aman Resort',  imp:'vip',      due:'Jun 13', released:false, tie:TIE.b, items:[
+    {sku:'CN-LAV-200',   name:'Lavender Candle 200g', qty:120, prod:false, pack:false},
+    {sku:'CN-CITRUS-120',name:'Citrus Candle 120g',   qty:80,  prod:false, pack:false},
+  ]},
+  {code:'INV-1042', cust:'Bayu Hotel',   imp:'priority', due:'Jun 12', released:true,  tie:TIE.p, items:[
+    {sku:'CN-LAV-100', name:'Lavender 100g',   qty:100, prod:false, pack:false},
+    {sku:'CN-VAN-60',  name:'Vanilla 60g',     qty:60,  prod:true,  pack:false},
+    {sku:'CN-SAN-40',  name:'Sandalwood 40g',  qty:40,  prod:true,  pack:true },
+  ]},
+  {code:'INV-1040', cust:'Cahaya Spa',   imp:'standard', due:'Jun 14', released:true,  tie:TIE.g, items:[
+    {sku:'CN-ROSE-80', name:'Rose 80g', qty:50, prod:false, pack:false},
+    {sku:'CN-OUD-30',  name:'Oud 30g',  qty:30, prod:false, pack:false},
+  ]},
+  {code:'INV-1041', cust:'Damai Villas', imp:'standard', due:'Jun 11', released:true,  tie:TIE.a, items:[
+    {sku:'CN-MINT-90', name:'Mint 90g', qty:70, prod:true, pack:true},
+  ]},
+]);
+
+let orders = SEED();
+let mode = 'new';
+let role = 'lead';
+
+const allPacked = o => o.items.every(it=>it.pack);
+
+// NEW: each item finds its own column from its two flags — but Ready is whole-order gated.
+function itemCol(o,it){
+  if(!o.released) return 'order';
+  if(!it.prod)    return 'production';
+  if(!it.pack)    return 'packing';
+  return allPacked(o) ? 'ready' : 'packing';   // packed, but order not fully packed → wait in Packing
+}
+// OLD: whole order parks at its slowest item.
+function orderStage(o){
+  if(!o.released) return 'order';
+  if(o.items.some(it=>!it.prod)) return 'production';
+  if(o.items.some(it=>!it.pack)) return 'packing';
+  return 'ready';
+}
+
+function esc(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+function noteHtml(){
+  if(mode==='new') return `<b>New view — items flow on their own.</b> <span class="tag">INV-1042 is in 2 columns at once.</span>
+    Production still has the Lavender; Packing already has the Vanilla. The Sandalwood is packed but <i>waits</i> — the order
+    reaches Ready for Delivery only once all 3 are packed.`;
+  return `<b>Today — the order moves as one block.</b> <span class="tag">INV-1042 is stuck in Production</span> because the Lavender isn't made —
+    even though its Vanilla &amp; Sandalwood are done. Packing can't start until the <i>whole</i> order arrives.`;
+}
+
+function render(){
+  document.getElementById('note').innerHTML = noteHtml();
+  const R = ROLES[role];
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+
+  STAGES.forEach(st=>{
+    const col = document.createElement('div');
+    col.className='col';
+
+    const cards = [];
+    orders.forEach(o=>{
+      if(mode==='new'){
+        const its = o.items.filter(it=>itemCol(o,it)===st.key);
+        if(its.length) cards.push({o,its});
+      }else{
+        if(orderStage(o)===st.key) cards.push({o,its:o.items});
+      }
+    });
+
+    col.innerHTML = `<h2><span class="dot" style="background:${st.color}"></span>${st.label}
+      <span class="cnt">${cards.length}</span></h2>
+      <div class="role">${st.role}</div>`;
+
+    if(!cards.length){
+      const e=document.createElement('div'); e.className='empty'; e.textContent='—'; col.appendChild(e);
+    }
+
+    cards.forEach(({o,its})=>{
+      const card=document.createElement('div');
+      card.className='card'; card.style.setProperty('--tie',o.tie);
+      card.dataset.code=o.code;
+
+      // "also in" — lead+ only
+      let alsoHtml='';
+      if(mode==='new' && R.seeAlso){
+        const cols=new Set(o.items.map(it=>itemCol(o,it)));
+        cols.delete(st.key);
+        if(cols.size){
+          const names=STAGES.filter(s=>cols.has(s.key)).map(s=>`<span class="pill">${s.label}</span>`).join('');
+          alsoHtml=`<div class="also">⇄ also in ${names}</div>`;
+        }
+      }
+
+      // customer line — scrubbed for floor departments
+      const custLine = R.seeCust
+        ? `${esc(o.cust)} · <span class="due">due ${o.due}</span>`
+        : `${IMPLBL[o.imp]} · <span class="due">due ${o.due}</span>`;
+
+      const canAct = mode==='new' && R.acts.includes(st.key);
+
+      let itemsHtml = its.map((it)=>{
+        const idx=o.items.indexOf(it);
+        let right='', cls='item';
+        if(mode==='new'){
+          if(st.key==='production'){
+            right = canAct ? `<button class="act" data-code="${o.code}" data-i="${idx}" data-do="prod">✓ Mark made</button>` : '';
+          }else if(st.key==='packing'){
+            if(!it.pack){
+              right = canAct ? `<button class="act" data-code="${o.code}" data-i="${idx}" data-do="pack">✓ Mark packed</button>` : '';
+            }else{
+              right = `<span class="donetag wait">✓ packed · waiting</span>`; cls+=' waiting';
+            }
+          }else if(st.key==='ready'){
+            right = `<span class="donetag">✓ packed</span>`;
+          }
+        }
+        return `<div class="${cls}">
+            <span class="iqty">${it.qty}×</span>
+            <span class="iname">${esc(it.name)}<br><span class="isku">${esc(it.sku)}</span></span>
+            ${right}
+          </div>`;
+      }).join('');
+
+      // footer: release button (order col), pack gate (packing col), old-mode bottleneck
+      let footHtml='';
+      if(st.key==='order' && mode==='new' && R.release){
+        footHtml=`<button class="send" data-code="${o.code}" data-do="release">▶ Send to production</button>`;
+      }else if(st.key==='order' && mode==='old'){
+        footHtml=`<button class="send" data-code="${o.code}" data-do="release">▶ Send to production</button>`;
+      }
+      if(mode==='new' && st.key==='packing' && R.seeAlso){
+        const packed=o.items.filter(x=>x.pack).length, tot=o.items.length;
+        if(packed<tot) footHtml=`<div class="gate">▢ ${packed}/${tot} packed — to Ready for Delivery when all packed</div>`;
+      }
+      if(mode==='old' && st.key==='production'){
+        const idle=o.items.filter(it=>it.prod && !it.pack).length;
+        if(idle) footHtml=`<div class="blocked">⏳ ${idle} item${idle>1?'s':''} made — waiting, can't be packed yet</div>`;
+      }
+
+      card.innerHTML=`<div class="chead"><span class="code">${o.code}</span>
+          <span class="imp ${o.imp}">${o.imp}</span></div>
+        <div class="cust">${custLine}</div>
+        ${alsoHtml}${itemsHtml}${footHtml}`;
+      col.appendChild(card);
+    });
+
+    board.appendChild(col);
+  });
+  wireHover();
+}
+
+function wireHover(){
+  document.querySelectorAll('.card').forEach(c=>{
+    c.addEventListener('mouseenter',()=>{
+      document.querySelectorAll(`.card[data-code="${c.dataset.code}"]`).forEach(s=>s.classList.add('sib'));
+    });
+    c.addEventListener('mouseleave',()=>{
+      document.querySelectorAll('.card.sib').forEach(s=>s.classList.remove('sib'));
+    });
+  });
+}
+
+document.getElementById('board').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  const o=orders.find(x=>x.code===b.dataset.code); if(!o) return;
+  const act=b.dataset.do;
+  if(act==='release') o.released=true;
+  else{ const it=o.items[+b.dataset.i]; if(act==='prod') it.prod=true; if(act==='pack') it.pack=true; }
+  render();
+});
+document.getElementById('seg').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  mode=b.dataset.mode;
+  document.querySelectorAll('#seg button').forEach(x=>x.classList.toggle('on',x===b));
+  render();
+});
+document.getElementById('roleseg').addEventListener('click',e=>{
+  const b=e.target.closest('button'); if(!b) return;
+  role=b.dataset.role;
+  document.querySelectorAll('#roleseg button').forEach(x=>x.classList.toggle('on',x===b));
+  render();
+});
+document.getElementById('reset').addEventListener('click',()=>{orders=SEED();render();});
+
+render();
+</script>
+</body>
+</html>
