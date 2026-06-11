@@ -109,7 +109,7 @@ const STAFF_RANKING_ENABLED = false;
 // instead of the whole order waiting at its slowest line. Dark by default; flip to true
 // once verified on the live board. Relies on the backend kanban `items[]` payload and
 // the item-PATCH `track` param (both shipped). When false the board is byte-identical.
-const SPLIT_BOARD_ENABLED = false;
+const SPLIT_BOARD_ENABLED = true;
 // Where a single line sits on the split board, from the two completion flags it already
 // carries: not produced → Production; produced but not packed → Packing; packed → done
 // (it waits in Packing until the whole order is advanced to Ready for Delivery).
