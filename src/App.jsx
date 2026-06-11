@@ -104,20 +104,8 @@ const REWARD_SYSTEM_ENABLED = false;
 // stay in place; flip to true to bring the two tabs back.
 const STAFF_RANKING_ENABLED = false;
 
-// Customer importance tiers — mirrors the backend `importance` column (low → high).
-// Production-floor roles see this in place of the customer name. To rename a tier,
-// change the label here (and the CHECK values in schema.sql if you add/remove one).
-const IMPORTANCE = {
-  standard: { label: "Standard", color: C.text2 },
-  priority: { label: "Priority", color: C.accent },
-  vip: { label: "VIP", color: C.danger },
-};
-const IMPORTANCE_OPTS = [
-  { value: "standard", label: "Standard" },
-  { value: "priority", label: "Priority" },
-  { value: "vip", label: "VIP" },
-];
-const impCfg = (level) => IMPORTANCE[level] || IMPORTANCE.standard;
+// Customer "importance" tiers removed 2026-06-11 — the board sorts by delivery date
+// instead. The backend `importance` column is kept (defaults 'standard') but unused.
 
 // Delivery sub-status pill for Ready-for-Delivery cards (board + floor): once a
 // delivery is scheduled the order reads "Pending", otherwise "Ready for Delivery".
@@ -132,11 +120,11 @@ function deliveryTag(o) {
 const NAV = [
   { id: "board", label: "Order Board", icon: "board", roles: [...BOARD_ROLES, "admin"] },
   { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "admin"] },
-  { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "delivery_team", "admin"] },
+  { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "delivery_team", "admin", "production_lead"] },
   { id: "floor", label: "Floor Display", icon: "display" }, // every role; rendered as a distinct launch button, not a workspace tab
   { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "production_lead"] },
   { id: "messages", label: "Messages", icon: "message", roles: ["super_admin"] },
-  { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead"] },
+  { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead", "production_staff"] },
   { id: "audit", label: "Audit Trail", icon: "audit", roles: ["super_admin", "admin"] },
   { id: "users", label: "User Management", icon: "users", roles: ["super_admin", "admin"] },
   { id: "settings", label: "System Settings", icon: "settings", roles: ["super_admin", "admin"] },
@@ -252,7 +240,7 @@ function printPickingSlip(order) {
   <div class="lh"><div class="mark">${flame}</div><div><div class="brand">WAWASAN LTS TRADING SDN BHD</div><div class="doc">Order Picking Slip</div></div><div class="inv">${escHtml(order.invoice_number)}</div></div>
   <hr class="rule"/>
   <div class="meta">
-    <div><b>Customer</b>${escHtml(order.customer_name || impCfg(order.importance).label)}</div>
+    <div><b>Customer</b>${escHtml(order.customer_name || "—")}</div>
     <div><b>Delivery date</b>${escHtml(fmtDay(order.required_delivery_date))}</div>
     <div><b>Stage</b>${escHtml((STAGE_LABELS[order.stage] || {}).label || order.stage)}</div>
     <div><b>Priority</b>${order.priority === "urgent" ? "URGENT" : "Normal"}</div>
@@ -520,14 +508,12 @@ function StackCard({ head, rows, actions }) {
 // ─── Kanban card (board) ───────────────────────────────────────────────────────
 function KanbanCard({ order, user, onOpen, onAdvance, onMoveBack, onReorderUp, onReorderDown, reorderable, rank, onSetTier, unread }) {
   const stage = STAGES[order.stage] || { color: C.text3 };
-  const [picker, setPicker] = useState(false); // tier-change picker open on the pill
   const rBtn = (dis) => ({ cursor: dis ? "default" : "pointer", opacity: dis ? 0.3 : 1, lineHeight: 1, fontSize: 10, padding: "2px 6px", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 5, color: C.text2 });
   const cd = countdown(order.required_delivery_date);
   const late = (daysUntil(order.required_delivery_date) ?? 0) < 0;
   const urgent = order.priority === "urgent";
   const onHold = !!order.on_hold;
   const waiting = !!order.waiting_stock;
-  const imp = impCfg(order.importance);
   const showName = !!order.customer_name;
   const dtag = deliveryTag(order);
   const invColor = late ? C.danger : urgent ? C.accent2 : C.text;
@@ -561,7 +547,7 @@ function KanbanCard({ order, user, onOpen, onAdvance, onMoveBack, onReorderUp, o
           {order.skip_production && <Pill color={C.accent} bg="transparent">No production</Pill>}
         </div>
       </div>
-      <div style={{ fontSize: 16.5, color: showName ? C.text : imp.color, fontWeight: 700, letterSpacing: 0.2, margin: "8px 0 0" }}>{showName ? order.customer_name : imp.label}</div>
+      <div style={{ fontSize: 16.5, color: showName ? C.text : C.text2, fontWeight: 700, letterSpacing: 0.2, margin: "8px 0 0" }}>{showName ? order.customer_name : `${order.item_count || 0} item${(order.item_count || 0) === 1 ? "" : "s"}`}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "5px 0 4px", fontSize: 12.5 }}>
         <Icon name="clock" size={13} color={cd.tone} />
         <span style={{ color: C.text2 }}>{fmtDay(order.required_delivery_date)}</span>
@@ -627,7 +613,7 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
   return (
     <Modal open onClose={onClose} title={title} width={520}>
       <div style={{ fontSize: 14, marginBottom: 4 }}>
-        <span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{order.invoice_number}</span> <span style={{ color: C.text2 }}>· {order.customer_name || impCfg(order.importance).label}</span>
+        <span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{order.invoice_number}</span> <span style={{ color: C.text2 }}>· {order.customer_name || `${order.item_count || 0} item${(order.item_count || 0) === 1 ? "" : "s"}`}</span>
       </div>
       <div style={{ fontSize: 12.5, color: C.text3, marginBottom: 14 }}>Check the items below are done, then confirm the move to <b style={{ color: C.text2 }}>{(STAGE_LABELS[to] || {}).label || to}</b>.</div>
       {!detail ? <Loading /> : (
@@ -651,12 +637,14 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
           })}
         </div>
       )}
-      {(order.stage === "production" || order.stage === "packing") && items.length > 0 && !allMade && (
+      {to === "ready_for_delivery" && items.length > 0 && !allMade ? (
+        <div style={{ fontSize: 12.5, color: C.danger, fontWeight: 600, marginBottom: 12 }}>✋ Every STK must be marked done before this order can move to Ready for Delivery.</div>
+      ) : (order.stage === "production" || order.stage === "packing") && items.length > 0 && !allMade ? (
         <div style={{ fontSize: 12.5, color: C.packing, marginBottom: 12 }}>⚠ Not all STKs are marked done yet — confirm only if your stage is actually complete.</div>
-      )}
+      ) : null}
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn onClick={go} disabled={busy}><Icon name="check" size={15} /> {busy ? "Moving…" : "Confirm & advance"}</Btn>
+        <Btn onClick={go} disabled={busy || (to === "ready_for_delivery" && items.length > 0 && !allMade)}><Icon name="check" size={15} /> {busy ? "Moving…" : "Confirm & advance"}</Btn>
       </div>
     </Modal>
   );
@@ -698,9 +686,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
   const [err, setErr] = useState("");
   const [confirmAdv, setConfirmAdv] = useState(null);
   const [moveBack, setMoveBack] = useState(null); // order being reversed via the red ↩ arrow
-  const [dragId, setDragId] = useState(null); // card being dragged
-  const [dragOverZone, setDragOverZone] = useState(null); // tier drop-zone hovered (key "stage:tier")
-  const canReorder = ["super_admin", "admin", "production_lead"].includes(user.role);
+  // (drag-to-tier board reordering removed — each column sorts by delivery date)
   const [viewStage, setViewStageRaw] = useState(() => {
     const saved = (typeof localStorage !== "undefined" && localStorage.getItem("oms_board_stage")) || "all";
     return saved === "all" || visibleStages(user.role).includes(saved) ? saved : "all";
@@ -726,7 +712,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [weekOnly, refreshKey]);
   // Near-instant board: re-check every 3s, but never mid-drag, mid-confirm or mid-reorder, so it can't fight the user.
-  useEffect(() => { pausePollRef.current = !!(dragId || confirmAdv || moveBack); }, [dragId, confirmAdv, moveBack]);
+  useEffect(() => { pausePollRef.current = !!(confirmAdv || moveBack); }, [confirmAdv, moveBack]);
   useEffect(() => {
     const t = setInterval(() => { if (!pausePollRef.current && !persistingRef.current) load(true); }, 3000);
     return () => clearInterval(t); /* eslint-disable-next-line */
@@ -744,65 +730,13 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     try { await api("POST", `/orders/${o.id}/move`, { to_stage: to, reason: reason || undefined }); setMoveBack(null); load(); }
     catch (e) { alert(e.message); }
   }
-  // Each column is grouped into priority tiers (VIP > Priority > Standard); within a tier the
-  // cards are a manual order (rank). Backend sorts by tier, then this order. Three clear moves:
-  // ▲▼ rank within a tier · tap the pill to change tier · drag a card into a group (tier + rank).
-  const TIER_ORDER = ["vip", "priority", "standard"];
-  // Persist a column's new full order (+ optionally a moved card's new tier). Optimistic.
-  async function persist(stage, orderedIds, setImp) {
-    const byId = Object.fromEntries((board[stage] || []).map((o) => [o.id, o]));
-    const next = orderedIds.map((id) => (setImp && id === setImp.id) ? { ...byId[id], importance: setImp.importance } : byId[id]);
-    setBoard({ ...board, [stage]: next }); // optimistic
-    setDragId(null);
-    persistingRef.current = true;                 // hold the 3s poll off until the reorder lands
-    try { await api("POST", "/orders/reorder", { stage, ordered_ids: orderedIds, set_importance: setImp || undefined }); lastSigRef.current = ""; }
-    catch (e) { alert(e.message); load(); }
-    finally { persistingRef.current = false; }
-  }
-  // ▲▼ — move a card up/down WITHIN its own tier only (rank). Never changes the tier.
-  function reorderMove(stage, id, dir) {
-    const arr = [...((board && board[stage]) || [])];
-    const i = arr.findIndex((o) => o.id === id); if (i < 0) return;
-    const me = arr[i];
-    let j = -1;
-    if (dir < 0) { for (let k = i - 1; k >= 0; k--) if (arr[k].importance === me.importance) { j = k; break; } }
-    else { for (let k = i + 1; k < arr.length; k++) if (arr[k].importance === me.importance) { j = k; break; } }
-    if (j < 0) return;
-    arr.splice(i, 1); arr.splice(j, 0, me);
-    persist(stage, arr.map((o) => o.id), null);
-  }
-  // Tap-the-pill tier change: move the card to the bottom of the target tier group.
-  function setTier(stage, id, tier) {
-    const arr = [...((board && board[stage]) || [])];
-    const i = arr.findIndex((o) => o.id === id); if (i < 0 || arr[i].importance === tier) return;
-    const me = arr[i]; arr.splice(i, 1);
-    let last = -1; arr.forEach((o, k) => { if (o.importance === tier) last = k; });
-    arr.splice(last + 1, 0, me);
-    persist(stage, arr.map((o) => o.id), { id, importance: tier });
-  }
-  // Drag onto a card → join that card's tier, just above it (sets tier + rank in one move).
-  function dropOnCard(stage, targetId) {
-    if (!dragId || dragId === targetId || !board) { setDragId(null); return; }
-    const arr = [...(board[stage] || [])];
-    const from = arr.findIndex((o) => o.id === dragId);
-    const target = arr.find((o) => o.id === targetId);
-    if (from < 0 || !target) { setDragId(null); return; }
-    const tier = target.importance, changed = arr[from].importance !== tier;
-    const me = arr[from]; arr.splice(from, 1);
-    arr.splice(arr.findIndex((o) => o.id === targetId), 0, me);
-    persist(stage, arr.map((o) => o.id), changed ? { id: dragId, importance: tier } : null);
-  }
-  // Drag onto a group (incl. an empty one) → join that tier at the bottom.
-  function dropOnZone(stage, tier) {
-    if (!dragId || !board) { setDragId(null); return; }
-    const arr = [...(board[stage] || [])];
-    const from = arr.findIndex((o) => o.id === dragId); if (from < 0) { setDragId(null); return; }
-    const changed = arr[from].importance !== tier;
-    const me = arr[from]; arr.splice(from, 1);
-    let last = -1; arr.forEach((o, k) => { if (o.importance === tier) last = k; });
-    arr.splice(last + 1, 0, me);
-    persist(stage, arr.map((o) => o.id), changed ? { id: dragId, importance: tier } : null);
-  }
+  // Each column is sorted by delivery deadline — earliest first, undated last; ties
+  // break on invoice number so the order is stable between refreshes.
+  const byDue = (arr) => [...arr].sort((a, b) => {
+    const da = a.required_delivery_date ? new Date(a.required_delivery_date).getTime() : Infinity;
+    const db = b.required_delivery_date ? new Date(b.required_delivery_date).getTime() : Infinity;
+    return da - db || String(a.invoice_number).localeCompare(String(b.invoice_number));
+  });
   const filt = (arr) => {
     const q = search.trim().toLowerCase();
     let out = arr;
@@ -841,7 +775,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
       <div style={{ display: "grid", gridTemplateColumns: shownStages.length === 1 ? `repeat(1, minmax(min(100%, 280px), 560px))` : `repeat(auto-fit, minmax(min(100%, 250px), 1fr))`, gap: 16, alignItems: "start" }}>
         {shownStages.map((s) => {
           const cfg = STAGES[s];
-          const orders = filt((board && board[s]) || []);
+          const orders = byDue(filt((board && board[s]) || []));
           return (
             <div key={s} style={{ background: C.bg2, border: `1px solid ${C.border}`, borderTop: `3px solid ${cfg.color}`, borderRadius: 13, padding: 12, minHeight: 200 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, padding: "2px 2px 0" }}>
@@ -852,59 +786,8 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
                 <span style={{ background: C.surface2, color: C.text2, borderRadius: 7, padding: "1px 9px", fontSize: 13, fontWeight: 700 }}>{orders.length}</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                {!canReorder ? (
-                  <>
-                    {orders.map((o) => <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} onMoveBack={reverse} unread={unreadIds && unreadIds.has(o.id)} />)}
-                    {orders.length === 0 && <Empty label="No orders" />}
-                  </>
-                ) : (
-                  <>
-                    {(() => {
-                      // Calm the tier scaffolding: hide empty tiers at rest (they come back
-                      // while dragging so you can still drop into one). The tier header always
-                      // shows when the column has cards, so staff can read a card's priority
-                      // even when it's the only order in the column. Per-column helper text
-                      // removed — the ⓘ in the toolbar explains drag/▲▼.
-                      const nonEmpty = TIER_ORDER.filter((t) => orders.some((o) => (o.importance || "standard") === t)).length;
-                      const showHeaders = nonEmpty > 0 || !!dragId;
-                      return TIER_ORDER.map((tier) => {
-                        const group = orders.filter((o) => (o.importance || "standard") === tier);
-                        if (group.length === 0 && !dragId) return null;
-                        const zoneKey = s + ":" + tier;
-                        const over = dragOverZone === zoneKey && dragId;
-                        const tcfg = IMPORTANCE[tier] || { label: tier, color: C.text3 };
-                        return (
-                          <div key={tier}
-                            onDragOver={(e) => { e.preventDefault(); if (dragOverZone !== zoneKey) setDragOverZone(zoneKey); }}
-                            onDragLeave={() => setDragOverZone((z) => (z === zoneKey ? null : z))}
-                            onDrop={(e) => { e.preventDefault(); setDragOverZone(null); dropOnZone(s, tier); }}
-                            style={{ borderRadius: 10, padding: "1px 2px", boxShadow: over ? `inset 0 0 0 1.5px ${C.accent}` : "none" }}>
-                            {showHeaders && (
-                              <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.5, color: tcfg.color, display: "flex", alignItems: "center", gap: 8, margin: "6px 4px 8px" }}>
-                                {tcfg.label}<span style={{ flex: 1, height: 1, background: C.border }} />
-                              </div>
-                            )}
-                            {group.length === 0
-                              ? <div style={{ fontSize: 11, color: C.text3, padding: "8px 10px", border: `1px dashed ${C.border2}`, borderRadius: 9, textAlign: "center", marginBottom: 4 }}>Drop here → {tcfg.label}</div>
-                              : group.map((o, i) => (
-                                  <div key={o.id} draggable
-                                    onDragStart={(e) => { setDragId(o.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", o.id); } catch (_) {} }}
-                                    onDragEnd={() => { setDragId(null); setDragOverZone(null); }}
-                                    onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) {} }}
-                                    onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverZone(null); dropOnCard(s, o.id); }}
-                                    style={{ cursor: "grab", opacity: dragId === o.id ? 0.4 : 1, marginBottom: 9 }}>
-                                    <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} onMoveBack={reverse} reorderable rank={i + 1} unread={unreadIds && unreadIds.has(o.id)}
-                                      onReorderUp={i > 0 ? () => reorderMove(s, o.id, -1) : null}
-                                      onReorderDown={i < group.length - 1 ? () => reorderMove(s, o.id, 1) : null}
-                                      onSetTier={(t) => setTier(s, o.id, t)} />
-                                  </div>
-                                ))}
-                          </div>
-                        );
-                      });
-                    })()}
-                  </>
-                )}
+                {orders.map((o) => <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} onMoveBack={reverse} unread={unreadIds && unreadIds.has(o.id)} />)}
+                {orders.length === 0 && <Empty label="No orders" />}
               </div>
             </div>
           );
@@ -991,6 +874,16 @@ function FloorDisplay({ onExit }) {
   const [detail, setDetail] = useState(null);
   const [vp, setVp] = useState(() => ({ w: typeof window !== "undefined" ? window.innerWidth : 1920, h: typeof window !== "undefined" ? window.innerHeight : 1080 }));
   const cache = useRef({});
+
+  // Kiosk session: the wall TV is logged in once and must never time out. Swap to a
+  // long-lived token on mount so the 8h window can't log the floor out overnight.
+  useEffect(() => {
+    let live = true;
+    api("POST", "/auth/refresh", { kiosk: true })
+      .then((d) => { if (live && d && d.token) { _token = d.token; try { localStorage.setItem("oms_token", d.token); } catch (e) {} } })
+      .catch(() => {});
+    return () => { live = false; };
+  }, []);
 
   async function load() {
     try {
@@ -1117,7 +1010,6 @@ function FloorDisplay({ onExit }) {
                         <div style={{ fontFamily: MONO, fontSize: 28, fontWeight: 800, color: allDone ? C.text : late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 7 }}>
                           {urgent && <Pill color="#fff" bg={C.danger} border={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>Urgent</Pill>}
-                          <Pill color={impCfg(o.importance).color} style={{ fontSize: 14, padding: "3px 10px" }}>{impCfg(o.importance).label}</Pill>
                           {dtag && <Pill color={dtag.color} style={{ fontSize: 14, padding: "3px 10px" }}>{dtag.label}</Pill>}
                           {o.waiting_stock && <Pill color={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>⚠ Stock</Pill>}
                           {o.on_hold && <Pill color={C.hold} style={{ fontSize: 14, padding: "3px 10px" }}>Hold</Pill>}
@@ -1154,7 +1046,6 @@ function FloorDisplay({ onExit }) {
                   <Pill color={spotStage.color} style={{ fontSize: 18, padding: "7px 16px" }}>● {spotStage.label}</Pill>
                   {spot.priority === "urgent" && <Pill color="#fff" bg={C.danger} border={C.danger} style={{ fontSize: 18, padding: "7px 16px" }}>Urgent</Pill>}
                   {spotDtag && <Pill color={spotDtag.color} style={{ fontSize: 18, padding: "7px 16px" }}>{spotDtag.label}</Pill>}
-                  <Pill color={impCfg(spot.importance).color} style={{ fontSize: 18, padding: "7px 16px" }}>{impCfg(spot.importance).label}</Pill>
                 </div>
                 <span style={{ fontSize: 18, fontWeight: 700, color: C.text3 }}>{(spotIdx % pool.length) + 1} / {pool.length}</span>
               </div>
@@ -1239,7 +1130,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
   const [logOpen, setLogOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false); // Details "More" expander — keep the wall collapsed; Internal Notes live inside
   const canMove = ["super_admin"].includes(user.role);
-  // Back-office Admin (deputy) may route an order — set PIC + priority/importance —
+  // Back-office Admin (deputy) may route an order — set PIC + priority + deadline —
   // but not move stages, hold/flag, or cancel (those stay canMove = Boss/Ops).
   const canRoute = ["super_admin", "admin"].includes(user.role);
   const roleCanMark = ["super_admin", "production_lead", "production_staff", "packing_staff"].includes(user.role);
@@ -1283,8 +1174,9 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
     try { await api("POST", `/orders/${orderId}/assign-pic`, { pic_id: picId || null }); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); }
   }
-  async function setImportance(v) {
-    try { await api("PATCH", `/orders/${orderId}`, { importance: v }); await load(); onUpdated && onUpdated(); }
+  async function setDeadline(v) {
+    if (!v) return;
+    try { await api("PATCH", `/orders/${orderId}`, { required_delivery_date: v }); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); }
   }
   async function setPriority(v) {
@@ -1350,7 +1242,6 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
         <span style={{ fontFamily: MONO, fontSize: 22, fontWeight: 800, color: C.text }}>{order.invoice_number}</span>
         <Pill color={cfg.color}>{cfg.label}</Pill>
         {order.priority === "urgent" && <Pill color={C.danger}>Urgent</Pill>}
-        {order.importance && order.importance !== "standard" && <Pill color={impCfg(order.importance).color}>{impCfg(order.importance).label}</Pill>}
         {order.waiting_stock && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
         {order.on_hold && <Pill color={C.hold}>On hold</Pill>}
         {(order.activity || []).some((a) => a.action === "item_edited") && <Pill color={C.accent2}>✎ Edited</Pill>}
@@ -1392,17 +1283,20 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
           {/* Need-to-know first; the rest tucks behind "More" so Details isn't a wall. */}
           <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: 14 }}>
             {order.customer_name != null && <LV label="Customer" v={order.customer_name} />}
-            <LV label="Delivery" v={<span style={{ color: countdown(order.required_delivery_date).tone }}>{fmtDay(order.required_delivery_date)} · {countdown(order.required_delivery_date).text}</span>} />
+            <LV label="Delivery date" v={
+              canRoute
+                ? <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <input type="date" value={(order.required_delivery_date || "").slice(0, 10)} onChange={(e) => setDeadline(e.target.value)} style={{ padding: "5px 9px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13.5, fontWeight: 600, color: C.text, colorScheme: "dark" }} />
+                    <span style={{ color: countdown(order.required_delivery_date).tone, fontSize: 12.5 }}>{countdown(order.required_delivery_date).text}</span>
+                  </span>
+                : <span style={{ color: countdown(order.required_delivery_date).tone }}>{fmtDay(order.required_delivery_date)} · {countdown(order.required_delivery_date).text}</span>
+            } />
             <LV label="Priority" v={
               canRoute
                 ? <select value={order.priority || "normal"} onChange={(e) => setPriority(e.target.value)} style={{ padding: "5px 9px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13.5, fontWeight: 700, color: order.priority === "urgent" ? C.danger : C.text2 }}><option value="normal" style={{ background: C.bg2, color: C.text }}>Normal</option><option value="urgent" style={{ background: C.bg2, color: C.text }}>Urgent</option></select>
                 : <Pill color={order.priority === "urgent" ? C.danger : C.text2}>{order.priority === "urgent" ? "Urgent" : "Normal"}</Pill>
             } />
-            <LV label="Importance" v={
-              canRoute
-                ? <select value={order.importance || "standard"} onChange={(e) => setImportance(e.target.value)} style={{ padding: "5px 9px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13.5, fontWeight: 700, color: impCfg(order.importance).color }}>{IMPORTANCE_OPTS.map((o) => <option key={o.value} value={o.value} style={{ background: C.bg2, color: C.text }}>{o.label}</option>)}</select>
-                : <Pill color={impCfg(order.importance).color}>{impCfg(order.importance).label}</Pill>
-            } />
+            {/* importance tier removed — the delivery deadline is editable above */}
             {/* canRoute (Boss/Admin) edit the PIC in Stage actions below — don't show it twice. */}
             {!canRoute && <LV label="Person in charge" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />}
           </div>
@@ -1692,7 +1586,7 @@ function SkuCombo({ value, catalog, onPick, onType, placeholder = "STK", style }
   );
 }
 function CreateOrderForm({ onCreated, onClose, onOpenExisting }) {
-  const [f, setF] = useState({ invoice_number: "", customer_name: "", customer_contact: "", delivery_address: "", required_delivery_date: "", expiry_date: "", priority: "normal", importance: "standard", skip_production: false, notes: "" });
+  const [f, setF] = useState({ invoice_number: "", customer_name: "", customer_contact: "", delivery_address: "", required_delivery_date: "", expiry_date: "", priority: "normal", skip_production: false, notes: "" });
   const [items, setItems] = useState([{ sku: "", name: "", quantity: 1, unit: "pcs" }]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -1743,7 +1637,7 @@ function CreateOrderForm({ onCreated, onClose, onOpenExisting }) {
       <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: 10 }}>
         <Field label="Invoice Number" value={f.invoice_number} onChange={(v) => set("invoice_number", v)} required placeholder="INV-26-0001" />
         <Field label="Priority" value={f.priority} onChange={(v) => set("priority", v)} options={[{ value: "normal", label: "Normal" }, { value: "urgent", label: "Urgent" }]} />
-        <Field label="Importance" value={f.importance} onChange={(v) => set("importance", v)} options={IMPORTANCE_OPTS} />
+        {/* importance tier field removed — board sorts by delivery date */}
         <Field label="Customer Name" value={f.customer_name} onChange={(v) => set("customer_name", v)} required />
         <Field label="Contact" value={f.customer_contact} onChange={(v) => set("customer_contact", v)} placeholder="01X-XXXXXXX" />
         <Field label="Delivery address" value={f.delivery_address} onChange={(v) => set("delivery_address", v)} placeholder="Where it ships to (optional — dispatch sees this)" />
@@ -2883,17 +2777,7 @@ function Messages({ user }) {
   const fmtWhen = (s) => s ? new Date(s).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
   return (
     <div>
-      <div style={{ background: "#2a1d0b", border: `1px solid ${C.accent}55`, borderRadius: 11, padding: "12px 14px", marginBottom: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontWeight: 800, color: C.accent, fontSize: 13, letterSpacing: 0.5 }}>🚧 DEMO / PREVIEW ONLY</span>
-          <span style={{ color: C.text3, fontSize: 12.5 }}>Point the queued messages at your own number to watch them arrive on your phone. Don't send to real customers during a demo.</span>
-        </div>
-        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ fontSize: 12.5, color: C.text2 }}>Send all queued to:</span>
-          <input value={redirectTo} onChange={(e) => setRedirectTo(e.target.value)} placeholder="60123456789" style={{ padding: "7px 10px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, color: C.text, fontSize: 13, fontFamily: MONO, width: 160 }} />
-          <Btn variant="soft" size="sm" disabled={!!busy || queued === 0 || !redirectTo.trim()} onClick={redirectAll}>{busy === "redirect" ? "Applying…" : `Apply to ${queued} queued`}</Btn>
-        </div>
-      </div>
+      {/* demo redirect-to-my-number tool removed — WhatsApp sending is live now */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "6px 12px", borderRadius: 9, background: (live ? C.ready : C.packing) + "1c", border: `1px solid ${(live ? C.ready : C.packing)}55`, color: live ? C.ready : C.packing, fontSize: 12.5, fontWeight: 700 }}>
           {live ? "● Live — sending to WhatsApp" : "● Test mode — messages logged, not sent"}
@@ -3491,7 +3375,7 @@ function Remarks({ user }) {
             <Icon name="message" size={20} color={C.accent} />
             <span style={{ fontSize: 16, fontWeight: 800, color: C.text }}>This week — {weekLabel}</span>
           </div>
-          <span style={{ fontSize: 13, color: C.text3 }}>Visible to Admin &amp; Production Head</span>
+          <span style={{ fontSize: 13, color: C.text3 }}>Visible to Admin, Production Head &amp; production team</span>
         </div>
         {canPost ? (
           <>
@@ -4041,7 +3925,6 @@ export default function App() {
                 <Icon name={n.icon} size={18} color={active ? C.accent : C.text3} />
                 <span style={{ flex: 1 }}>{n.label}</span>
                 {n.id === "board" && boardCount != null && <span style={{ background: active ? C.accent + "33" : C.surface2, color: active ? C.accent : C.text3, borderRadius: 6, padding: "0 7px", fontSize: 12, fontWeight: 700 }}>{boardCount}</span>}
-                {n.id === "messages" && <span style={{ background: "#3a2a0a", color: C.accent, borderRadius: 6, padding: "1px 6px", fontSize: 9.5, fontWeight: 800, letterSpacing: 0.5 }}>DEMO</span>}
               </button>
             );
           })}
