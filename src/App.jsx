@@ -660,6 +660,10 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onM
   })();
   const packedCount = (o.items || []).filter(itemPackDone).length;
   const totalCount = (o.items || []).length;
+  // Order-level actions (move back / advance) sit on the order's lead column — the
+  // earliest stage it still has a line in — so they always land on a card that exists,
+  // even if the order's stage briefly differs from where its lines render.
+  const showActions = stageKey === ((o.items || []).some((it) => itemPlace(it) === "production") ? "production" : "packing");
   return (
     <div onClick={() => onOpen(o)}
       style={{ position: "relative", background: C.surface, border: `1px solid ${urgent ? C.danger + "88" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "11px 12px", cursor: "pointer" }}>
@@ -723,7 +727,7 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onM
             ? <><Avatar name={o.pic_name} color={o.pic_color} size={20} /><span style={{ fontSize: 12, color: C.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pic_name}</span></>
             : <span style={{ fontSize: 11.5, color: C.text3 }}>Unassigned</span>}
         </div>
-        {stageKey === o.stage && (
+        {showActions && (
           <div style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={(e) => e.stopPropagation()}>
             {onMoveBack && ((user.role === "super_admin" && o.stage !== "order") || (user.role === "production_lead" && o.stage === "packing")) && !o.on_hold && (
               <button onClick={() => onMoveBack(o)} title="Move back a stage…" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, borderRadius: 8, background: "#2a1414", border: `1px solid #5b2526`, color: C.danger, cursor: "pointer", fontSize: 15, lineHeight: 1 }}>↩</button>
