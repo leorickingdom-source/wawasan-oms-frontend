@@ -1106,16 +1106,15 @@ function FloorDisplay({ onExit }) {
                           {o.waiting_stock && <Pill color={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>⚠ Stock</Pill>}
                           {o.on_hold && <Pill color={C.hold} style={{ fontSize: 14, padding: "3px 10px" }}>Hold</Pill>}
                         </div>
-                        <div style={{ fontSize: 19, color: cd.tone, marginTop: 6, fontWeight: 600 }}>
+                        <div style={{ fontSize: 23, color: cd.tone, marginTop: 8, fontWeight: 700 }}>
                           <span style={{ color: C.text2 }}>{fmtDay(o.required_delivery_date)}</span> · {cd.text}
                         </div>
-                        <div style={{ fontSize: 18, color: C.text3, marginTop: 3 }}>{o.item_count} {o.item_count === 1 ? "product" : "products"}</div>
                         {(o.stage === "production" || o.stage === "packing") && o.item_count > 0 && (() => {
                           const done = o.made_count || 0, total = o.item_count || 0, full = total > 0 && done >= total;
                           const p = total > 0 ? Math.round((done / total) * 100) : 0;
                           return (
                             <div style={{ marginTop: 8 }}>
-                              {!full && <div style={{ fontSize: 17, fontWeight: 800, color: C.accent2, marginBottom: 5 }}>{done}/{total} STKs · {p}%</div>}
+                              {!full && <div style={{ fontSize: 17, fontWeight: 800, color: C.accent2, marginBottom: 5 }}>{done}/{total} STKs</div>}
                               <div style={{ height: 8, background: C.surface2, borderRadius: 4, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: full ? C.green : C.accent }} /></div>
                             </div>
                           );
@@ -1136,33 +1135,26 @@ function FloorDisplay({ onExit }) {
             <>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <Pill color={spotStage.color} style={{ fontSize: 12, padding: "4px 10px" }}>● {spotStage.label}</Pill>
-                  {spot.priority === "urgent" && <Pill color="#fff" bg={C.danger} border={C.danger} style={{ fontSize: 12, padding: "4px 10px" }}>Urgent</Pill>}
-                  {spotDtag && <Pill color={spotDtag.color} style={{ fontSize: 12, padding: "4px 10px" }}>{spotDtag.label}</Pill>}
+                  <Pill color={spotStage.color} style={{ fontSize: 18, padding: "7px 16px" }}>● {spotStage.label}</Pill>
+                  {spot.priority === "urgent" && <Pill color="#fff" bg={C.danger} border={C.danger} style={{ fontSize: 18, padding: "7px 16px" }}>Urgent</Pill>}
+                  {spotDtag && <Pill color={spotDtag.color} style={{ fontSize: 18, padding: "7px 16px" }}>{spotDtag.label}</Pill>}
+                  <Pill color={impCfg(spot.importance).color} style={{ fontSize: 18, padding: "7px 16px" }}>{impCfg(spot.importance).label}</Pill>
                 </div>
-                <span style={{ fontSize: 14, color: C.text3 }}>{(spotIdx % pool.length) + 1} / {pool.length}</span>
+                <span style={{ fontSize: 18, fontWeight: 700, color: C.text3 }}>{(spotIdx % pool.length) + 1} / {pool.length}</span>
               </div>
-              <div style={{ fontFamily: MONO, fontSize: 78, fontWeight: 800, color: C.accent2, margin: "10px 0 6px", lineHeight: 1, letterSpacing: -2 }}>{spot.invoice_number}</div>
-              <div style={{ marginBottom: 10 }}>
-                <Pill color={impCfg(spot.importance).color} style={{ fontSize: 18, padding: "5px 14px" }}>{impCfg(spot.importance).label}</Pill>
-              </div>
+              <div style={{ fontFamily: MONO, fontSize: 78, fontWeight: 800, color: C.accent2, margin: "10px 0 12px", lineHeight: 1, letterSpacing: -2 }}>{spot.invoice_number}</div>
               {detail && detail.id === spot.id && (detail.items || []).length > 0 && (() => {
                 const its = detail.items || [];
                 const total = its.length;
                 const done = its.filter((it) => itemStatusKey(it) === "done").length;
                 const making = its.filter((it) => itemStatusKey(it) === "in_progress").length;
                 const todo = total - done - making;
-                const units = its.reduce((s, it) => s + Math.round(Number(it.quantity) || 0), 0);
                 const p = total > 0 ? Math.round((done / total) * 100) : 0;
                 const chip = (label, n, color) => (
                   <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, background: color + "1f", border: `1px solid ${color}55`, color, borderRadius: 9, padding: "8px 14px", fontSize: 28, fontWeight: 800 }}>{n}<span style={{ fontSize: 14, fontWeight: 700, opacity: 0.85, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span></span>
                 );
                 return (
                   <div style={{ marginBottom: 12 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, marginBottom: 8 }}>
-                      <span style={{ color: C.text2 }}>{total} products · {units} units</span>
-                      <span style={{ color: p >= 100 ? C.green : C.accent2, fontWeight: 800 }}>{p}% done</span>
-                    </div>
                     <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
                       {chip("To do", todo, C.accent)}
                       {chip("Making", making, C.packing)}
@@ -1198,7 +1190,7 @@ function FloorDisplay({ onExit }) {
                   : <div style={{ color: C.text3, padding: "12px 0" }}>Loading line items…</div>}
               </div>
               <div style={{ marginTop: 12 }}>
-                <Pill color={spotCd.tone} style={{ fontSize: 13, padding: "5px 11px" }}><Icon name="clock" size={13} color={spotCd.tone} /> {fmtDay(spot.required_delivery_date)} · {spotCd.text} left</Pill>
+                <Pill color={spotCd.tone} style={{ fontSize: 22, padding: "9px 16px" }}><Icon name="clock" size={20} color={spotCd.tone} /> {fmtDay(spot.required_delivery_date)} · {spotCd.text} left</Pill>
                 <div style={{ height: 5, background: C.surface2, borderRadius: 4, overflow: "hidden", marginTop: 12 }}>
                   <div style={{ height: "100%", width: `${((spotIdx % pool.length) + 1) / pool.length * 100}%`, background: C.accent, transition: "width .4s" }} />
                 </div>
