@@ -133,6 +133,16 @@ function lineCol(o, it) {
   const p = itemPlace(it);
   return p === "packed" ? "packing" : p;
 }
+// Bucket orders' lines into one split column: an instance per order with ≥1 line in
+// `stageKey`, carrying just those lines in `_items`. Shared by the board + floor display.
+function splitByCol(orders, stageKey) {
+  const out = [];
+  for (const o of (orders || [])) {
+    const its = (o.items || []).filter((it) => lineCol(o, it) === stageKey);
+    if (its.length) out.push({ ...o, _items: its });
+  }
+  return out;
+}
 
 // Customer "importance" tiers removed 2026-06-11 — the board sorts by delivery date
 // instead. The backend `importance` column is kept (defaults 'standard') but unused.
@@ -666,25 +676,29 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
     s.delete(track);
     return [...s].filter((k) => k === "order" || k === "production" || k === "packing");
   })();
-  const packedCount = (o.items || []).filter(itemPackDone).length;
-  const totalCount = (o.items || []).length;
-  // Order-level actions (move back / advance) sit on the order's lead column — the
-  // earliest stage it still has a line in — so they always land on a card that exists,
-  // even if the order's stage briefly differs from where its lines render.
-  const lead = (o.items || []).some((it) => lineCol(o, it) === "production") ? "production"
-    : (o.items || []).some((it) => lineCol(o, it) === "packing") ? "packing" : "order";
-  const showActions = stageKey === lead;
+  // Roles that can't act on this card (admins, other-department staff) get a trimmed,
+  // read-only card. When every line in this column is complete the card greens like the
+  // old board's "all done" tint.
+  const canAct = canMark || canMoveLine;
+  const colDone = lines.length > 0 && lines.every((l) => track === "packing" ? itemPackDone(l) : itemProdDone(l));
   return (
     <div onClick={() => onOpen(o)}
-      style={{ position: "relative", background: C.surface, border: `1px solid ${urgent ? C.danger + "88" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "11px 12px", cursor: "pointer" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+      style={{ position: "relative", background: colDone ? C.ready + "26" : C.surface, border: `1px solid ${colDone ? C.ready + "88" : urgent ? C.danger + "88" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "11px 12px", cursor: "pointer" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <span style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: urgent ? C.accent2 : C.text, letterSpacing: 0.3 }}>{o.invoice_number}</span>
-        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }} title={`PIC: ${o.pic_name || "Unassigned"}`}>
+          {o.pic_name
+            ? <><Avatar name={o.pic_name} color={o.pic_color} size={22} /><span style={{ fontSize: 12, color: C.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 96 }}>{o.pic_name}</span></>
+            : <span style={{ fontSize: 11, color: C.text3 }}>Unassigned</span>}
+        </div>
+      </div>
+      {(urgent || onHold) && (
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 6 }}>
           {urgent && <Pill color="#fff" bg={C.danger} border={C.danger}>Urgent</Pill>}
           {onHold && <Pill color={C.hold}>On hold</Pill>}
         </div>
-      </div>
-      <div style={{ fontSize: 13.5, color: showName ? C.text2 : C.text3, fontWeight: 600, margin: "5px 0 2px" }}>
+      )}
+      <div style={{ fontSize: 13.5, color: showName ? C.text2 : C.text3, fontWeight: 600, margin: "6px 0 2px" }}>
         {showName ? o.customer_name : `${(o.items || []).length} line${((o.items || []).length) === 1 ? "" : "s"} here`}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 0 8px", fontSize: 12 }}>
@@ -699,13 +713,16 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }} onClick={(e) => e.stopPropagation()}>
         {lines.map((it) => {
-          const waiting = track === "packing" && itemPackDone(it);
           const prodVal = it.status || (it.made ? "done" : "not_started");
           const packVal = it.pack_status || (it.pack_made ? "done" : "not_started");
+          const done = track === "packing" ? itemPackDone(it) : itemProdDone(it);
+          const waiting = track === "packing" && done;
           // Send a packing line back to Production (undo a premature "Done"). Supervisors only.
           const back = canMoveLine && track === "packing"
             ? <button onClick={() => onLineMove(o, it, "to_production")} title="Send this line back to Production" style={backStyle}>↩ To Production</button>
             : null;
+          // Read-only status chip for viewers who can't act on this card.
+          const tcfg = (track === "packing" && done) ? { short: "Packed", color: C.ready } : (ITEM_STATUS[track === "packing" ? packVal : prodVal] || ITEM_STATUS.not_started);
           return (
             <div key={it.id} style={{ borderTop: `1px solid ${C.border}`, paddingTop: 7 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
@@ -713,9 +730,11 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
                 <span style={{ fontSize: 12.5, color: C.text, lineHeight: 1.2 }}>{it.name}</span>
               </div>
               <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.text3, margin: "1px 0 6px" }}>{it.sku}</div>
-              {waiting ? (
+              {!canAct ? (
+                <span style={{ display: "inline-block", padding: "2px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: tcfg.color, background: tcfg.color + "1f", border: `1px solid ${tcfg.color}44` }}>{(track === "packing" && done) ? "✓ " : ""}{tcfg.short}</span>
+              ) : waiting ? (
                 <>
-                  <div style={{ fontSize: 11, color: C.ready, fontWeight: 700 }}>✓ packed{totalCount > packedCount ? <span style={{ color: C.text3, fontWeight: 600 }}> · waiting for order</span> : null}</div>
+                  <div style={{ fontSize: 11, color: C.ready, fontWeight: 700 }}>✓ packed</div>
                   {back}
                 </>
               ) : track === "production" ? (
@@ -730,23 +749,11 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
           );
         })}
       </div>
-      {isLeadPlus && track === "packing" && totalCount > 0 && packedCount < totalCount && (
-        <div style={{ marginTop: 9, fontSize: 10.5, fontWeight: 600, color: C.packing, background: C.packing + "1A", border: `1px solid ${C.packing}44`, borderRadius: 7, padding: "5px 8px" }}>
-          ▢ {packedCount}/{totalCount} packed — moves to Ready for Delivery when all packed
+      {onAdvance && track === "packing" && o.stage === "packing" && canAdvanceStage(user.role, o.stage) && !o.on_hold && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 9, borderTop: `1px solid ${C.border}`, paddingTop: 8 }} onClick={(e) => e.stopPropagation()}>
+          <IconBtn icon="arrowRight" onClick={() => onAdvance(o, "ready_for_delivery")} title="Send to Ready for Delivery" color={C.ready} bg="#13301f" border="#1f5036" />
         </div>
       )}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 7, marginTop: 9, borderTop: `1px solid ${C.border}`, paddingTop: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
-          {o.pic_name
-            ? <><Avatar name={o.pic_name} color={o.pic_color} size={20} /><span style={{ fontSize: 12, color: C.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pic_name}</span></>
-            : <span style={{ fontSize: 11.5, color: C.text3 }}>Unassigned</span>}
-        </div>
-        {showActions && onAdvance && canAdvanceStage(user.role, o.stage) && !o.on_hold && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={(e) => e.stopPropagation()}>
-            <IconBtn icon="arrowRight" onClick={() => onAdvance(o, BOARD_STAGES[BOARD_STAGES.indexOf(o.stage) + 1] || "delivered")} title={user.role === "super_admin" ? `Advance to ${(STAGE_LABELS[BOARD_STAGES[BOARD_STAGES.indexOf(o.stage) + 1]] || {}).label || "next"}` : (ADVANCE_LABEL[o.stage] || "Advance")} color={C.ready} bg="#13301f" border="#1f5036" />
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -962,13 +969,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     catch (e) { alert(e.message); }
   }
   function splitInstances(stageKey) {
-    const active = filt([...(((board && board.production)) || []), ...(((board && board.packing)) || [])]);
-    const out = [];
-    for (const o of active) {
-      const its = (o.items || []).filter((it) => lineCol(o, it) === stageKey);
-      if (its.length) out.push({ ...o, _items: its });
-    }
-    return out;
+    return splitByCol(filt([...(((board && board.production)) || []), ...(((board && board.packing)) || [])]), stageKey);
   }
 
   const showStagePicker = stages.length > 1;
@@ -1236,7 +1237,9 @@ function FloorDisplay({ onExit }) {
         <div style={{ flex: 1, display: "grid", gridTemplateColumns: `repeat(${cols.length}, 1fr)`, gap: 14, minHeight: 0 }}>
           {cols.map((s) => {
             const cfg = STAGES[s];
-            const orders = (board && board[s]) || [];
+            const orders = (SPLIT_BOARD_ENABLED && (s === "production" || s === "packing"))
+              ? splitByCol([...((board && board.production) || []), ...((board && board.packing) || [])], s)
+              : ((board && board[s]) || []);
             return (
               <div key={s} style={{ background: C.bg2, border: `1px solid ${C.border}`, borderTop: `4px solid ${cfg.color}`, borderRadius: 14, padding: "16px 14px", display: "flex", flexDirection: "column", minHeight: 0 }}>
                 <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: 1, color: C.text3, textTransform: "uppercase" }}>{cfg.label}</div>
@@ -1246,7 +1249,10 @@ function FloorDisplay({ onExit }) {
                     const cd = countdown(o.required_delivery_date);
                     const late = (cd.n ?? 0) < 0, urgent = o.priority === "urgent";
                     const dtag = deliveryTag(o);
-                    const allDone = (o.stage === "production" || o.stage === "packing") && (o.item_count || 0) > 0 && (o.made_count || 0) >= o.item_count;
+                    const sub = o._items || null;
+                    const subDone = sub ? sub.filter(s === "packing" ? itemPackDone : itemProdDone).length : (o.made_count || 0);
+                    const subTotal = sub ? sub.length : (o.item_count || 0);
+                    const allDone = (s === "production" || s === "packing") && subTotal > 0 && subDone >= subTotal;
                     return (
                       <div key={o.id} style={{ background: allDone ? C.green + "33" : urgent ? C.danger + "1A" : C.surface, border: `${allDone ? 2 : 1}px solid ${allDone ? C.green : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `5px solid ${cfg.color}`, borderRadius: 10, padding: "13px 16px" }}>
                         <div style={{ fontFamily: MONO, fontSize: 28, fontWeight: 800, color: allDone ? C.text : late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
@@ -1259,12 +1265,12 @@ function FloorDisplay({ onExit }) {
                         <div style={{ fontSize: 23, color: cd.tone, marginTop: 8, fontWeight: 700 }}>
                           <span style={{ color: C.text2 }}>{fmtDay(o.required_delivery_date)}</span> · {cd.text}
                         </div>
-                        {(o.stage === "production" || o.stage === "packing") && o.item_count > 0 && (() => {
-                          const done = o.made_count || 0, total = o.item_count || 0, full = total > 0 && done >= total;
+                        {(s === "production" || s === "packing") && subTotal > 0 && (() => {
+                          const done = subDone, total = subTotal, full = total > 0 && done >= total;
                           const p = total > 0 ? Math.round((done / total) * 100) : 0;
                           return (
                             <div style={{ marginTop: 8 }}>
-                              {!full && <div style={{ fontSize: 17, fontWeight: 800, color: C.accent2, marginBottom: 5 }}>{done}/{total} STKs</div>}
+                              {!full && <div style={{ fontSize: 17, fontWeight: 800, color: C.accent2, marginBottom: 5 }}>{done}/{total} {s === "packing" ? "packed" : "made"}</div>}
                               <div style={{ height: 8, background: C.surface2, borderRadius: 4, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: full ? C.green : C.accent }} /></div>
                             </div>
                           );
@@ -1763,7 +1769,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
         </div>
       )}
 
-      {!canMove && canAdvanceStage(user.role, order.stage) && !order.on_hold && (
+      {!canMove && canAdvanceStage(user.role, order.stage) && !order.on_hold && !(SPLIT_BOARD_ENABLED && order.stage === "production") && (
         <div style={{ marginTop: 22, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
           <Btn size="lg" style={{ width: "100%", justifyContent: "center" }} onClick={() => setConfirmAdv(true)} disabled={busy}>{ADVANCE_LABEL[order.stage] || "Mark complete"} →</Btn>
         </div>
