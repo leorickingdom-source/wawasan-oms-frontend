@@ -566,7 +566,7 @@ function StackCard({ head, rows, actions }) {
 // ─── Kanban card (board) ───────────────────────────────────────────────────────
 function KanbanCard({ order, user, onOpen, onAdvance, onMoveBack, onReorderUp, onReorderDown, reorderable, rank, onSetTier, unread }) {
   const stage = STAGES[order.stage] || { color: C.text3 };
-  const rBtn = (dis) => ({ cursor: dis ? "default" : "pointer", opacity: dis ? 0.3 : 1, lineHeight: 1, fontSize: 10, padding: "2px 6px", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 5, color: C.text2 });
+  const rBtn = (dis) => ({ cursor: dis ? "default" : "pointer", opacity: dis ? 0.3 : 1, lineHeight: 1, fontSize: 11, padding: "4px 9px", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 6, color: C.text2 });
   const cd = countdown(order.required_delivery_date);
   const late = (daysUntil(order.required_delivery_date) ?? 0) < 0;
   const urgent = order.priority === "urgent";
@@ -639,7 +639,7 @@ function KanbanCard({ order, user, onOpen, onAdvance, onMoveBack, onReorderUp, o
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={(e) => e.stopPropagation()}>
           {reorderable && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 2, marginRight: 1 }} title={(onReorderUp || onReorderDown) ? "Move priority up / down" : "Add another order here to reorder"}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginRight: 3 }} title={(onReorderUp || onReorderDown) ? "Move priority up / down" : "Add another order here to reorder"}>
               <button onClick={() => onReorderUp && onReorderUp()} disabled={!onReorderUp} style={rBtn(!onReorderUp)} aria-label="Move up">▲</button>
               <button onClick={() => onReorderDown && onReorderDown()} disabled={!onReorderDown} style={rBtn(!onReorderDown)} aria-label="Move down">▼</button>
             </div>
@@ -665,7 +665,7 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
   const canMoveLine = user.role === "super_admin" || user.role === "production_lead";
   const isLeadPlus = canMoveLine;
   const backStyle = { marginTop: 5, appearance: "none", border: "1px solid #5b2526", background: "#2a1414", color: "#fca5a5", fontSize: 11, fontWeight: 600, padding: "4px 9px", borderRadius: 7, cursor: "pointer" };
-  const rBtn = (dis) => ({ cursor: dis ? "default" : "pointer", opacity: dis ? 0.3 : 1, lineHeight: 1, fontSize: 10, padding: "2px 6px", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 5, color: C.text2 });
+  const rBtn = (dis) => ({ cursor: dis ? "default" : "pointer", opacity: dis ? 0.3 : 1, lineHeight: 1, fontSize: 11, padding: "4px 9px", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 6, color: C.text2 });
   const cd = countdown(o.required_delivery_date);
   const urgent = o.priority === "urgent";
   const onHold = !!o.on_hold;
@@ -688,9 +688,9 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
           {reorderable ? (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }} onClick={(e) => e.stopPropagation()} title={`Priority #${rank} in this stage — move up / down`}>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, marginRight: 3 }} onClick={(e) => e.stopPropagation()} title={`Priority #${rank} in this stage — move up / down`}>
               <button onClick={() => onReorderUp && onReorderUp()} disabled={!onReorderUp} style={rBtn(!onReorderUp)} aria-label="Move up">▲</button>
-              {rank != null && <span style={{ fontSize: 11, fontWeight: 800, color: C.accent, lineHeight: 1 }}>{rank}</span>}
+              {rank != null && <span style={{ fontSize: 12, fontWeight: 800, color: C.accent, lineHeight: 1, margin: "1px 0" }}>{rank}</span>}
               <button onClick={() => onReorderDown && onReorderDown()} disabled={!onReorderDown} style={rBtn(!onReorderDown)} aria-label="Move down">▼</button>
             </div>
           ) : (rank != null && (
@@ -3202,7 +3202,7 @@ function Delivery({ user, onOpenOrder }) {
   const [editDelivery, setEditDelivery] = useState(null);
   const [editForm, setEditForm] = useState({ deliverer_id: "", scheduled_date: "", address: "", notes: "" });
   const [editOther, setEditOther] = useState("");
-  const [showCouriers, setShowCouriers] = useState(true);
+  const [showCouriers, setShowCouriers] = useState(false);
   const [q, setQ] = useState("");
   const canAssign = ["super_admin", "delivery_team", "admin"].includes(user.role);
   const canDeliver = ["super_admin", "delivery_team", "admin"].includes(user.role);
@@ -4239,7 +4239,6 @@ function LoginPage({ onLogin }) {
         </div>
         <Field label="Email" type="email" name="email" autoComplete="username" value={email} onChange={setEmail} required placeholder="you@email.com" />
         <Field label="Password" type="password" name="current-password" autoComplete="current-password" value={password} onChange={setPassword} required />
-        <p style={{ fontSize: 12, color: C.text3, margin: "-2px 0 14px" }}>Forgot your password? Ask your manager (Boss or Ops) to reset it for you.</p>
         {err && <p style={{ color: "#fca5a5", fontSize: 13, margin: "-4px 0 12px" }}>{err}</p>}
         <Btn type="submit" onClick={() => {}} disabled={busy} style={{ width: "100%", justifyContent: "center" }}>{busy ? "Signing in…" : "Sign in"}</Btn>
       </form>
