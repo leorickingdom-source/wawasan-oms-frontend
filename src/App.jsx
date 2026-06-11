@@ -536,16 +536,15 @@ function KanbanCard({ order, user, onOpen, onAdvance, onMoveBack, onReorderUp, o
   // Done = green card tint, urgent = red tint — same visual language, no words needed.
   // When an order is both, green wins (it flags the actionable "advance me" state) and
   // the Urgent pill carries the urgency — no noisy double-ring.
-  const cardBg = allDone ? C.ready + "1A" : urgent ? C.danger + "1A" : C.surface;
-  const cardBgHover = allDone ? C.ready + "26" : urgent ? C.danger + "26" : C.surface2;
+  const cardBg = allDone ? C.ready + "33" : urgent ? C.danger + "1A" : C.surface;
+  const cardBgHover = allDone ? C.ready + "40" : urgent ? C.danger + "26" : C.surface2;
   const next = BOARD_STAGES[BOARD_STAGES.indexOf(order.stage) + 1] || "delivered";
   return (
     <div onClick={() => onOpen(order)}
-      style={{ position: "relative", background: cardBg, border: `1px solid ${unread ? C.accent : allDone ? C.ready + "88" : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "12px 13px", cursor: "pointer", transition: "background .12s", boxShadow: unread ? `0 0 0 2px ${C.accent}` : "none", animation: unread ? "wws-ring 1.5s ease infinite" : "none" }}
+      style={{ position: "relative", background: cardBg, border: `1px solid ${unread ? C.accent : allDone ? C.ready : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "12px 13px", cursor: "pointer", transition: "background .12s", boxShadow: unread ? `0 0 0 2px ${C.accent}` : "none", animation: unread ? "wws-ring 1.5s ease infinite" : "none" }}
       onMouseEnter={(e) => (e.currentTarget.style.background = cardBgHover)}
       onMouseLeave={(e) => (e.currentTarget.style.background = cardBg)}>
       {unread && <span style={{ position: "absolute", top: -8, right: -8, display: "inline-flex", alignItems: "center", gap: 3, background: C.accent, color: "#1a1410", fontSize: 9.5, fontWeight: 800, borderRadius: 20, padding: "2px 7px", boxShadow: "0 2px 8px rgba(0,0,0,.4)" }}>● NEW</span>}
-      {allDone && <div style={{ textAlign: "center", background: C.ready, color: "#06281c", fontWeight: 800, fontSize: 11.5, letterSpacing: 0.3, borderRadius: 7, padding: "5px 8px", marginBottom: 9 }}>✓ ALL DONE — READY TO MOVE</div>}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           {rank != null && <span title="Priority order in this group" style={{ flexShrink: 0, width: 22, height: 22, borderRadius: 7, background: C.accent, color: C.bg, fontWeight: 800, fontSize: 12, display: "grid", placeItems: "center" }}>{rank}</span>}
@@ -1096,8 +1095,7 @@ function FloorDisplay({ onExit }) {
                     const dtag = deliveryTag(o);
                     const allDone = (o.stage === "production" || o.stage === "packing") && (o.item_count || 0) > 0 && (o.made_count || 0) >= o.item_count;
                     return (
-                      <div key={o.id} style={{ background: allDone ? C.green + "1A" : urgent ? C.danger + "1A" : C.surface, border: `${allDone ? 2 : 1}px solid ${allDone ? C.green : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `5px solid ${cfg.color}`, borderRadius: 10, padding: "13px 16px" }}>
-                        {allDone && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: C.green, color: "#06281c", fontWeight: 800, fontSize: 16, letterSpacing: 0.4, borderRadius: 8, padding: "8px 10px", marginBottom: 11 }}>✓ ALL DONE — READY TO MOVE</div>}
+                      <div key={o.id} style={{ background: allDone ? C.green + "33" : urgent ? C.danger + "1A" : C.surface, border: `${allDone ? 2 : 1}px solid ${allDone ? C.green : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `5px solid ${cfg.color}`, borderRadius: 10, padding: "13px 16px" }}>
                         <div style={{ fontFamily: MONO, fontSize: 28, fontWeight: 800, color: allDone ? C.text : late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 7 }}>
                           {urgent && <Pill color="#fff" bg={C.danger} border={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>Urgent</Pill>}
