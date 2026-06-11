@@ -1689,12 +1689,13 @@ function SkuCombo({ value, catalog, onPick, onType, placeholder = "STK", style }
     </div>
   );
 }
-function CreateOrderForm({ onCreated, onClose }) {
+function CreateOrderForm({ onCreated, onClose, onOpenExisting }) {
   const [f, setF] = useState({ invoice_number: "", customer_name: "", customer_contact: "", delivery_address: "", required_delivery_date: "", expiry_date: "", priority: "normal", importance: "standard", skip_production: false, notes: "" });
   const [items, setItems] = useState([{ sku: "", name: "", quantity: 1, unit: "pcs" }]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [holidays, setHolidays] = useState([]);
+  const [dup, setDup] = useState(null); // existing order sharing this invoice no. — { id, customer_name, stage, suggestion }
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   const narrow = useViewport() < 640;
   useEffect(() => { api("GET", "/settings/holidays").then((d) => setHolidays(d || [])).catch(() => setHolidays([])); }, []);
@@ -1704,12 +1705,34 @@ function CreateOrderForm({ onCreated, onClose }) {
   for (const c of catalog) { if (c.sku) bySku[c.sku] = c; if (c.name && !byName[c.name]) byName[c.name] = c; }
   const holidayHit = f.required_delivery_date ? holidays.find((h) => h.date === f.required_delivery_date) : null;
 
+  // Live duplicate check — as the invoice no. settles, ask the server whether it
+  // already exists, so the user is warned before save instead of hitting a 409.
+  useEffect(() => {
+    const code = f.invoice_number.trim();
+    setDup(null);
+    if (code.length < 3 || /^SI\d/i.test(code)) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      api("GET", `/orders/check-invoice?code=${encodeURIComponent(code)}`)
+        .then((r) => { if (!cancelled && r && r.exists) setDup(r); })
+        .catch(() => {});
+    }, 400);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [f.invoice_number]);
+
   async function submit() {
     if (!f.invoice_number || !f.customer_name || !f.required_delivery_date) { setErr("Invoice, customer and delivery date are required."); return; }
     if (/^SI\d/i.test(f.invoice_number.trim())) { setErr("Invoice numbers starting with “SI” are reserved for SQL Account — use a manual code like INV-26-0001."); return; }
+    if (dup) { setErr("That invoice number already exists — open it, use the next free number, or change it."); return; }
     setBusy(true); setErr("");
     try { await api("POST", "/orders", { ...f, items: items.filter((i) => i.name) }); onCreated && onCreated(); }
-    catch (e) { setErr(e.message); } finally { setBusy(false); }
+    catch (e) {
+      setErr(e.message);
+      // Lost a race (or typed past the live check): surface the same rich warning.
+      if (/already exists/i.test(e.message || "")) {
+        api("GET", `/orders/check-invoice?code=${encodeURIComponent(f.invoice_number.trim())}`).then((r) => { if (r && r.exists) setDup(r); }).catch(() => {});
+      }
+    } finally { setBusy(false); }
   }
   const inp = { padding: "8px 10px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13, color: C.text };
 
@@ -1729,6 +1752,18 @@ function CreateOrderForm({ onCreated, onClose }) {
         </label>
       </div>
       <p style={{ fontSize: 11.5, color: C.text3, margin: "2px 0 8px" }}>Manual invoice no. — use a code like <b>INV-26-0001</b>. Codes starting with “SI” are reserved for SQL Account.</p>
+      {dup && (
+        <div style={{ background: "#2a1714", border: `1px solid ${C.danger}`, borderRadius: 9, padding: "10px 12px", margin: "0 0 10px" }}>
+          <div style={{ fontSize: 13, color: "#fcaaa0", fontWeight: 600 }}>
+            ⚠ Invoice <span style={{ fontFamily: MONO }}>{f.invoice_number.trim()}</span> already exists{dup.customer_name ? ` — ${dup.customer_name}` : ""}{dup.stage && STAGES[dup.stage] ? ` · ${STAGES[dup.stage].label}` : ""}.
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 9, flexWrap: "wrap" }}>
+            <Btn size="sm" variant="soft" onClick={() => onOpenExisting && onOpenExisting(dup.id)}>Open it</Btn>
+            {dup.suggestion && <Btn size="sm" onClick={() => set("invoice_number", dup.suggestion)}>Use next free: {dup.suggestion}</Btn>}
+            <Btn size="sm" variant="ghost" onClick={() => setDup(null)}>Edit</Btn>
+          </div>
+        </div>
+      )}
       {holidayHit && <p style={{ color: C.packing, fontSize: 12.5, margin: "0 0 8px" }}>⚠ {fmtDay(f.required_delivery_date)} is a holiday: {holidayHit.name}. Delivery may not happen that day.</p>}
       <Field label="Notes" value={f.notes} onChange={(v) => set("notes", v)} placeholder="Optional…" />
       <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, margin: "6px 0 8px" }}>Order Items <span style={{ fontWeight: 400, color: C.text3 }}>· type a STK or product to autofill</span></div>
@@ -1747,7 +1782,7 @@ function CreateOrderForm({ onCreated, onClose }) {
       {err && <p style={{ color: "#fca5a5", fontSize: 13, margin: "12px 0 0" }}>{err}</p>}
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 16 }}>
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn onClick={submit} disabled={busy}>{busy ? "Creating…" : "Create order"}</Btn>
+        <Btn onClick={submit} disabled={busy || !!dup}>{busy ? "Creating…" : "Create order"}</Btn>
       </div>
     </div>
   );
@@ -3973,7 +4008,7 @@ export default function App() {
       </Modal>
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Create new order" width={620}>
-        <CreateOrderForm onCreated={() => { setShowCreate(false); bumpBoard(); }} onClose={() => setShowCreate(false)} />
+        <CreateOrderForm onCreated={() => { setShowCreate(false); bumpBoard(); }} onClose={() => setShowCreate(false)} onOpenExisting={(id) => { setShowCreate(false); openOrder(id); }} />
       </Modal>
     </div>
   );
