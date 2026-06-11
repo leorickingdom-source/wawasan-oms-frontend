@@ -545,13 +545,14 @@ function KanbanCard({ order, user, onOpen, onAdvance, onMoveBack, onReorderUp, o
       onMouseEnter={(e) => (e.currentTarget.style.background = cardBgHover)}
       onMouseLeave={(e) => (e.currentTarget.style.background = cardBg)}>
       {unread && <span style={{ position: "absolute", top: -8, right: -8, display: "inline-flex", alignItems: "center", gap: 3, background: C.accent, color: "#1a1410", fontSize: 9.5, fontWeight: 800, borderRadius: 20, padding: "2px 7px", boxShadow: "0 2px 8px rgba(0,0,0,.4)" }}>● NEW</span>}
+      {allDone && <div style={{ textAlign: "center", background: C.ready, color: "#06281c", fontWeight: 800, fontSize: 11.5, letterSpacing: 0.3, borderRadius: 7, padding: "5px 8px", marginBottom: 9 }}>✓ ALL DONE — READY TO MOVE</div>}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           {rank != null && <span title="Priority order in this group" style={{ flexShrink: 0, width: 22, height: 22, borderRadius: 7, background: C.accent, color: C.bg, fontWeight: 800, fontSize: 12, display: "grid", placeItems: "center" }}>{rank}</span>}
-          <span style={{ fontFamily: MONO, fontSize: 15, fontWeight: 700, color: invColor, letterSpacing: 0.3 }}>{order.invoice_number}</span>
+          <span style={{ fontFamily: MONO, fontSize: 19, fontWeight: 700, color: allDone ? C.text : invColor, letterSpacing: 0.3 }}>{order.invoice_number}</span>
         </div>
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {urgent && <Pill color={C.danger}>Urgent</Pill>}
+          {urgent && <Pill color="#fff" bg={C.danger} border={C.danger}>Urgent</Pill>}
           {dtag && <Pill color={dtag.color}>{dtag.label}</Pill>}
           {waiting && <Pill color={C.danger}>⚠ Waiting stock</Pill>}
           {onHold && <Pill color={C.hold}>On hold</Pill>}
@@ -1094,12 +1095,12 @@ function FloorDisplay({ onExit }) {
                     const late = (cd.n ?? 0) < 0, urgent = o.priority === "urgent";
                     const dtag = deliveryTag(o);
                     const allDone = (o.stage === "production" || o.stage === "packing") && (o.item_count || 0) > 0 && (o.made_count || 0) >= o.item_count;
-                    const urgentDone = urgent && allDone;
                     return (
-                      <div key={o.id} style={{ background: allDone ? C.green + "1A" : urgent ? C.danger + "1A" : C.surface, border: `1px solid ${urgentDone ? C.green : allDone ? C.green + "88" : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `5px solid ${cfg.color}`, borderRadius: 10, padding: "13px 16px", boxShadow: urgentDone ? `0 0 0 2px ${C.bg2}, 0 0 0 4px ${C.danger}` : "none" }}>
-                        <div style={{ fontFamily: MONO, fontSize: 28, fontWeight: 800, color: late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
+                      <div key={o.id} style={{ background: allDone ? C.green + "1A" : urgent ? C.danger + "1A" : C.surface, border: `${allDone ? 2 : 1}px solid ${allDone ? C.green : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `5px solid ${cfg.color}`, borderRadius: 10, padding: "13px 16px" }}>
+                        {allDone && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: C.green, color: "#06281c", fontWeight: 800, fontSize: 16, letterSpacing: 0.4, borderRadius: 8, padding: "8px 10px", marginBottom: 11 }}>✓ ALL DONE — READY TO MOVE</div>}
+                        <div style={{ fontFamily: MONO, fontSize: 28, fontWeight: 800, color: allDone ? C.text : late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 7 }}>
-                          {urgent && <Pill color={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>Urgent</Pill>}
+                          {urgent && <Pill color="#fff" bg={C.danger} border={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>Urgent</Pill>}
                           <Pill color={impCfg(o.importance).color} style={{ fontSize: 14, padding: "3px 10px" }}>{impCfg(o.importance).label}</Pill>
                           {dtag && <Pill color={dtag.color} style={{ fontSize: 14, padding: "3px 10px" }}>{dtag.label}</Pill>}
                           {o.waiting_stock && <Pill color={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>⚠ Stock</Pill>}
@@ -1114,7 +1115,7 @@ function FloorDisplay({ onExit }) {
                           const p = total > 0 ? Math.round((done / total) * 100) : 0;
                           return (
                             <div style={{ marginTop: 8 }}>
-                              <div style={{ fontSize: 17, fontWeight: 800, color: full ? C.green : C.accent2, marginBottom: 5 }}>{full ? "All done ✓" : `${done}/${total} STKs · ${p}%`}</div>
+                              {!full && <div style={{ fontSize: 17, fontWeight: 800, color: C.accent2, marginBottom: 5 }}>{done}/{total} STKs · {p}%</div>}
                               <div style={{ height: 8, background: C.surface2, borderRadius: 4, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: full ? C.green : C.accent }} /></div>
                             </div>
                           );
@@ -1141,7 +1142,7 @@ function FloorDisplay({ onExit }) {
                 </div>
                 <span style={{ fontSize: 14, color: C.text3 }}>{(spotIdx % pool.length) + 1} / {pool.length}</span>
               </div>
-              <div style={{ fontFamily: MONO, fontSize: 62, fontWeight: 800, color: C.accent2, margin: "10px 0 6px", lineHeight: 1 }}>{spot.invoice_number}</div>
+              <div style={{ fontFamily: MONO, fontSize: 78, fontWeight: 800, color: C.accent2, margin: "10px 0 6px", lineHeight: 1, letterSpacing: -2 }}>{spot.invoice_number}</div>
               <div style={{ marginBottom: 10 }}>
                 <Pill color={impCfg(spot.importance).color} style={{ fontSize: 18, padding: "5px 14px" }}>{impCfg(spot.importance).label}</Pill>
               </div>
