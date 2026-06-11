@@ -132,7 +132,6 @@ function deliveryTag(o) {
 const NAV = [
   { id: "board", label: "Order Board", icon: "board", roles: [...BOARD_ROLES, "admin"] },
   { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "admin"] },
-  { id: "import", label: "Import Invoices", icon: "upload", roles: ["super_admin"] },
   { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "delivery_team", "admin"] },
   { id: "floor", label: "Floor Display", icon: "display" }, // every role; rendered as a distinct launch button, not a workspace tab
   { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "production_lead"] },

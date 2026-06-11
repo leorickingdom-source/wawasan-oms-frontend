@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WAWASAN LTS — Cloud Invoice Import</title>
+<style>
+  :root{
+    --bg:#100e0c; --bg2:#16130f; --surface:#1c1813; --surface2:#241f18;
+    --border:#2c2620; --border2:#3a3329;
+    --text:#f5efe6; --text2:#b4aa9c; --text3:#7e7568;
+    --accent:#f97316; --accent2:#fb923c;
+    --order:#60a5fa; --green:#34d399; --danger:#ef4444; --amber:#f5b13a;
+    --mono:ui-monospace,'SF Mono','JetBrains Mono','Roboto Mono',Consolas,Menlo,monospace;
+    --sans:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:radial-gradient(1200px 600px at 15% -10%, #1a1510 0%, var(--bg) 55%) fixed, var(--bg);
+    color:var(--text); font-family:var(--sans); line-height:1.45;
+    min-height:100vh; padding:22px clamp(14px,3vw,40px) 60px;
+  }
+  .top{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:6px}
+  .brand{display:flex; align-items:baseline; gap:10px}
+  .brand b{font-size:20px; letter-spacing:.14em; font-weight:800}
+  .brand .lts{color:var(--accent)}
+  .brand span{color:var(--text3); font-size:12px; letter-spacing:.18em; text-transform:uppercase}
+  .top .spacer{flex:1}
+  .pill{font-family:var(--mono); font-size:11px; padding:4px 9px; border-radius:999px; border:1px solid var(--border2); color:var(--text2); background:var(--surface)}
+  .pill.live{color:#fff; background:var(--danger); border-color:var(--danger); box-shadow:0 0 0 3px rgba(239,68,68,.18)}
+  .pill.sim{color:var(--order); border-color:#2b4a6b; background:#13202e}
+  .gear{cursor:pointer; user-select:none; font-size:12px; color:var(--text2); border:1px solid var(--border2); background:var(--surface); padding:5px 11px; border-radius:8px}
+  .gear:hover{color:var(--text); border-color:var(--accent)}
+  .lede{color:var(--text2); font-size:14px; margin:0 0 18px; max-width:880px}
+  .lede b{color:var(--text)}
+  .cloudtag{display:inline-flex; align-items:center; gap:5px; font-size:11px; color:var(--green); background:#10241a; border:1px solid #2f5d44; border-radius:999px; padding:2px 9px; margin-left:4px}
+
+  /* settings drawer */
+  .drawer{display:none; gap:12px; flex-wrap:wrap; align-items:flex-end; background:var(--surface); border:1px solid var(--border2); border-radius:12px; padding:14px 16px; margin-bottom:18px}
+  .drawer.open{display:flex}
+  .drawer .fld{display:flex; flex-direction:column; gap:4px}
+  .drawer label{font-size:11px; color:var(--text3); text-transform:uppercase; letter-spacing:.08em}
+  .drawer input{font-family:var(--mono); font-size:13px; background:var(--bg2); border:1px solid var(--border2); color:var(--text); border-radius:8px; padding:8px 10px; min-width:240px}
+  .drawer input:focus{outline:none; border-color:var(--accent)}
+  .toggle{display:inline-flex; border:1px solid var(--border2); border-radius:8px; overflow:hidden}
+  .toggle button{font-family:var(--sans); font-size:12px; font-weight:600; padding:8px 14px; border:0; background:transparent; color:var(--text2); cursor:pointer}
+  .toggle button.on[data-m="sim"]{background:#13202e; color:var(--order)}
+  .toggle button.on[data-m="live"]{background:var(--danger); color:#fff}
+  .hint{font-size:11px; color:var(--text3); width:100%; margin-top:2px}
+  .hint code{color:var(--accent2); font-family:var(--mono)}
+
+  .wrap{display:grid; gap:18px; max-width:1000px}
+
+  /* drop zone */
+  .drop{position:relative; background:var(--surface); border:2px dashed var(--border2); border-radius:14px; padding:30px 22px; text-align:center; transition:.15s; cursor:pointer}
+  .drop:hover{border-color:var(--accent); background:var(--surface2)}
+  .drop.over{border-color:var(--accent); background:#231a12; box-shadow:0 0 0 4px rgba(249,115,22,.12)}
+  .drop .ic{font-size:30px; line-height:1}
+  .drop h3{margin:10px 0 4px; font-size:16px; color:var(--text)}
+  .drop p{margin:0; font-size:12.5px; color:var(--text3)}
+  .drop .or{margin-top:12px; font-size:12px; color:var(--text2)}
+  .drop .browse{color:var(--accent2); text-decoration:underline dotted; cursor:pointer}
+  .drop .sample{color:var(--text3); text-decoration:underline dotted; cursor:pointer}
+  .drop input[type=file]{display:none}
+  .filebar{display:none; align-items:center; gap:10px; justify-content:center; margin-top:14px; font-size:12.5px; color:var(--text2)}
+  .filebar.show{display:flex}
+  .filebar .fn{font-family:var(--mono); color:var(--text)}
+  .filebar .clr{color:var(--text3); border:1px solid var(--border2); background:var(--bg2); border-radius:7px; padding:3px 9px; cursor:pointer; font-size:11px}
+  .filebar .clr:hover{color:var(--text); border-color:var(--danger)}
+
+  .howto{font-size:11.5px; color:var(--text3); margin-top:6px; text-align:center}
+  .howto b{color:var(--text2)}
+
+  /* results */
+  .results{display:none; background:var(--bg2); border:1px solid var(--border); border-radius:14px; padding:16px 16px 18px}
+  .results.show{display:block}
+  .summary{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px}
+  .chip{display:flex; flex-direction:column; gap:1px; background:var(--surface); border:1px solid var(--border2); border-radius:10px; padding:9px 14px; min-width:96px}
+  .chip .n{font-size:21px; font-weight:800; font-family:var(--mono)}
+  .chip .l{font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--text3)}
+  .chip.new .n{color:var(--green)} .chip.dup .n{color:var(--amber)} .chip.tot .n{color:var(--text)}
+  .chip.bad .n{color:var(--danger)}
+
+  table.inv{width:100%; border-collapse:collapse; font-size:12.5px}
+  table.inv th{text-align:left; color:var(--text3); font-weight:600; text-transform:uppercase; font-size:10px; letter-spacing:.06em; border-bottom:1px solid var(--border); padding:7px 8px}
+  table.inv td{padding:9px 8px; border-bottom:1px solid var(--border); vertical-align:top}
+  table.inv tr:last-child td{border-bottom:0}
+  table.inv .doc{font-family:var(--mono); color:var(--text); font-weight:600; white-space:nowrap}
+  table.inv .cust{color:var(--text2)}
+  table.inv .li{color:var(--text3); font-size:11px; max-width:340px}
+  table.inv .li .q{font-family:var(--mono); color:var(--accent2)}
+  .badge{display:inline-block; font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; padding:2px 8px; border-radius:999px; white-space:nowrap}
+  .badge.new{color:var(--green); background:#10241a; border:1px solid #2f5d44}
+  .badge.dup{color:var(--amber); background:#2a2210; border:1px solid #5d4f2f}
+  .badge.ok{color:var(--green); background:#10241a; border:1px solid #2f5d44}
+  .badge.err{color:#fca5a5; background:#2a1714; border:1px solid #6b2f2f}
+  .badge.wait{color:var(--text3); background:var(--surface); border:1px solid var(--border2)}
+
+  .actions{display:flex; gap:10px; align-items:center; margin-top:16px; flex-wrap:wrap}
+  .go{font-family:var(--sans); font-weight:800; font-size:14px; color:#fff; background:linear-gradient(var(--accent),#ea580c); border:0; border-radius:11px; padding:12px 18px; cursor:pointer; box-shadow:0 10px 26px -8px rgba(249,115,22,.7); white-space:nowrap}
+  .go:hover{filter:brightness(1.06)} .go:disabled{opacity:.45; cursor:default; box-shadow:none; filter:none}
+  .go.live{background:linear-gradient(var(--danger),#b91c1c)}
+  .reset{font-size:12px; color:var(--text3); background:none; border:0; cursor:pointer; text-decoration:underline dotted}
+  .reset:hover{color:var(--text2)}
+  .mapnote{font-size:11px; color:var(--text3); margin-left:auto}
+
+  .err-banner{display:none; background:#2a1714; border:1px solid var(--danger); border-radius:10px; padding:11px 13px; font-size:12.5px; color:#fcaaa0; margin-top:4px}
+  .err-banner.show{display:block}
+
+  /* toast */
+  .toast{position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(20px); background:var(--surface2); border:1px solid var(--border2); border-left:4px solid var(--green); color:var(--text); padding:12px 16px; border-radius:10px; box-shadow:0 16px 40px -12px rgba(0,0,0,.8); font-size:13px; opacity:0; pointer-events:none; transition:.3s; max-width:90vw; z-index:50}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0); pointer-events:auto}
+  .toast.err{border-left-color:var(--danger)}
+  .toast b{color:#fff} .toast a{color:var(--accent2)}
+  .toast .x{margin-left:10px; color:var(--text3); cursor:pointer}
+</style>
+</head>
+<body>
+
+  <div class="top">
+    <div class="brand"><b>WAWASAN <span class="lts">LTS</span></b><span>Order Management</span></div>
+    <span class="pill" id="modePill">Simulation</span>
+    <span class="pill" id="readyPill" style="display:none;color:var(--green);border-color:#2f5d44;background:#10241a">🔒 Live ready</span>
+    <div class="spacer"></div>
+    <div class="gear" id="gear">⚙ Settings</div>
+  </div>
+
+  <p class="lede">
+    <b>Cloud invoice import.</b> Export your day's invoices from <b>SQL Account</b> as a CSV, drop the file here, and every
+    new invoice becomes a job on the production board. The matching + duplicate-check all run in the cloud
+    <span class="cloudtag">☁ nothing installed on your PC</span>
+  </p>
+
+  <div class="drawer" id="drawer">
+    <div class="fld">
+      <label>Mode</label>
+      <div class="toggle" id="toggle">
+        <button data-m="sim" class="on">▶ Simulation (safe)</button>
+        <button data-m="live">● Live (real board)</button>
+      </div>
+    </div>
+    <div class="fld liveonly" style="display:none">
+      <label>Webhook secret</label>
+      <input id="secret" type="password" placeholder="SQL_ACCOUNT_WEBHOOK_SECRET" autocomplete="off" />
+    </div>
+    <div class="fld liveonly" style="display:none">
+      <label>Webhook URL</label>
+      <input id="hookurl" value="https://wawasan-oms-backend.vercel.app/api/orders/webhook/sql-account" />
+    </div>
+    <div class="hint" id="liveHint" style="display:none">
+      ⚠ <b>Live</b> sends each new invoice to the <b>real</b> board. The cloud rejects duplicates automatically (same Doc No → skipped).
+    </div>
+    <div class="hint">Simulation parses the file in your browser and shows what <i>would</i> happen — nothing leaves the page.</div>
+  </div>
+
+  <div class="wrap">
+
+    <!-- Drop zone -->
+    <div>
+      <div class="drop" id="drop">
+        <div class="ic">📄⤴</div>
+        <h3>Drop your SQL Account CSV here</h3>
+        <p>Sales-invoice export · one file, many invoices</p>
+        <div class="or">or <span class="browse" id="browse">browse for a file</span> · <span class="sample" id="sample">use a sample export</span></div>
+        <input type="file" id="file" accept=".csv,text/csv" />
+        <div class="filebar" id="filebar"><span>📎 <span class="fn" id="fname"></span></span><button class="clr" id="clr">remove</button></div>
+      </div>
+      <div class="howto">In SQL Account: <b>Sales → Invoice → Print/Preview → Export → CSV</b>. Column names are matched automatically.</div>
+      <div class="err-banner" id="errBanner"></div>
+    </div>
+
+    <!-- Results -->
+    <div class="results" id="results">
+      <div class="summary" id="summary"></div>
+      <div style="overflow-x:auto">
+        <table class="inv">
+          <thead><tr><th>Doc No</th><th>Customer</th><th>Items</th><th>Status</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="actions">
+        <button class="go" id="go">Import new orders ▶</button>
+        <button class="reset" id="reset">↺ Clear</button>
+        <span class="mapnote" id="mapnote"></span>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  "use strict";
+  var $ = function(s){return document.querySelector(s)};
+  var DEFAULT_HOOK = "https://wawasan-oms-backend.vercel.app/api/orders/webhook/sql-account";
+  var mode = "sim";
+
+  // In Simulation we can't reach the cloud DB, so pretend these Doc Nos are already
+  // on the board — shows the duplicate-skip behaviour. Live mode checks the real DB.
+  var SIM_IN_SYSTEM = { "SI26060059": "Perfect Design Trading", "SI26060060": "Checkers Hypermarket" };
+
+  // A realistic SQL Account export, used by "use a sample export".
+  var SAMPLE_CSV =
+    'DocNo,DocDate,CompanyName,Phone,ItemCode,Description,Qty,UOM,Terms,PONo\n' +
+    'SI26060059,06/06/2026,PERFECT DESIGN TRADING SDN BHD,011-10841868,STK006,"FIRE CHICKEN FIRESTARTER (40 BIJI) - 72 BOX/CTN",10,CTN,C.O.D.,PO-001652\n' +
+    'SI26060059,06/06/2026,PERFECT DESIGN TRADING SDN BHD,011-10841868,STK035,"SERAI LILIN ANTI INSECTS CANDLES - 2PCS/PACK (66 PACKS/CTN)",2,CTN,C.O.D.,PO-001652\n' +
+    'SI26060060,08/06/2026,CHECKERS HYPERMARKET SDN BHD,03-91075151,STK006,"FIRE CHICKEN FIRESTARTER (40 BIJI) - 72 BOX/CTN",1,CTN,30 Days,PO26060462JCU\n' +
+    'SI26060060,08/06/2026,CHECKERS HYPERMARKET SDN BHD,03-91075151,STK026,"LILIN PIALA EMAS (ITEM NO:2288) 6S - 50 BOX/CTN",1,CTN,30 Days,PO26060462JCU\n' +
+    'SI26060061,10/06/2026,SENGHIN HANG TRADING SDN BHD,03-51612539,STK006,"FIRE CHICKEN FIRESTARTER (40 BIJI) - 72 BOX/CTN",10,CTN,C.O.D.,\n' +
+    'SI26060062,19/06/2026,TAN NAM SENG BROTHERS SDN BHD,03-62765463,STK008,"FLYING HORSE FIRE STARTER (40 BIJI) - 72 BOX/CTN",45,CTN,C.O.D.,\n' +
+    'SI26060063,26/06/2026,TAN NAM SENG BROTHERS SDN BHD,03-62765463,STK008,"FLYING HORSE FIRE STARTER (40 BIJI) - 72 BOX/CTN",50,CTN,C.O.D.,\n';
+
+  // ── parser + column mapping (same logic as the SQL Account bridge) ──
+  var norm = function(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]/g,""); };
+  var ALIASES = {
+    docNo:["docno","invoiceno","invoicenumber","documentno","billno"],
+    customer:["companyname","customer","customername","debtorname","debtor","billto","company"],
+    contact:["phone","phone1","tel","telephone","mobile","hp","contact","contactno"],
+    date:["docdate","date","invoicedate","transdate"],
+    po:["pono","ponumber","po","yourref","custpono","ref","ref1"],
+    terms:["terms","paymentterms","term","creditterms"],
+    sku:["itemcode","code","stockcode","sku","productcode","item"],
+    name:["description","itemdescription","desc","productname","itemname","name","detail"],
+    qty:["qty","quantity","qtyorder","orderqty","invqty"],
+    uom:["uom","unit","units","uomname"]
+  };
+  function parseCsv(text){
+    if(text.charCodeAt(0)===0xFEFF) text=text.slice(1);
+    var rows=[], row=[], field="", i=0, inQ=false;
+    while(i<text.length){
+      var c=text[i];
+      if(inQ){
+        if(c==='"'){ if(text[i+1]==='"'){ field+='"'; i+=2; continue; } inQ=false; i++; continue; }
+        field+=c; i++; continue;
+      }
+      if(c==='"'){ inQ=true; i++; continue; }
+      if(c===','){ row.push(field); field=""; i++; continue; }
+      if(c==='\r'){ i++; continue; }
+      if(c==='\n'){ row.push(field); rows.push(row); row=[]; field=""; i++; continue; }
+      field+=c; i++;
+    }
+    if(field.length||row.length){ row.push(field); rows.push(row); }
+    return rows.filter(function(r){ return r.some(function(c){ return c.trim()!==""; }); });
+  }
+  function buildResolver(headers){
+    var normed=headers.map(norm), idx={};
+    for(var f in ALIASES){ idx[f]=normed.findIndex(function(h){ return ALIASES[f].indexOf(h)>=0; }); }
+    return idx;
+  }
+  function toIsoDate(s){
+    s=String(s||"").trim();
+    var m=s.match(/^(\d{4})-(\d{2})-(\d{2})/); if(m) return m[1]+"-"+m[2]+"-"+m[3];
+    m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); if(m) return m[3]+"-"+String(m[2]).padStart(2,"0")+"-"+String(m[1]).padStart(2,"0");
+    return undefined;
+  }
+  var num = function(s){ var n=parseFloat(String(s==null?"":s).replace(/,/g,"")); return isFinite(n)?n:1; };
+  function rowsToInvoices(rows){
+    if(rows.length<2) return {invoices:[], headers:[]};
+    var headers=rows[0], ix=buildResolver(headers);
+    if(ix.docNo<0 || ix.customer<0){
+      throw new Error("Couldn't find a Doc-No or Customer column. Columns seen: "+headers.join(", "));
+    }
+    var get=function(r,f){ return ix[f]>=0 ? String(r[ix[f]]==null?"":r[ix[f]]).trim() : ""; };
+    var byDoc=new Map();
+    rows.slice(1).forEach(function(r){
+      var docNo=get(r,"docNo"); if(!docNo) return;
+      if(!byDoc.has(docNo)){
+        byDoc.set(docNo,{ invoice_number:docNo, customer_name:get(r,"customer"),
+          customer_contact:get(r,"contact")||undefined, order_date:toIsoDate(get(r,"date")),
+          po_ref:get(r,"po")||undefined, payment_terms:get(r,"terms")||undefined, items:[] });
+      }
+      var name=get(r,"name"), sku=get(r,"sku");
+      if(name||sku) byDoc.get(docNo).items.push({ sku:sku||"N/A", name:name||sku||"Item", quantity:num(get(r,"qty")), unit:get(r,"uom")||"pcs" });
+    });
+    return { invoices:[].concat.apply([],[Array.from(byDoc.values())]), headers:headers };
+  }
+
+  // ── state ──
+  var parsed = [];   // [{invoice_number, customer_name, items, ...}]
+
+  function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+
+  function statusFor(inv){ return SIM_IN_SYSTEM[inv.invoice_number] ? "dup" : "new"; }
+
+  function render(){
+    var res=$("#results");
+    if(!parsed.length){ res.className="results"; return; }
+    res.className="results show";
+    var nNew=0, nDup=0;
+    var body="";
+    parsed.forEach(function(inv){
+      var st = (mode==="live") ? "wait" : statusFor(inv);
+      if(st==="new") nNew++; if(st==="dup") nDup++;
+      var liTop = inv.items.slice(0,2).map(function(it){ return '<span class="q">'+esc(String(it.quantity))+' '+esc(it.unit)+'</span> '+esc(it.name); }).join('<br>');
+      var more = inv.items.length>2 ? '<br>+'+(inv.items.length-2)+' more' : '';
+      var badge = mode==="live"
+        ? '<span class="badge wait" data-doc="'+esc(inv.invoice_number)+'">will send</span>'
+        : (st==="dup" ? '<span class="badge dup">already in system</span>' : '<span class="badge new">new</span>');
+      body += '<tr><td class="doc">'+esc(inv.invoice_number)+'</td><td class="cust">'+esc(inv.customer_name||"—")+'</td>'+
+              '<td class="li">'+liTop+more+'</td><td>'+badge+'</td></tr>';
+    });
+    $("#rows").innerHTML = body;
+
+    var sum="";
+    sum += '<div class="chip tot"><span class="n">'+parsed.length+'</span><span class="l">Invoices in file</span></div>';
+    if(mode==="live"){
+      sum += '<div class="chip new"><span class="n">'+parsed.length+'</span><span class="l">To send</span></div>';
+    } else {
+      sum += '<div class="chip new"><span class="n">'+nNew+'</span><span class="l">New → board</span></div>';
+      sum += '<div class="chip dup"><span class="n">'+nDup+'</span><span class="l">Already in system</span></div>';
+    }
+    $("#summary").innerHTML = sum;
+
+    var go=$("#go");
+    if(mode==="live"){ go.textContent="● Send "+parsed.length+" invoice"+(parsed.length===1?"":"s")+" to the board ▶"; go.className="go live"; go.disabled=false; }
+    else { go.textContent="Import "+nNew+" new order"+(nNew===1?"":"s")+" ▶"; go.className="go"; go.disabled=nNew===0; }
+    $("#mapnote").textContent = "Columns matched automatically · prices & tax stay in SQL Account";
+  }
+
+  function loadCsvText(text, name){
+    try{
+      var out = rowsToInvoices(parseCsv(text));
+      if(!out.invoices.length){ showErr("No invoice rows found in that file."); return; }
+      parsed = out.invoices;
+      $("#errBanner").className="err-banner";
+      $("#fname").textContent = name || "export.csv";
+      $("#filebar").className = "filebar show";
+      render();
+      toast("<b>"+parsed.length+" invoice"+(parsed.length===1?"":"s")+"</b> read from "+esc(name||"the file")+".", false);
+    }catch(e){ showErr(e.message); }
+  }
+  function showErr(msg){ var b=$("#errBanner"); b.textContent="⚠ "+msg; b.className="err-banner show"; }
+
+  function handleFile(file){
+    if(!file) return;
+    if(!/\.csv$/i.test(file.name)){ showErr("Please choose a .csv export (SQL Account → Export → CSV)."); return; }
+    var rd=new FileReader();
+    rd.onload=function(){ loadCsvText(String(rd.result||""), file.name); };
+    rd.onerror=function(){ showErr("Could not read that file."); };
+    rd.readAsText(file);
+  }
+
+  // ── import action ──
+  function doImport(){
+    var go=$("#go");
+    if(mode==="live"){ sendLiveAll(); return; }
+    var newOnes = parsed.filter(function(i){ return statusFor(i)==="new"; });
+    if(!newOnes.length){ toast("Nothing new to import — all invoices are already in the system.", true); return; }
+    go.disabled=true; go.textContent="Importing…";
+    setTimeout(function(){
+      // mark them imported in the simulation
+      newOnes.forEach(function(i){ SIM_IN_SYSTEM[i.invoice_number] = i.customer_name; });
+      render();
+      toast("<b>"+newOnes.length+" order"+(newOnes.length===1?"":"s")+" created</b> on the board (simulation). Duplicates were skipped automatically.", false);
+    }, 650);
+  }
+
+  function sendLiveAll(){
+    var secret=($("#secret").value||"").trim();
+    var url=($("#hookurl").value||"").trim()||DEFAULT_HOOK;
+    if(!secret){ toast("Enter the webhook secret in ⚙ Settings first.", true); $("#drawer").classList.add("open"); return; }
+    var go=$("#go"); go.disabled=true; go.textContent="Sending…";
+    var queue=parsed.slice(), created=0, dup=0, failed=0;
+    function setBadge(doc, cls, txt){ var el=document.querySelector('.badge[data-doc="'+CSS.escape(doc)+'"]'); if(el){ el.className="badge "+cls; el.textContent=txt; } }
+    function next(){
+      if(!queue.length){
+        go.textContent="● Send "+parsed.length+" invoices to the board ▶"; go.disabled=false;
+        toast("<b>Done.</b> "+created+" created, "+dup+" already existed, "+failed+" failed.", failed>0);
+        return;
+      }
+      var inv=queue.shift();
+      var payload={ invoice_number:inv.invoice_number, customer_name:inv.customer_name,
+        customer_contact:inv.customer_contact, order_date:inv.order_date, payment_terms:inv.payment_terms,
+        po_ref:inv.po_ref, notes:"Imported from SQL Account CSV", items:inv.items };
+      fetch(url,{method:"POST",headers:{"Content-Type":"application/json","x-webhook-secret":secret},body:JSON.stringify(payload)})
+        .then(function(r){
+          if(r.status===201){ created++; setBadge(inv.invoice_number,"ok","created ✓"); }
+          else if(r.status===409){ dup++; setBadge(inv.invoice_number,"dup","already there"); }
+          else if(r.status===401){ failed++; setBadge(inv.invoice_number,"err","bad secret"); }
+          else { failed++; setBadge(inv.invoice_number,"err","HTTP "+r.status); }
+        })
+        .catch(function(){ failed++; setBadge(inv.invoice_number,"err","no network"); })
+        .then(function(){ setTimeout(next, 120); });
+    }
+    next();
+  }
+
+  // ── toast ──
+  var toastT;
+  function toast(html,isErr){ var t=$("#toast"); clearTimeout(toastT); t.className="toast show"+(isErr?" err":""); t.innerHTML=html+'<span class="x" onclick="this.parentNode.className=\'toast\'">✕</span>'; toastT=setTimeout(function(){ t.className="toast"; }, isErr?9000:6500); }
+
+  // ── mode / settings ──
+  function setMode(m){
+    mode=m; var live=m==="live";
+    $("#modePill").textContent = live?"LIVE — real board":"Simulation";
+    $("#modePill").className = "pill "+(live?"live":"sim");
+    document.querySelectorAll(".liveonly").forEach(function(e){ e.style.display=live?"":"none"; });
+    $("#liveHint").style.display = live?"":"none";
+    document.querySelectorAll("#toggle button").forEach(function(b){ b.classList.toggle("on", b.dataset.m===m); });
+    render();
+  }
+  function refreshSecretStatus(){ $("#readyPill").style.display = ($("#secret").value||"").trim() ? "" : "none"; }
+  try{ var saved=JSON.parse(localStorage.getItem("wlts_import")||"{}"); if(saved.url)$("#hookurl").value=saved.url; if(saved.secret)$("#secret").value=saved.secret; }catch(e){}
+  refreshSecretStatus();
+
+  // ── wire ──
+  $("#gear").onclick=function(){ $("#drawer").classList.toggle("open"); };
+  $("#toggle").onclick=function(e){ var b=e.target.closest("button"); if(b) setMode(b.dataset.m); };
+  ["secret","hookurl"].forEach(function(id){ var el=$("#"+id); if(el) el.addEventListener("input",function(){ try{ localStorage.setItem("wlts_import", JSON.stringify({url:$("#hookurl").value, secret:$("#secret").value})); }catch(e){} refreshSecretStatus(); }); });
+
+  $("#browse").onclick=function(){ $("#file").click(); };
+  $("#drop").onclick=function(e){ if(e.target.closest("#sample")||e.target.closest("#browse")||e.target.closest(".filebar")) return; $("#file").click(); };
+  $("#file").onchange=function(){ handleFile(this.files[0]); this.value=""; };
+  $("#sample").onclick=function(e){ e.stopPropagation(); loadCsvText(SAMPLE_CSV, "SQL-Account-sample.csv"); };
+  $("#clr").onclick=function(e){ e.stopPropagation(); reset(); };
+  $("#reset").onclick=reset;
+  $("#go").onclick=doImport;
+
+  var drop=$("#drop");
+  ["dragenter","dragover"].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); drop.classList.add("over"); }); });
+  ["dragleave","drop"].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); if(ev==="dragleave" && e.relatedTarget && drop.contains(e.relatedTarget)) return; drop.classList.remove("over"); }); });
+  drop.addEventListener("drop",function(e){ var f=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if(f) handleFile(f); });
+
+  function reset(){ parsed=[]; $("#results").className="results"; $("#filebar").className="filebar"; $("#errBanner").className="err-banner"; $("#fname").textContent=""; }
+})();
+</script>
+</body>
+</html>
