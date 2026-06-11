@@ -3412,7 +3412,6 @@ function Remarks({ user }) {
             <Icon name="message" size={20} color={C.accent} />
             <span style={{ fontSize: 16, fontWeight: 800, color: C.text }}>This week — {weekLabel}</span>
           </div>
-          <span style={{ fontSize: 13, color: C.text3 }}>Visible to Admin, Production Head &amp; production team</span>
         </div>
         {canPost ? (
           <>
@@ -3653,12 +3652,14 @@ function Users({ user }) {
 }
 
 // ─── Settings ──────────────────────────────────────────────────────────────────
-function Settings() {
+function Settings({ user }) {
   const [s, setS] = useState(null);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [holidays, setHolidays] = useState([]);
   const [newHol, setNewHol] = useState({ date: "", name: "" });
+  const [importBusy, setImportBusy] = useState(false);
+  const [showPw, setShowPw] = useState(false);
   const [weights, setWeights] = useState(null);
   const [wBusy, setWBusy] = useState(false);
   const [wSaved, setWSaved] = useState(false);
@@ -3693,7 +3694,40 @@ function Settings() {
     if (!confirm("Remove this holiday?")) return;
     try { await api("DELETE", `/settings/holidays/${id}`); loadHolidays(); } catch (e) { alert(e.message); }
   }
-
+  // Bulk-import holidays from a CSV / Excel file — two columns: a date and a name.
+  function ymdCell(v) {
+    if (v == null || v === "") return null;
+    if (v instanceof Date && !isNaN(v)) { const o = new Date(v.getTime() - v.getTimezoneOffset() * 60000); return o.toISOString().slice(0, 10); }
+    const str = String(v).trim();
+    let m;
+    if ((m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/))) return `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+    if ((m = str.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/))) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`; // dd/mm/yyyy
+    const d = new Date(str); if (!isNaN(d)) { const o = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return o.toISOString().slice(0, 10); }
+    return null;
+  }
+  async function importHolidays(file) {
+    if (!file) return;
+    setImportBusy(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { cellDates: true });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, blankrows: false });
+      const out = [];
+      for (const row of rows) {
+        if (!Array.isArray(row) || row.length === 0) continue;
+        let date = null, name = "";
+        for (const cell of row) { const d = ymdCell(cell); if (d) { date = d; break; } }
+        for (const cell of row) { if (cell != null && String(cell).trim() && !ymdCell(cell)) { name = String(cell).trim(); break; } }
+        if (date && name) out.push({ date, name });
+      }
+      if (out.length === 0) { alert("No holidays found in that file. Expecting two columns: a date and a name (e.g. 2026-01-01, New Year's Day)."); return; }
+      const r = await api("POST", "/settings/holidays/bulk", { holidays: out });
+      alert(`Imported ${r.inserted} holiday${r.inserted === 1 ? "" : "s"}${r.skipped ? `, skipped ${r.skipped} (blank or already added)` : ""}.`);
+      loadHolidays();
+    } catch (e) { alert("Could not read that file: " + e.message); }
+    finally { setImportBusy(false); }
+  }
   if (!s) return <Loading />;
   const inp = { padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5, colorScheme: "dark" };
   const today0 = new Date(); today0.setHours(0, 0, 0, 0);
@@ -3764,7 +3798,26 @@ function Settings() {
           <input placeholder="Holiday name (e.g. Hari Raya)" value={newHol.name} onChange={(e) => setNewHol((p) => ({ ...p, name: e.target.value }))} style={{ ...inp, flex: 1, minWidth: 160 }} />
           <Btn size="sm" onClick={addHoliday} disabled={!newHol.date || !newHol.name.trim()}><Icon name="plus" size={14} /> Add</Btn>
         </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${C.border}`, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12.5, color: C.text3 }}>Or import a list:</span>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "7px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text2, fontSize: 13, cursor: importBusy ? "default" : "pointer", opacity: importBusy ? 0.6 : 1 }}>
+            {importBusy ? "Importing…" : "⬆ Import CSV / Excel"}
+            <input type="file" accept=".csv,.xlsx,.xls" disabled={importBusy} onChange={(e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; importHolidays(f); }} style={{ display: "none" }} />
+          </label>
+          <span style={{ fontSize: 11.5, color: C.text3 }}>two columns: date · name</span>
+        </div>
       </Card>
+
+      {user && user.role === "super_admin" && (
+        <Card>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 6 }}>Shared login password</h3>
+          <p style={{ fontSize: 12.5, color: C.text3, marginBottom: 14 }}>Everyone signs in with this one shared password (staff still use their own email). Shown here so you can look it up if anyone forgets.</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ ...inp, minWidth: 150, fontFamily: MONO, letterSpacing: showPw ? 0.5 : 3, color: C.text, userSelect: "all" }}>{showPw ? (s.login_password || "wawasan123") : "••••••••"}</span>
+            <Btn size="sm" variant="ghost" onClick={() => setShowPw((v) => !v)}>{showPw ? "Hide" : "Show"}</Btn>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
@@ -4037,7 +4090,7 @@ export default function App() {
           {view === "remarks" && <Remarks user={user} />}
           {view === "audit" && <Audit />}
           {view === "users" && <Users user={user} />}
-          {view === "settings" && <Settings />}
+          {view === "settings" && <Settings user={user} />}
         </main>
       </div>
 
