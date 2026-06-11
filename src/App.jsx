@@ -79,8 +79,8 @@ const STAGE_LABELS = {
 };
 const ROLE_LABELS = {
   super_admin: "Boss", admin: "Admin",
-  production_lead: "Production Head", production_staff: "Production Staff",
-  packing_staff: "Packing Staff", delivery_team: "Delivery Coordinator",
+  production_lead: "Production Head", production_staff: "Production Department",
+  packing_staff: "Packing Department", delivery_team: "Delivery Department",
 };
 // Every role except the system-only Admin — for nav pages Admin shouldn't see.
 const NON_ADMIN_ROLES = ["super_admin", "production_lead", "production_staff", "packing_staff", "delivery_team"];
@@ -123,7 +123,6 @@ const NAV = [
   { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "delivery_team", "admin", "production_lead"] },
   { id: "floor", label: "Floor Display", icon: "display" }, // every role; rendered as a distinct launch button, not a workspace tab
   { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "production_lead"] },
-  { id: "messages", label: "Messages", icon: "message", roles: ["super_admin"] },
   { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead", "production_staff"] },
   { id: "audit", label: "Audit Trail", icon: "audit", roles: ["super_admin", "admin"] },
   { id: "users", label: "User Management", icon: "users", roles: ["super_admin", "admin"] },
@@ -135,7 +134,6 @@ const PAGE_META = {
   import: ["Import from SQL Account", "Upload a CSV export — new invoices become orders"],
   delivery: ["Delivery", "Schedule and dispatch"],
   reports: ["Reports", "Department performance"],
-  messages: ["Messages", "WhatsApp customer updates & morning brief"],
   remarks: ["Production Remarks", "Weekly notes from the production lead"],
   audit: ["Audit Trail", "Every action, logged"],
   users: ["User Management", "Accounts, roles and access"],
@@ -686,7 +684,8 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
   const [err, setErr] = useState("");
   const [confirmAdv, setConfirmAdv] = useState(null);
   const [moveBack, setMoveBack] = useState(null); // order being reversed via the red ↩ arrow
-  // (drag-to-tier board reordering removed — each column sorts by delivery date)
+  const [dragId, setDragId] = useState(null); // card being dragged
+  const canReorder = ["super_admin", "admin", "production_lead"].includes(user.role);
   const [viewStage, setViewStageRaw] = useState(() => {
     const saved = (typeof localStorage !== "undefined" && localStorage.getItem("oms_board_stage")) || "all";
     return saved === "all" || visibleStages(user.role).includes(saved) ? saved : "all";
@@ -712,7 +711,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [weekOnly, refreshKey]);
   // Near-instant board: re-check every 3s, but never mid-drag, mid-confirm or mid-reorder, so it can't fight the user.
-  useEffect(() => { pausePollRef.current = !!(confirmAdv || moveBack); }, [confirmAdv, moveBack]);
+  useEffect(() => { pausePollRef.current = !!(dragId || confirmAdv || moveBack); }, [dragId, confirmAdv, moveBack]);
   useEffect(() => {
     const t = setInterval(() => { if (!pausePollRef.current && !persistingRef.current) load(true); }, 3000);
     return () => clearInterval(t); /* eslint-disable-next-line */
@@ -730,13 +729,36 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     try { await api("POST", `/orders/${o.id}/move`, { to_stage: to, reason: reason || undefined }); setMoveBack(null); load(); }
     catch (e) { alert(e.message); }
   }
-  // Each column is sorted by delivery deadline — earliest first, undated last; ties
-  // break on invoice number so the order is stable between refreshes.
-  const byDue = (arr) => [...arr].sort((a, b) => {
-    const da = a.required_delivery_date ? new Date(a.required_delivery_date).getTime() : Infinity;
-    const db = b.required_delivery_date ? new Date(b.required_delivery_date).getTime() : Infinity;
-    return da - db || String(a.invoice_number).localeCompare(String(b.invoice_number));
-  });
+  // Manual drag-to-reorder within a column. The server stores the order as sort_order;
+  // un-arranged columns fall back to delivery-date order (see the kanban query). Optimistic.
+  async function persist(stage, orderedIds) {
+    const byId = Object.fromEntries((board[stage] || []).map((o) => [o.id, o]));
+    const next = orderedIds.map((id) => byId[id]).filter(Boolean);
+    setBoard({ ...board, [stage]: next });        // optimistic
+    setDragId(null);
+    persistingRef.current = true;                 // hold the 3s poll off until it lands
+    try { await api("POST", "/orders/reorder", { stage, ordered_ids: orderedIds }); lastSigRef.current = ""; }
+    catch (e) { alert(e.message); load(); }
+    finally { persistingRef.current = false; }
+  }
+  // ▲▼ — nudge a card up/down one position in the column.
+  function reorderMove(stage, id, dir) {
+    const arr = [...((board && board[stage]) || [])];
+    const i = arr.findIndex((o) => o.id === id); if (i < 0) return;
+    const j = dir < 0 ? i - 1 : i + 1; if (j < 0 || j >= arr.length) return;
+    const me = arr[i]; arr.splice(i, 1); arr.splice(j, 0, me);
+    persist(stage, arr.map((o) => o.id));
+  }
+  // Drop a dragged card onto another → insert it at that card's position.
+  function dropOnCard(stage, targetId) {
+    if (!dragId || dragId === targetId || !board) { setDragId(null); return; }
+    const arr = [...(board[stage] || [])];
+    const from = arr.findIndex((o) => o.id === dragId); if (from < 0) { setDragId(null); return; }
+    const me = arr[from]; arr.splice(from, 1);
+    const to = arr.findIndex((o) => o.id === targetId); if (to < 0) { setDragId(null); return; }
+    arr.splice(to, 0, me);
+    persist(stage, arr.map((o) => o.id));
+  }
   const filt = (arr) => {
     const q = search.trim().toLowerCase();
     let out = arr;
@@ -775,7 +797,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
       <div style={{ display: "grid", gridTemplateColumns: shownStages.length === 1 ? `repeat(1, minmax(min(100%, 280px), 560px))` : `repeat(auto-fit, minmax(min(100%, 250px), 1fr))`, gap: 16, alignItems: "start" }}>
         {shownStages.map((s) => {
           const cfg = STAGES[s];
-          const orders = byDue(filt((board && board[s]) || []));
+          const orders = filt((board && board[s]) || []);
           return (
             <div key={s} style={{ background: C.bg2, border: `1px solid ${C.border}`, borderTop: `3px solid ${cfg.color}`, borderRadius: 13, padding: 12, minHeight: 200 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, padding: "2px 2px 0" }}>
@@ -786,8 +808,21 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
                 <span style={{ background: C.surface2, color: C.text2, borderRadius: 7, padding: "1px 9px", fontSize: 13, fontWeight: 700 }}>{orders.length}</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                {orders.map((o) => <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} onMoveBack={reverse} unread={unreadIds && unreadIds.has(o.id)} />)}
                 {orders.length === 0 && <Empty label="No orders" />}
+                {orders.map((o, i) => canReorder ? (
+                  <div key={o.id} draggable
+                    onDragStart={(e) => { setDragId(o.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", o.id); } catch (_) {} }}
+                    onDragEnd={() => setDragId(null)}
+                    onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) {} }}
+                    onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropOnCard(s, o.id); }}
+                    style={{ cursor: "grab", opacity: dragId === o.id ? 0.4 : 1 }}>
+                    <KanbanCard order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} onMoveBack={reverse} reorderable rank={i + 1} unread={unreadIds && unreadIds.has(o.id)}
+                      onReorderUp={i > 0 ? () => reorderMove(s, o.id, -1) : null}
+                      onReorderDown={i < orders.length - 1 ? () => reorderMove(s, o.id, 1) : null} />
+                  </div>
+                ) : (
+                  <KanbanCard key={o.id} order={o} user={user} onOpen={onOpenOrder} onAdvance={advance} onMoveBack={reverse} unread={unreadIds && unreadIds.has(o.id)} />
+                ))}
               </div>
             </div>
           );
@@ -3997,7 +4032,6 @@ export default function App() {
           {view === "import" && <ImportInvoices onImported={bumpBoard} onOpenOrder={(id) => openOrder(id)} />}
           {view === "delivery" && <Delivery user={user} onOpenOrder={(id) => openOrder(id)} />}
           {view === "reports" && <Reports user={user} />}
-          {view === "messages" && <Messages user={user} />}
           {view === "remarks" && <Remarks user={user} />}
           {view === "audit" && <Audit />}
           {view === "users" && <Users user={user} />}
