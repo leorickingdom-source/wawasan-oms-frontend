@@ -677,13 +677,13 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
     return [...s].filter((k) => k === "order" || k === "production" || k === "packing");
   })();
   // Roles that can't act on this card (admins, other-department staff) get a trimmed,
-  // read-only card. When every line in this column is complete the card greens like the
-  // old board's "all done" tint.
+  // read-only card. The card greens only when the WHOLE order is done (every line packed),
+  // not just this column's lines — so a card with a sibling still in production stays plain.
   const canAct = canMark || canMoveLine;
-  const colDone = lines.length > 0 && lines.every((l) => track === "packing" ? itemPackDone(l) : itemProdDone(l));
+  const orderDone = (o.items || []).length > 0 && (o.items || []).every(itemPackDone);
   return (
     <div onClick={() => onOpen(o)}
-      style={{ position: "relative", background: colDone ? C.ready + "26" : C.surface, border: `1px solid ${colDone ? C.ready + "88" : urgent ? C.danger + "88" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "11px 12px", cursor: "pointer" }}>
+      style={{ position: "relative", background: orderDone ? C.ready + "26" : C.surface, border: `1px solid ${orderDone ? C.ready + "88" : urgent ? C.danger + "88" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "11px 12px", cursor: "pointer" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <span style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: urgent ? C.accent2 : C.text, letterSpacing: 0.3 }}>{o.invoice_number}</span>
         <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }} title={`PIC: ${o.pic_name || "Unassigned"}`}>
@@ -716,7 +716,6 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
           const prodVal = it.status || (it.made ? "done" : "not_started");
           const packVal = it.pack_status || (it.pack_made ? "done" : "not_started");
           const done = track === "packing" ? itemPackDone(it) : itemProdDone(it);
-          const waiting = track === "packing" && done;
           // Send a packing line back to Production (undo a premature "Done"). Supervisors only.
           const back = canMoveLine && track === "packing"
             ? <button onClick={() => onLineMove(o, it, "to_production")} title="Send this line back to Production" style={backStyle}>↩ To Production</button>
@@ -732,11 +731,6 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
               <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.text3, margin: "1px 0 6px" }}>{it.sku}</div>
               {!canAct ? (
                 <span style={{ display: "inline-block", padding: "2px 9px", borderRadius: 20, fontSize: 11, fontWeight: 700, color: tcfg.color, background: tcfg.color + "1f", border: `1px solid ${tcfg.color}44` }}>{(track === "packing" && done) ? "✓ " : ""}{tcfg.short}</span>
-              ) : waiting ? (
-                <>
-                  <div style={{ fontSize: 11, color: C.ready, fontWeight: 700 }}>✓ packed</div>
-                  {back}
-                </>
               ) : track === "production" ? (
                 <StatusPicker value={prodVal} disabled={!canMark} onChange={(s) => onSetItem(o, it, s, "production")} />
               ) : (
@@ -1252,7 +1246,9 @@ function FloorDisplay({ onExit }) {
                     const sub = o._items || null;
                     const subDone = sub ? sub.filter(s === "packing" ? itemPackDone : itemProdDone).length : (o.made_count || 0);
                     const subTotal = sub ? sub.length : (o.item_count || 0);
-                    const allDone = (s === "production" || s === "packing") && subTotal > 0 && subDone >= subTotal;
+                    const allDone = sub
+                      ? ((o.items || []).length > 0 && (o.items || []).every(itemPackDone))
+                      : ((o.stage === "production" || o.stage === "packing") && (o.item_count || 0) > 0 && (o.made_count || 0) >= o.item_count);
                     return (
                       <div key={o.id} style={{ background: allDone ? C.green + "33" : urgent ? C.danger + "1A" : C.surface, border: `${allDone ? 2 : 1}px solid ${allDone ? C.green : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `5px solid ${cfg.color}`, borderRadius: 10, padding: "13px 16px" }}>
                         <div style={{ fontFamily: MONO, fontSize: 28, fontWeight: 800, color: allDone ? C.text : late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
