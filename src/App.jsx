@@ -657,7 +657,7 @@ function KanbanCard({ order, user, onOpen, onAdvance, onMoveBack, onReorderUp, o
 // in this stage, each with the status picker for THIS column's track. The same order
 // renders again in the other column for its lines there. Lead/Boss also see where else
 // it sits ("⇄ also in …") and the pack gate; departments just see their own lines.
-function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onLineMove }) {
+function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onLineMove, reorderable, onReorderUp, onReorderDown }) {
   const o = instance;
   const lines = instance._items || [];
   const track = stageKey; // 'production' | 'packing'
@@ -665,6 +665,7 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
   const canMoveLine = user.role === "super_admin" || user.role === "production_lead";
   const isLeadPlus = canMoveLine;
   const backStyle = { marginTop: 5, appearance: "none", border: "1px solid #5b2526", background: "#2a1414", color: "#fca5a5", fontSize: 11, fontWeight: 600, padding: "4px 9px", borderRadius: 7, cursor: "pointer" };
+  const rBtn = (dis) => ({ cursor: dis ? "default" : "pointer", opacity: dis ? 0.3 : 1, lineHeight: 1, fontSize: 10, padding: "2px 6px", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 5, color: C.text2 });
   const cd = countdown(o.required_delivery_date);
   const urgent = o.priority === "urgent";
   const onHold = !!o.on_hold;
@@ -685,7 +686,15 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
     <div onClick={() => onOpen(o)}
       style={{ position: "relative", background: orderDone ? C.ready + "26" : C.surface, border: `1px solid ${orderDone ? C.ready + "88" : urgent ? C.danger + "88" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "11px 12px", cursor: "pointer" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-        <span style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: urgent ? C.accent2 : C.text, letterSpacing: 0.3 }}>{o.invoice_number}</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+          {reorderable && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }} onClick={(e) => e.stopPropagation()} title="Move priority up / down">
+              <button onClick={() => onReorderUp && onReorderUp()} disabled={!onReorderUp} style={rBtn(!onReorderUp)} aria-label="Move up">▲</button>
+              <button onClick={() => onReorderDown && onReorderDown()} disabled={!onReorderDown} style={rBtn(!onReorderDown)} aria-label="Move down">▼</button>
+            </div>
+          )}
+          <span style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: urgent ? C.accent2 : C.text, letterSpacing: 0.3 }}>{o.invoice_number}</span>
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }} title={`PIC: ${o.pic_name || "Unassigned"}`}>
           {o.pic_name
             ? <><Avatar name={o.pic_name} color={o.pic_color} size={22} /><span style={{ fontSize: 12, color: C.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 96 }}>{o.pic_name}</span></>
@@ -743,9 +752,9 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
           );
         })}
       </div>
-      {onAdvance && track === "packing" && o.stage === "packing" && canAdvanceStage(user.role, o.stage) && !o.on_hold && (
+      {onAdvance && track === "packing" && o.stage === "packing" && orderDone && canAdvanceStage(user.role, o.stage) && !o.on_hold && (
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 9, borderTop: `1px solid ${C.border}`, paddingTop: 8 }} onClick={(e) => e.stopPropagation()}>
-          <IconBtn icon="arrowRight" onClick={() => onAdvance(o, "ready_for_delivery")} title="Send to Ready for Delivery" color={C.ready} bg="#13301f" border="#1f5036" />
+          <IconBtn icon="arrowRight" onClick={() => onAdvance(o, "ready_for_delivery")} title="Send to Ready for Delivery (all packed)" color={C.ready} bg="#13301f" border="#1f5036" />
         </div>
       )}
     </div>
@@ -896,6 +905,12 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
   }, [weekOnly]);
 
   function advance(order, to) { setConfirmAdv({ order, to }); }
+  // Split board: the packing→Ready arrow only shows once every line is packed, so the
+  // confirm modal is redundant — move straight through (the backend still gates it).
+  async function directAdvance(order, to) {
+    try { await api("POST", `/orders/${order.id}/move`, { to_stage: to }); load(); }
+    catch (e) { alert(e.message); }
+  }
   async function doAdvance(picId) {
     const { order, to } = confirmAdv;
     try {
@@ -1006,8 +1021,18 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                 {orders.length === 0 && <Empty label="No orders" />}
-                {splitCol && orders.map((inst) => (
-                  <SplitCard key={inst.id} instance={inst} stageKey={s} user={user} onOpen={onOpenOrder} onSetItem={setSplitItem} onLineMove={setLineMove} onAdvance={advance} />
+                {splitCol && orders.map((inst, i) => canReorder ? (
+                  <div key={inst.id} draggable
+                    onDragStart={(e) => { setDragId(inst.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", inst.id); } catch (_) {} }}
+                    onDragEnd={() => setDragId(null)}
+                    onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) {} }}
+                    onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropOnCard(s, inst.id); }}
+                    style={{ opacity: dragId === inst.id ? 0.4 : 1 }}>
+                    <SplitCard instance={inst} stageKey={s} user={user} onOpen={onOpenOrder} onSetItem={setSplitItem} onLineMove={setLineMove} onAdvance={directAdvance}
+                      reorderable onReorderUp={i > 0 ? () => reorderMove(s, inst.id, -1) : null} onReorderDown={i < orders.length - 1 ? () => reorderMove(s, inst.id, 1) : null} />
+                  </div>
+                ) : (
+                  <SplitCard key={inst.id} instance={inst} stageKey={s} user={user} onOpen={onOpenOrder} onSetItem={setSplitItem} onLineMove={setLineMove} onAdvance={directAdvance} />
                 ))}
                 {!splitCol && orders.map((o, i) => canReorder ? (
                   <div key={o.id} draggable
@@ -1525,7 +1550,6 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
         {!isFloor && (
           <div style={{ display: "flex", gap: 8 }}>
             <Btn variant="ghost" size="sm" onClick={() => printPickingSlip(order)}>Print picking slip</Btn>
-            <Btn variant="ghost" size="sm" onClick={() => printDeliveryOrders([{ order, delivery }])}>Print delivery order</Btn>
           </div>
         )}
       </div>
@@ -3200,16 +3224,21 @@ function Delivery({ user, onOpenOrder }) {
   }
   // Print the Delivery Order (driver's signable paper). Fetches the full order for
   // its line items; the batch version prints every scheduled note in one dialog.
+  async function markPrinted(ids) { if (!ids.length) return; try { await api("POST", "/delivery/mark-do-printed", { ids }); load(); } catch (e) { /* non-fatal */ } }
   async function printOneDO(orderId) {
     const o = await api("GET", `/orders/${orderId}`).catch(() => null);
     const dv = (list || []).find((x) => x.order_id === orderId && x.status !== "delivered");
-    if (o) printDeliveryOrders([{ order: o, delivery: dv }]);
+    if (o) { printDeliveryOrders([{ order: o, delivery: dv }]); if (dv) markPrinted([dv.id]); }
   }
+  // Mass print skips notes already printed (no duplicates); reprint a single one from its row.
   async function printAllDOs() {
-    const active = (list || []).filter((x) => x.status !== "delivered");
+    const active = (list || []).filter((x) => x.status !== "delivered" && !x.do_printed_at);
+    if (!active.length) { alert("All scheduled Delivery Orders are already printed. Use a row's Reprint to print one again."); return; }
     const entries = [];
     for (const dv of active) { const o = await api("GET", `/orders/${dv.order_id}`).catch(() => null); if (o) entries.push({ order: o, delivery: dv }); }
-    if (entries.length) printDeliveryOrders(entries); else alert("Nothing scheduled to print.");
+    if (!entries.length) { alert("Nothing scheduled to print."); return; }
+    printDeliveryOrders(entries);
+    markPrinted(entries.map((e) => e.delivery.id));
   }
   function scheduleFor(orderId) { const o = ready.find((x) => x.id === orderId); setForm((f) => ({ ...f, order_id: orderId, address: (o && o.delivery_address) || "" })); setShow(true); }
   async function addDeliverer() {
@@ -3217,6 +3246,10 @@ function Delivery({ user, onOpenOrder }) {
     try { await api("POST", "/delivery/deliverers", newDeliverer); setNewDeliverer({ name: "", phone: "" }); load(); } catch (e) { alert(e.message); }
   }
   async function toggleDeliverer(dl) { try { await api("PATCH", `/delivery/deliverers/${dl.id}`, { is_active: !dl.is_active }); load(); } catch (e) { alert(e.message); } }
+  async function delDeliverer(dl) {
+    if (!window.confirm(`Delete driver "${dl.name}"? Past deliveries will show no driver. This can't be undone.`)) return;
+    try { await api("DELETE", `/delivery/deliverers/${dl.id}`); load(); } catch (e) { alert(e.message); }
+  }
   function openEdit(dv) {
     setEditForm({ deliverer_id: dv.deliverer_id || "", scheduled_date: dv.scheduled_date || "", address: dv.address || "", notes: dv.notes || "" });
     setEditOther(""); setEditDelivery(dv);
@@ -3339,7 +3372,7 @@ function Delivery({ user, onOpenOrder }) {
           <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Scheduled · {fActive.length}</h3>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Btn variant="soft" size="sm" onClick={() => printRouteList(fActive)}>Print route list</Btn>
-            <Btn variant="soft" size="sm" onClick={printAllDOs}>🖨 Print delivery orders</Btn>
+            <Btn variant="soft" size="sm" onClick={printAllDOs}>🖨 Print new DOs</Btn>
           </div>
         </div>
         {stacked ? (
@@ -3360,7 +3393,7 @@ function Delivery({ user, onOpenOrder }) {
                 {canDeliver && <label style={{ ...proofBtn, flex: 1, justifyContent: "center", padding: "11px" }}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(dv.order_id, f); }} /></label>}
                 {canDeliver && <Btn variant="success" style={{ flex: 2, justifyContent: "center" }} onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
                 {canAssign && <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => openEdit(dv)}>Edit</Btn>}
-                <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => printOneDO(dv.order_id)}>🖨 DO</Btn>
+                <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => printOneDO(dv.order_id)}>{dv.do_printed_at ? "🖨 Reprint" : "🖨 DO"}</Btn>
               </>}
             />
           ))
@@ -3388,7 +3421,7 @@ function Delivery({ user, onOpenOrder }) {
                       {canAssign && <Btn size="sm" variant="soft" onClick={() => openEdit(dv)}>Edit</Btn>}
                       {canDeliver && <label style={proofBtn}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(dv.order_id, f); }} /></label>}
                       {canDeliver && <Btn size="sm" variant="success" onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
-                      <Btn size="sm" variant="soft" onClick={() => printOneDO(dv.order_id)}>🖨 DO</Btn>
+                      <Btn size="sm" variant="soft" onClick={() => printOneDO(dv.order_id)}>{dv.do_printed_at ? "🖨 Reprint" : "🖨 DO"}</Btn>
                     </div>
                   </td>
                 </tr>
@@ -3477,7 +3510,10 @@ function Delivery({ user, onOpenOrder }) {
                         <td style={{ padding: "11px 16px", color: C.text }}>{dl.name}</td>
                         <td style={{ padding: "11px 16px", color: C.text2 }}>{dl.phone || "—"}</td>
                         <td style={{ padding: "11px 16px" }}><Pill color={dl.is_active ? C.ready : C.danger}>{dl.is_active ? "Active" : "Disabled"}</Pill></td>
-                        <td style={{ padding: "11px 16px" }}><Btn size="sm" variant="ghost" onClick={() => toggleDeliverer(dl)}>{dl.is_active ? "Disable" : "Enable"}</Btn></td>
+                        <td style={{ padding: "11px 16px" }}>
+                          <Btn size="sm" variant="ghost" onClick={() => toggleDeliverer(dl)}>{dl.is_active ? "Disable" : "Enable"}</Btn>
+                          {!dl.is_active && <Btn size="sm" variant="danger" onClick={() => delDeliverer(dl)} style={{ marginLeft: 8 }}>Delete</Btn>}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
