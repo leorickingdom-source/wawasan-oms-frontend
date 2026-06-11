@@ -3283,7 +3283,7 @@ function Delivery({ user, onOpenOrder }) {
   // Mass print skips notes already printed (no duplicates); reprint a single one from its row.
   async function printAllDOs() {
     const active = (list || []).filter((x) => x.status !== "delivered" && !x.do_printed_at);
-    if (!active.length) { alert("All scheduled Delivery Orders are already printed. Use a row's 🖨 DO to reprint one."); return; }
+    if (!active.length) { alert("All scheduled Delivery Orders are already printed. Use a row's 🖨 Reprint to print one again."); return; }
     const entries = [];
     for (const dv of active) { const o = await api("GET", `/orders/${dv.order_id}`).catch(() => null); if (o) entries.push({ order: o, delivery: dv }); }
     if (!entries.length) { alert("Nothing scheduled to print."); return; }
@@ -3339,7 +3339,7 @@ function Delivery({ user, onOpenOrder }) {
       ? <button onClick={open} title="View proof photo" style={{ background: "none", border: 0, padding: 0, cursor: "pointer" }}><Pill color={C.ready} style={{ fontSize: 10, cursor: "pointer" }}>👁 View proof</Pill></button>
       : <button onClick={open} title="View proof photo" style={{ background: "none", border: 0, padding: 0, color: C.ready, cursor: "pointer", textDecoration: "underline", font: "inherit", fontWeight: 700 }}>👁 View proof</button>;
   };
-  const active = list.filter((x) => x.status !== "delivered");
+  const active = list.filter((x) => x.status !== "delivered" && x.status !== "failed");
   const delByOrder = {};
   for (const dv of list) delByOrder[dv.order_id] = dv;
   // Filter every table by invoice # or customer name (mirrors the Order Board search).
@@ -3347,9 +3347,10 @@ function Delivery({ user, onOpenOrder }) {
   const match = (o) => !qq || (o.invoice_number || "").toLowerCase().includes(qq) || (o.customer_name || "").toLowerCase().includes(qq);
   const fReady = ready.filter(match);
   const fActive = active.filter(match);
+  const fFailed = list.filter((x) => x.status === "failed").filter(match);
   const fCompleted = completed.filter(match);
   const shownCompleted = allCompleted ? fCompleted : fCompleted.slice(0, 3);
-  const matchCount = fReady.length + fActive.length + fCompleted.length;
+  const matchCount = fReady.length + fActive.length + fFailed.length + fCompleted.length;
   const noMatch = qq ? `No match for "${q.trim()}"` : null;
 
   return (
@@ -3443,7 +3444,7 @@ function Delivery({ user, onOpenOrder }) {
                 {canDeliver && <label style={{ ...proofBtn, flex: 1, justifyContent: "center", padding: "11px" }}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(dv.order_id, f); }} /></label>}
                 {canDeliver && <Btn variant="success" style={{ flex: 2, justifyContent: "center" }} onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
                 {canAssign && <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => openEdit(dv)}>Edit</Btn>}
-                <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => printOneDO(dv.order_id)}>🖨 DO</Btn>
+                <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => printOneDO(dv.order_id)}>{dv.do_printed_at ? "🖨 Reprint" : "🖨 DO"}</Btn>
               </>}
             />
           ))
@@ -3471,7 +3472,55 @@ function Delivery({ user, onOpenOrder }) {
                       {canAssign && <Btn size="sm" variant="soft" onClick={() => openEdit(dv)}>Edit</Btn>}
                       {canDeliver && <label style={proofBtn}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(dv.order_id, f); }} /></label>}
                       {canDeliver && <Btn size="sm" variant="success" onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
-                      <Btn size="sm" variant="soft" onClick={() => printOneDO(dv.order_id)}>🖨 DO</Btn>
+                      <Btn size="sm" variant="soft" onClick={() => printOneDO(dv.order_id)}>{dv.do_printed_at ? "🖨 Reprint" : "🖨 DO"}</Btn>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+        )}
+      </div>
+      )}
+
+      {fFailed.length > 0 && (
+      <div>
+        <h3 style={{ fontSize: 15, fontWeight: 700, color: C.danger, marginBottom: 12 }}>⚠ Failed deliveries · {fFailed.length}</h3>
+        {stacked ? (
+          fFailed.map((dv) => (
+            <StackCard key={dv.id}
+              head={<>
+                <button onClick={() => onOpenOrder && onOpenOrder(dv.order_id)} style={{ background: "none", border: 0, padding: 0, fontFamily: MONO, fontSize: 15, fontWeight: 700, color: C.accent, cursor: "pointer" }}>{dv.invoice_number}</button>
+                <Pill color={C.danger}>Failed</Pill>
+              </>}
+              rows={[
+                ["Customer", dv.customer_name || "—"],
+                ["Driver", dv.delivery_man_name || "—"],
+                ["Due", <span style={{ color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</span>],
+              ]}
+              actions={<>
+                {canAssign && <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => openEdit(dv)}>Edit / reschedule</Btn>}
+                {canDeliver && <Btn variant="success" style={{ flex: 1, justifyContent: "center" }} onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
+              </>}
+            />
+          ))
+        ) : (
+        <Card style={{ padding: 0, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Driver", "Scheduled", "Due", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {fFailed.map((dv) => (
+                <tr key={dv.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "11px 16px", fontFamily: MONO }}><button onClick={() => onOpenOrder && onOpenOrder(dv.order_id)} title="Open order details" style={{ background: "none", border: 0, padding: 0, fontFamily: MONO, fontSize: "inherit", color: C.accent, cursor: "pointer", textAlign: "left" }}>{dv.invoice_number}</button></td>
+                  <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.customer_name}</td>
+                  <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.delivery_man_name || "—"}</td>
+                  <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"}</td>
+                  <td style={{ padding: "11px 16px", color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</td>
+                  <td style={{ padding: "11px 16px" }}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {canAssign && <Btn size="sm" variant="soft" onClick={() => openEdit(dv)}>Edit / reschedule</Btn>}
+                      {canDeliver && <Btn size="sm" variant="success" onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
                     </div>
                   </td>
                 </tr>
