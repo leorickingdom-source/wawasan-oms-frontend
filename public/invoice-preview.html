@@ -127,6 +127,7 @@
   <div class="top">
     <div class="brand"><b>WAWASAN <span class="lts">LTS</span></b><span>Order Management</span></div>
     <span class="pill" id="modePill">Simulation</span>
+    <span class="pill" id="readyPill" style="display:none;color:var(--green);border-color:#2f5d44;background:#10241a">🔒 Live ready</span>
     <div class="spacer"></div>
     <div class="gear" id="gear">⚙ Demo settings</div>
   </div>
@@ -156,7 +157,7 @@
       <label>Open-board link</label>
       <input id="boardurl" value="https://wawasan-oms-frontend.vercel.app" />
     </div>
-    <button class="reset" id="remember" style="display:none">Remember on this PC</button>
+    <div class="hint" id="secretStatus" style="display:none"></div>
     <div class="hint" id="liveHint" style="display:none">
       ⚠ <b>Live</b> creates a <b>real</b> order (number <code>DEMO-…</code>) on the board — paste the secret first, then <b>Send REAL invoice</b>.
       Works from this hosted link, or via <code>Serve-Live-Demo.cmd</code> on localhost. Clean up after on the board (<b>Cancel order</b>).
@@ -384,29 +385,46 @@
     $("#modePill").className = "pill " + (live?"live":"sim");
     document.querySelectorAll(".liveonly").forEach(function(e){ e.style.display = live?"":"none"; });
     $("#liveHint").style.display = live?"":"none";
-    $("#remember").style.display = live?"":"none";
+    $("#secretStatus").style.display = live?"":"none";
     document.querySelectorAll("#toggle button").forEach(function(b){ b.classList.toggle("on", b.dataset.m===m); });
     var btn=$("#go");
     btn.textContent = live ? "● Send REAL invoice ▶" : "Save & Send to OMS ▶";
     btn.style.background = live ? "linear-gradient(var(--danger),#b91c1c)" : "";
   }
 
-  // load remembered live settings
+  // Persisted on THIS device only (localStorage) — the secret is NEVER in the page source.
+  function saveDemo(){
+    try{ localStorage.setItem("wlts_demo", JSON.stringify({url:$("#hookurl").value, board:$("#boardurl").value, secret:$("#secret").value})); }catch(e){}
+    refreshSecretStatus();
+  }
+  function forgetDemo(){
+    try{ localStorage.removeItem("wlts_demo"); }catch(e){}
+    $("#secret").value = ""; refreshSecretStatus();
+    toast("Secret cleared from this device.", false);
+  }
+  function refreshSecretStatus(){
+    var has = !!($("#secret").value||"").trim();
+    $("#readyPill").style.display = has ? "" : "none";
+    var st = $("#secretStatus");
+    st.innerHTML = has
+      ? '🔒 <b>Secret saved on this device</b> — zero typing at the factory. <a id="forget" href="javascript:void(0)" style="color:var(--accent2)">Forget</a>'
+      : 'Paste the secret once — it auto-saves on <b>this device only</b>, so the factory demo needs no typing. Don\'t do this on a client/shared PC.';
+    var f = $("#forget"); if(f) f.onclick = forgetDemo;
+  }
+
+  // Pre-load: read any secret/URLs remembered on this device.
   try{
     var saved = JSON.parse(localStorage.getItem("wlts_demo")||"{}");
     if(saved.url) $("#hookurl").value = saved.url;
     if(saved.board) $("#boardurl").value = saved.board;
     if(saved.secret) $("#secret").value = saved.secret;
   }catch(e){}
+  refreshSecretStatus();
 
   $("#gear").onclick = function(){ $("#drawer").classList.toggle("open"); };
   $("#toggle").onclick = function(e){ var b=e.target.closest("button"); if(b) setMode(b.dataset.m); };
-  $("#remember").onclick = function(){
-    try{
-      localStorage.setItem("wlts_demo", JSON.stringify({url:$("#hookurl").value,board:$("#boardurl").value,secret:$("#secret").value}));
-      toast("Saved on this PC — you won't need to retype the secret.", false);
-    }catch(e){ toast("Could not save in this browser.", true); }
-  };
+  // Auto-save as you type, so the secret is remembered without a separate click.
+  ["secret","hookurl","boardurl"].forEach(function(id){ var el=$("#"+id); if(el) el.addEventListener("input", saveDemo); });
   $("#go").onclick = fire;
   $("#reset").onclick = function(){
     document.querySelectorAll(".card").forEach(function(c){c.remove()});
