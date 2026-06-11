@@ -1118,6 +1118,16 @@ function StatCard({ label, value, color }) {
     </div>
   );
 }
+// Big glance tally for the top of the wall — how many orders are LATE / URGENT /
+// waiting stock right now, so the floor reads the alarm from across the room.
+function FloorAlert({ n, label, bg, fg }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 22px", borderRadius: 14, background: bg, color: fg }}>
+      <span style={{ fontSize: 40, fontWeight: 800, lineHeight: 1 }}>{n}</span>
+      <span style={{ fontSize: 24, fontWeight: 800, letterSpacing: 0.6 }}>{label}</span>
+    </div>
+  );
+}
 // Full-screen reward leaderboard for the production wall — rotates Departments
 // then People every 12s. Reads the same /reports/scorecard as the Reports tab;
 // weights come from System Settings. Monthly, big and glanceable for a TV.
@@ -1247,6 +1257,32 @@ function FloorDisplay({ onExit }) {
   // Left wall always shows every stage column; the stage filter only drives which
   // stage the right-hand spotlight cycles (pool), so a picked stage "stays" on the right.
   const cols = BOARD_STAGES;
+  // Glance ordering for the wall: within each column put late → urgent → soonest-due
+  // first, then cap to what fits and roll the rest into "＋N more". Auto-scroll and
+  // shrink-to-fit both read badly from a distance; the cropped ones are always the
+  // least urgent, and the spotlight still cycles every order in full.
+  const FLOOR_CAP = 5;
+  const floorRank = (o) => { const n = countdown(o.required_delivery_date).n; const nn = (n == null ? 9999 : n); return [nn < 0 ? 0 : 1, o.priority === "urgent" ? 0 : 1, nn]; };
+  const cmpRank = (a, b) => { const x = floorRank(a), y = floorRank(b); return (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]); };
+  const floorCols = cols.map((s) => {
+    const orders = (SPLIT_BOARD_ENABLED && (s === "production" || s === "packing"))
+      ? splitByCol([...((board && board.production) || []), ...((board && board.packing) || [])], s)
+      : ((board && board[s]) || []);
+    const ranked = [...orders].sort(cmpRank);
+    return { s, cfg: STAGES[s], total: orders.length, shown: ranked.slice(0, FLOOR_CAP), more: Math.max(0, orders.length - FLOOR_CAP) };
+  });
+  // Active-order alarm tally for the top strip (unique orders across all stages).
+  const floorAlerts = (() => {
+    if (!board) return { late: 0, urgent: 0, stock: 0 };
+    const seen = new Map();
+    BOARD_STAGES.forEach((s) => (board[s] || []).forEach((o) => seen.set(o.id, o)));
+    const a = [...seen.values()];
+    return {
+      late: a.filter((o) => (countdown(o.required_delivery_date).n ?? 0) < 0).length,
+      urgent: a.filter((o) => o.priority === "urgent").length,
+      stock: a.filter((o) => o.waiting_stock).length,
+    };
+  })();
   const spotStage = spot ? (STAGE_LABELS[spot.stage] || { label: spot.stage, color: C.accent }) : null;
   const spotCd = spot ? countdown(spot.required_delivery_date) : null;
   const spotDtag = spot ? deliveryTag(spot) : null;
@@ -1299,22 +1335,37 @@ function FloorDisplay({ onExit }) {
         </div>
       </div>
 
+      {/* Alarm strip — states the glance answer up front: how many need attention now */}
+      {view === "board" && (floorAlerts.late > 0 || floorAlerts.urgent > 0 || floorAlerts.stock > 0) && (
+        <div style={{ display: "flex", gap: 14, marginBottom: 16, flexWrap: "wrap" }}>
+          {floorAlerts.late > 0 && <FloorAlert n={floorAlerts.late} label="LATE" bg={C.danger} fg="#fff" />}
+          {floorAlerts.urgent > 0 && <FloorAlert n={floorAlerts.urgent} label="URGENT" bg={C.accent} fg="#231304" />}
+          {floorAlerts.stock > 0 && <FloorAlert n={floorAlerts.stock} label="WAITING STOCK" bg={C.hold} fg="#231304" />}
+        </div>
+      )}
+
       {/* Body */}
       <div style={{ flex: 1, display: "flex", gap: 16, minHeight: 0 }}>
         {REWARD_SYSTEM_ENABLED && view === "scoreboard" && <FloorScoreboard />}
         {view === "board" && (<>
-        <div style={{ flex: 1, display: "grid", gridTemplateColumns: `repeat(${cols.length}, 1fr)`, gap: 14, minHeight: 0 }}>
-          {cols.map((s) => {
-            const cfg = STAGES[s];
-            const orders = (SPLIT_BOARD_ENABLED && (s === "production" || s === "packing"))
-              ? splitByCol([...((board && board.production) || []), ...((board && board.packing) || [])], s)
-              : ((board && board[s]) || []);
+        <div style={{ flex: 1, display: "grid", gridTemplateColumns: floorCols.map((c) => (c.total === 0 ? "112px" : "minmax(0, 1fr)")).join(" "), gap: 14, minHeight: 0 }}>
+          {floorCols.map(({ s, cfg, total, shown, more }) => {
+            // Empty stage collapses to a thin vertical rail, so the columns that actually
+            // have work (usually Packing / Ready) get the room.
+            if (total === 0) {
+              return (
+                <div key={s} style={{ background: C.bg2, border: `1px solid ${C.border}`, borderTop: `4px solid ${cfg.color}`, borderRadius: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12 }}>
+                  <div style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", fontSize: 18, fontWeight: 800, letterSpacing: 2, textTransform: "uppercase", color: C.text3 }}>{cfg.label}</div>
+                  <div style={{ fontSize: 44, fontWeight: 800, color: C.text3, lineHeight: 1 }}>0</div>
+                </div>
+              );
+            }
             return (
               <div key={s} style={{ background: C.bg2, border: `1px solid ${C.border}`, borderTop: `4px solid ${cfg.color}`, borderRadius: 14, padding: "16px 14px", display: "flex", flexDirection: "column", minHeight: 0 }}>
                 <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: 1, color: C.text3, textTransform: "uppercase" }}>{cfg.label}</div>
-                <div style={{ fontSize: 66, fontWeight: 800, color: cfg.color, lineHeight: 1, margin: "2px 0 14px" }}>{orders.length}</div>
+                <div style={{ fontSize: 66, fontWeight: 800, color: cfg.color, lineHeight: 1, margin: "2px 0 14px" }}>{total}</div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 9, overflowY: "hidden" }}>
-                  {orders.map((o) => {
+                  {shown.map((o) => {
                     const cd = countdown(o.required_delivery_date);
                     const late = (cd.n ?? 0) < 0, urgent = o.priority === "urgent";
                     const dtag = deliveryTag(o);
@@ -1333,7 +1384,7 @@ function FloorDisplay({ onExit }) {
                           {o.waiting_stock && <Pill color={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>⚠ Stock</Pill>}
                           {o.on_hold && <Pill color={C.hold} style={{ fontSize: 14, padding: "3px 10px" }}>Hold</Pill>}
                         </div>
-                        <div style={{ fontSize: 23, color: cd.tone, marginTop: 8, fontWeight: 700 }}>
+                        <div style={{ fontSize: 27, color: cd.tone, marginTop: 8, fontWeight: 700 }}>
                           <span style={{ color: C.text2 }}>{fmtDay(o.required_delivery_date)}</span> · {cd.text}
                         </div>
                         {(s === "production" || s === "packing") && subTotal > 0 && (() => {
@@ -1349,7 +1400,9 @@ function FloorDisplay({ onExit }) {
                       </div>
                     );
                   })}
-                  {orders.length === 0 && <Empty label="—" />}
+                  {more > 0 && (
+                    <div style={{ textAlign: "center", fontSize: 21, fontWeight: 800, color: C.text3, background: "rgba(255,255,255,0.03)", border: `1px dashed ${C.border2}`, borderRadius: 10, padding: "13px 10px" }}>＋{more} more · on the board</div>
+                  )}
                 </div>
               </div>
             );
