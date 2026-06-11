@@ -959,30 +959,37 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     arr.splice(to, 0, me);
     persist(stage, arr.map((o) => o.id));
   }
-  // Split board reorder — its own path: operate on the VISIBLE column list (not the
-  // per-stage bucket), and the backend sets sort_order without a stage filter, so a split
-  // order can be moved from whichever column it appears in. `ids` = the column's order.
-  async function persistSplit(stage, ids) {
+  // Split board reorder — its own path. Reordering happens in the single global priority
+  // list (activeSorted), so one column never fights the other; the backend sets sort_order
+  // without a stage filter, so a split order moves from whichever column you grab it in.
+  async function persistSplit(ids) {
     persistingRef.current = true;
-    try { await api("POST", "/orders/reorder", { stage, ordered_ids: ids }); lastSigRef.current = ""; load(); }
+    try { await api("POST", "/orders/reorder", { stage: "production", ordered_ids: ids }); lastSigRef.current = ""; load(); }
     catch (e) { alert(e.message); }
     finally { persistingRef.current = false; }
   }
-  function reorderSplit(stage, ids, id, dir) {
-    const arr = [...ids];
-    const i = arr.indexOf(id); if (i < 0) return;
-    const j = dir < 0 ? i - 1 : i + 1; if (j < 0 || j >= arr.length) return;
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-    persistSplit(stage, arr);
+  // ▲▼: move `id` just before/after its NEIGHBOUR within the same column.
+  function reorderSplit(stageKey, id, dir) {
+    const active = activeSorted();
+    const colIds = splitByCol(active, stageKey).map((x) => x.id);
+    const ci = colIds.indexOf(id); if (ci < 0) return;
+    const nbr = colIds[dir < 0 ? ci - 1 : ci + 1]; if (!nbr) return;
+    const gids = active.map((o) => o.id);
+    gids.splice(gids.indexOf(id), 1);
+    const ni = gids.indexOf(nbr);
+    gids.splice(dir < 0 ? ni : ni + 1, 0, id);
+    persistSplit(gids);
   }
-  function dropSplit(stage, ids, targetId) {
+  // Drag onto a card → take its slot in the global priority list.
+  function dropSplit(targetId) {
     if (!dragId || dragId === targetId) { setDragId(null); return; }
-    const arr = [...ids];
-    const from = arr.indexOf(dragId), to = arr.indexOf(targetId);
+    const gids = activeSorted().map((o) => o.id);
+    const from = gids.indexOf(dragId); if (from < 0) { setDragId(null); return; }
+    gids.splice(from, 1);
+    const to = gids.indexOf(targetId); if (to < 0) { setDragId(null); return; }
+    gids.splice(to, 0, dragId);
     setDragId(null);
-    if (from < 0 || to < 0) return;
-    arr.splice(from, 1); arr.splice(to, 0, dragId);
-    persistSplit(stage, arr);
+    persistSplit(gids);
   }
   const filt = (arr) => {
     const q = search.trim().toLowerCase();
@@ -1005,8 +1012,20 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     try { await api("PATCH", `/orders/${o.id}/items/${it.id}`, { line_move }); load(); }
     catch (e) { alert(e.message); }
   }
+  // Active orders (Production + Packing), sorted by the board's one global priority
+  // (sort_order, then due) so the split columns + reorder share a single ordering.
+  function activeSorted() {
+    const arr = filt([...(((board && board.production)) || []), ...(((board && board.packing)) || [])]);
+    return arr.sort((a, b) => {
+      const an = a.sort_order == null, bn = b.sort_order == null;
+      if (an !== bn) return an ? 1 : -1;
+      if (!an && a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
+      const da = a.required_delivery_date || "9999-12-31", db = b.required_delivery_date || "9999-12-31";
+      return da < db ? -1 : da > db ? 1 : 0;
+    });
+  }
   function splitInstances(stageKey) {
-    return splitByCol(filt([...(((board && board.production)) || []), ...(((board && board.packing)) || [])]), stageKey);
+    return splitByCol(activeSorted(), stageKey);
   }
 
   const showStagePicker = stages.length > 1;
@@ -1050,19 +1069,18 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                 {orders.length === 0 && <Empty label="No orders" />}
                 {splitCol && orders.map((inst, i) => {
-                  const ids = orders.map((x) => x.id);
                   const sc = (
                     <SplitCard instance={inst} stageKey={s} user={user} onOpen={onOpenOrder} onSetItem={setSplitItem} onLineMove={setLineMove} onAdvance={directAdvance}
                       rank={i + 1} reorderable={canReorder}
-                      onReorderUp={canReorder && i > 0 ? () => reorderSplit(s, ids, inst.id, -1) : null}
-                      onReorderDown={canReorder && i < orders.length - 1 ? () => reorderSplit(s, ids, inst.id, 1) : null} />
+                      onReorderUp={canReorder && i > 0 ? () => reorderSplit(s, inst.id, -1) : null}
+                      onReorderDown={canReorder && i < orders.length - 1 ? () => reorderSplit(s, inst.id, 1) : null} />
                   );
                   return canReorder ? (
                     <div key={inst.id} draggable
                       onDragStart={(e) => { setDragId(inst.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", inst.id); } catch (_) {} }}
                       onDragEnd={() => setDragId(null)}
                       onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) {} }}
-                      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropSplit(s, ids, inst.id); }}
+                      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropSplit(inst.id); }}
                       style={{ opacity: dragId === inst.id ? 0.4 : 1 }}>{sc}</div>
                   ) : <div key={inst.id}>{sc}</div>;
                 })}
@@ -3265,7 +3283,7 @@ function Delivery({ user, onOpenOrder }) {
   // Mass print skips notes already printed (no duplicates); reprint a single one from its row.
   async function printAllDOs() {
     const active = (list || []).filter((x) => x.status !== "delivered" && !x.do_printed_at);
-    if (!active.length) { alert("All scheduled Delivery Orders are already printed. Use a row's Reprint to print one again."); return; }
+    if (!active.length) { alert("All scheduled Delivery Orders are already printed. Use a row's 🖨 DO to reprint one."); return; }
     const entries = [];
     for (const dv of active) { const o = await api("GET", `/orders/${dv.order_id}`).catch(() => null); if (o) entries.push({ order: o, delivery: dv }); }
     if (!entries.length) { alert("Nothing scheduled to print."); return; }
@@ -3404,7 +3422,7 @@ function Delivery({ user, onOpenOrder }) {
           <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Scheduled · {fActive.length}</h3>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Btn variant="soft" size="sm" onClick={() => printRouteList(fActive)}>Print route list</Btn>
-            <Btn variant="soft" size="sm" onClick={printAllDOs}>🖨 Print new DOs</Btn>
+            <Btn variant="soft" size="sm" onClick={printAllDOs}>🖨 Print DOs</Btn>
           </div>
         </div>
         {stacked ? (
@@ -3425,7 +3443,7 @@ function Delivery({ user, onOpenOrder }) {
                 {canDeliver && <label style={{ ...proofBtn, flex: 1, justifyContent: "center", padding: "11px" }}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(dv.order_id, f); }} /></label>}
                 {canDeliver && <Btn variant="success" style={{ flex: 2, justifyContent: "center" }} onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
                 {canAssign && <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => openEdit(dv)}>Edit</Btn>}
-                <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => printOneDO(dv.order_id)}>{dv.do_printed_at ? "🖨 Reprint" : "🖨 DO"}</Btn>
+                <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => printOneDO(dv.order_id)}>🖨 DO</Btn>
               </>}
             />
           ))
@@ -3453,7 +3471,7 @@ function Delivery({ user, onOpenOrder }) {
                       {canAssign && <Btn size="sm" variant="soft" onClick={() => openEdit(dv)}>Edit</Btn>}
                       {canDeliver && <label style={proofBtn}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(dv.order_id, f); }} /></label>}
                       {canDeliver && <Btn size="sm" variant="success" onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
-                      <Btn size="sm" variant="soft" onClick={() => printOneDO(dv.order_id)}>{dv.do_printed_at ? "🖨 Reprint" : "🖨 DO"}</Btn>
+                      <Btn size="sm" variant="soft" onClick={() => printOneDO(dv.order_id)}>🖨 DO</Btn>
                     </div>
                   </td>
                 </tr>
