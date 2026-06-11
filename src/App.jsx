@@ -969,7 +969,9 @@ function FloorDisplay({ onExit }) {
   }, [spot && spot.id]);
 
   const clock = now.toLocaleTimeString("en-GB", { hour12: false });
-  const cols = filter === "all" ? BOARD_STAGES : [filter];
+  // Left wall always shows every stage column; the stage filter only drives which
+  // stage the right-hand spotlight cycles (pool), so a picked stage "stays" on the right.
+  const cols = BOARD_STAGES;
   const spotStage = spot ? (STAGE_LABELS[spot.stage] || { label: spot.stage, color: C.accent }) : null;
   const spotCd = spot ? countdown(spot.required_delivery_date) : null;
   const spotDtag = spot ? deliveryTag(spot) : null;
