@@ -127,11 +127,9 @@ function canMarkTrack(role, track) {
   if (role === "packing_staff") return track === "packing";
   return false;
 }
-// A line's board column, with the held-in-order override: a line parked back in Order
-// shows there; otherwise it derives from its completion flags (itemPlace). Packed lines
+// A line's board column, derived from its completion flags (itemPlace). Packed lines
 // wait in the Packing column until the whole order advances to Ready.
 function lineCol(o, it) {
-  if (it && it.held_in_order) return "order";
   const p = itemPlace(it);
   return p === "packed" ? "packing" : p;
 }
@@ -206,7 +204,7 @@ const ITEM_STATUS = {
 const ITEM_STATUS_ORDER = ["not_started", "in_progress", "done"];
 function itemStatusKey(it) { return it.status || (it.made ? "done" : "not_started"); }
 function itemStat(it) { return ITEM_STATUS[itemStatusKey(it)] || ITEM_STATUS.not_started; }
-function StatusPicker({ value, onChange, disabled, big }) {
+function StatusPicker({ value, onChange, disabled, big, labels }) {
   return (
     <div style={{ display: big ? "flex" : "inline-flex", gap: big ? 8 : 4, flexWrap: "wrap", width: big ? "100%" : undefined }}>
       {ITEM_STATUS_ORDER.map((s) => {
@@ -223,7 +221,7 @@ function StatusPicker({ value, onChange, disabled, big }) {
               fontSize: big ? 14.5 : 12.5, fontWeight: active ? 800 : 600, whiteSpace: "nowrap",
               display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, transition: "all .12s" }}>
             {active && <span aria-hidden style={{ fontWeight: 900 }}>✓</span>}
-            {cfg.short}
+            {(labels && labels[s]) || cfg.short}
           </button>
         );
       })}
@@ -649,18 +647,14 @@ function KanbanCard({ order, user, onOpen, onAdvance, onMoveBack, onReorderUp, o
 // in this stage, each with the status picker for THIS column's track. The same order
 // renders again in the other column for its lines there. Lead/Boss also see where else
 // it sits ("⇄ also in …") and the pack gate; departments just see their own lines.
-function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onMoveBack, onLineMove }) {
+function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onLineMove }) {
   const o = instance;
   const lines = instance._items || [];
-  const track = stageKey; // 'order' | 'production' | 'packing'
+  const track = stageKey; // 'production' | 'packing'
   const canMark = canMarkTrack(user.role, track);
   const canMoveLine = user.role === "super_admin" || user.role === "production_lead";
   const isLeadPlus = canMoveLine;
-  const [backFor, setBackFor] = useState(null);
-  const fwdStyle = { appearance: "none", border: "1px solid #1f5036", background: "#13301f", color: C.ready, fontSize: 11, fontWeight: 600, padding: "5px 9px", borderRadius: 7, cursor: "pointer" };
-  const skipStyle = { appearance: "none", border: "1px solid #5b4a1f", background: "#2a2410", color: C.packing, fontSize: 11, fontWeight: 600, padding: "5px 9px", borderRadius: 7, cursor: "pointer" };
   const backStyle = { marginTop: 5, appearance: "none", border: "1px solid #5b2526", background: "#2a1414", color: "#fca5a5", fontSize: 11, fontWeight: 600, padding: "4px 9px", borderRadius: 7, cursor: "pointer" };
-  const tgtStyle = (col) => ({ appearance: "none", border: `1px solid ${col}55`, background: "transparent", color: col, fontSize: 11, fontWeight: 600, padding: "5px 9px", borderRadius: 7, cursor: "pointer", textAlign: "left" });
   const cd = countdown(o.required_delivery_date);
   const urgent = o.priority === "urgent";
   const onHold = !!o.on_hold;
@@ -708,19 +702,10 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onM
           const waiting = track === "packing" && itemPackDone(it);
           const prodVal = it.status || (it.made ? "done" : "not_started");
           const packVal = it.pack_status || (it.pack_made ? "done" : "not_started");
-          const menuOpen = backFor === it.id;
-          const back = canMoveLine && (track === "production" || track === "packing") ? (
-            <>
-              <button onClick={() => setBackFor(menuOpen ? null : it.id)} title="Send this line back a stage" style={backStyle}>↩ Send back</button>
-              {menuOpen && (
-                <div style={{ marginTop: 6, background: C.bg2, border: `1px solid ${C.border2}`, borderRadius: 8, padding: 7, display: "flex", flexDirection: "column", gap: 5 }}>
-                  <span style={{ fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.5, color: C.text3, fontWeight: 700 }}>Send this line back to…</span>
-                  {track === "packing" && <button onClick={() => onLineMove(o, it, "to_production")} style={tgtStyle(C.production)}>→ Production</button>}
-                  <button onClick={() => onLineMove(o, it, "to_order")} style={tgtStyle(C.order)}>→ Order</button>
-                </div>
-              )}
-            </>
-          ) : null;
+          // Send a packing line back to Production (undo a premature "Done"). Supervisors only.
+          const back = canMoveLine && track === "packing"
+            ? <button onClick={() => onLineMove(o, it, "to_production")} title="Send this line back to Production" style={backStyle}>↩ To Production</button>
+            : null;
           return (
             <div key={it.id} style={{ borderTop: `1px solid ${C.border}`, paddingTop: 7 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
@@ -728,27 +713,13 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onM
                 <span style={{ fontSize: 12.5, color: C.text, lineHeight: 1.2 }}>{it.name}</span>
               </div>
               <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.text3, margin: "1px 0 6px" }}>{it.sku}</div>
-              {track === "order" ? (
-                canMoveLine ? (
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <button onClick={() => onLineMove(o, it, "to_production")} style={fwdStyle}>→ Production</button>
-                    <button onClick={() => onLineMove(o, it, "to_packing")} style={skipStyle} title="No production needed">⏭ Straight to packing</button>
-                  </div>
-                ) : <span style={{ fontSize: 11, color: C.text3 }}>Waiting to start</span>
-              ) : waiting ? (
+              {waiting ? (
                 <>
                   <div style={{ fontSize: 11, color: C.ready, fontWeight: 700 }}>✓ packed{totalCount > packedCount ? <span style={{ color: C.text3, fontWeight: 600 }}> · waiting for order</span> : null}</div>
                   {back}
                 </>
               ) : track === "production" ? (
-                <>
-                  <StatusPicker value={prodVal} disabled={!canMark} onChange={(s) => onSetItem(o, it, s, "production")} />
-                  {canMark && (
-                    <button onClick={() => onSetItem(o, it, "done", "production")} title="No production needed — send this line straight to packing"
-                      style={{ marginTop: 5, appearance: "none", border: `1px solid ${C.border2}`, background: "transparent", color: C.text3, fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 7, cursor: "pointer" }}>⏭ Skip to packing</button>
-                  )}
-                  {back}
-                </>
+                <StatusPicker value={prodVal} disabled={!canMark} onChange={(s) => onSetItem(o, it, s, "production")} />
               ) : (
                 <>
                   <StatusPicker value={packVal} disabled={!canMark} onChange={(s) => onSetItem(o, it, s, "packing")} />
@@ -770,14 +741,9 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onM
             ? <><Avatar name={o.pic_name} color={o.pic_color} size={20} /><span style={{ fontSize: 12, color: C.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pic_name}</span></>
             : <span style={{ fontSize: 11.5, color: C.text3 }}>Unassigned</span>}
         </div>
-        {showActions && (
+        {showActions && onAdvance && canAdvanceStage(user.role, o.stage) && !o.on_hold && (
           <div style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={(e) => e.stopPropagation()}>
-            {onMoveBack && ((user.role === "super_admin" && o.stage !== "order") || (user.role === "production_lead" && o.stage === "packing")) && !o.on_hold && (
-              <button onClick={() => onMoveBack(o)} title="Move back a stage…" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, borderRadius: 8, background: "#2a1414", border: `1px solid #5b2526`, color: C.danger, cursor: "pointer", fontSize: 15, lineHeight: 1 }}>↩</button>
-            )}
-            {onAdvance && canAdvanceStage(user.role, o.stage) && !o.on_hold && (
-              <IconBtn icon="arrowRight" onClick={() => onAdvance(o, BOARD_STAGES[BOARD_STAGES.indexOf(o.stage) + 1] || "delivered")} title={user.role === "super_admin" ? `Advance to ${(STAGE_LABELS[BOARD_STAGES[BOARD_STAGES.indexOf(o.stage) + 1]] || {}).label || "next"}` : (ADVANCE_LABEL[o.stage] || "Advance")} color={C.ready} bg="#13301f" border="#1f5036" />
-            )}
+            <IconBtn icon="arrowRight" onClick={() => onAdvance(o, BOARD_STAGES[BOARD_STAGES.indexOf(o.stage) + 1] || "delivered")} title={user.role === "super_admin" ? `Advance to ${(STAGE_LABELS[BOARD_STAGES[BOARD_STAGES.indexOf(o.stage) + 1]] || {}).label || "next"}` : (ADVANCE_LABEL[o.stage] || "Advance")} color={C.ready} bg="#13301f" border="#1f5036" />
           </div>
         )}
       </div>
@@ -827,13 +793,7 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
                 <div style={{ fontSize: 13.5, color: C.text }}>{it.name}</div>
               </div>
               {canMark
-                ? <div style={{ display: "flex", flexDirection: "column", gap: 5, alignItems: "flex-end" }}>
-                    <StatusPicker value={stt.k} onChange={(s) => setStatus(it, s)} />
-                    {SPLIT_BOARD_ENABLED && order.stage === "order" && stt.k !== "done" && (
-                      <button onClick={() => setStatus(it, "done")} title="No production needed — this line goes straight to packing"
-                        style={{ appearance: "none", border: `1px solid ${C.border2}`, background: "transparent", color: C.text3, fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 7, cursor: "pointer" }}>⏭ Skip to packing</button>
-                    )}
-                  </div>
+                ? <StatusPicker value={stt.k} onChange={(s) => setStatus(it, s)} labels={order.stage === "order" ? { not_started: "To do", in_progress: "Production", done: "Packing" } : undefined} />
                 : <div style={{ fontWeight: 700, color: stt.color, marginRight: 6, fontSize: 12.5 }}>{stt.label}</div>}
             </div>
             );
@@ -1039,7 +999,6 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
         {shownStages.map((s) => {
           const cfg = STAGES[s];
           const splitCol = SPLIT_BOARD_ENABLED && (s === "production" || s === "packing");
-          const heldCards = (SPLIT_BOARD_ENABLED && s === "order") ? splitInstances("order") : [];
           const orders = splitCol ? splitInstances(s) : filt((board && board[s]) || []);
           return (
             <div key={s} style={{ background: C.bg2, border: `1px solid ${C.border}`, borderTop: `3px solid ${cfg.color}`, borderRadius: 13, padding: 12, minHeight: 200 }}>
@@ -1048,15 +1007,12 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
                   <span style={{ width: 9, height: 9, borderRadius: "50%", background: cfg.color }} />
                   <span style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{cfg.label}</span>
                 </div>
-                <span style={{ background: C.surface2, color: C.text2, borderRadius: 7, padding: "1px 9px", fontSize: 13, fontWeight: 700 }}>{orders.length + heldCards.length}</span>
+                <span style={{ background: C.surface2, color: C.text2, borderRadius: 7, padding: "1px 9px", fontSize: 13, fontWeight: 700 }}>{orders.length}</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                {(orders.length + heldCards.length) === 0 && <Empty label="No orders" />}
+                {orders.length === 0 && <Empty label="No orders" />}
                 {splitCol && orders.map((inst) => (
-                  <SplitCard key={inst.id} instance={inst} stageKey={s} user={user} onOpen={onOpenOrder} onSetItem={setSplitItem} onLineMove={setLineMove} onAdvance={advance} onMoveBack={reverse} />
-                ))}
-                {heldCards.map((inst) => (
-                  <SplitCard key={"held-" + inst.id} instance={inst} stageKey="order" user={user} onOpen={onOpenOrder} onSetItem={setSplitItem} onLineMove={setLineMove} onAdvance={advance} onMoveBack={reverse} />
+                  <SplitCard key={inst.id} instance={inst} stageKey={s} user={user} onOpen={onOpenOrder} onSetItem={setSplitItem} onLineMove={setLineMove} onAdvance={advance} />
                 ))}
                 {!splitCol && orders.map((o, i) => canReorder ? (
                   <div key={o.id} draggable
