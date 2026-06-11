@@ -559,12 +559,12 @@ function KanbanCard({ order, user, onOpen, onAdvance, onMoveBack, onReorderUp, o
           {order.skip_production && <Pill color={C.accent} bg="transparent">No production</Pill>}
         </div>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "7px 0 4px", fontSize: 12.5 }}>
+      <div style={{ fontSize: 16.5, color: showName ? C.text : imp.color, fontWeight: 700, letterSpacing: 0.2, margin: "8px 0 0" }}>{showName ? order.customer_name : imp.label}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "5px 0 4px", fontSize: 12.5 }}>
         <Icon name="clock" size={13} color={cd.tone} />
         <span style={{ color: C.text2 }}>{fmtDay(order.required_delivery_date)}</span>
         {cd.text && <span style={{ color: cd.tone, fontWeight: 600 }}>· {cd.text}</span>}
       </div>
-      <div style={{ fontSize: 13, color: showName ? C.text : imp.color, fontWeight: showName ? 500 : 700, marginBottom: 3 }}>{showName ? order.customer_name : imp.label}</div>
       {(order.item_count === 0 || order.expiry_date) && (
         <div style={{ fontSize: 12, color: C.text3, marginBottom: 5 }}>
           {order.item_count === 0
