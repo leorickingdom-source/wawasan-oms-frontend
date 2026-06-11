@@ -3897,8 +3897,8 @@ export default function App() {
             )}
             {canCreate && <Btn onClick={() => setShowCreate(true)}><Icon name="plus" size={15} /> New Order</Btn>}
             <button onClick={() => { setShowNotifs((s) => !s); }} title="Notifications"
-              style={{ position: "relative", height: 38, minWidth: 38, padding: unread > 0 ? "0 12px" : 0, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, background: unread > 0 ? C.danger + "22" : C.surface, border: `1px solid ${unread > 0 ? C.danger : C.border2}`, borderRadius: 9, cursor: "pointer", color: unread > 0 ? C.danger : C.text2, fontWeight: 700, fontSize: 13, animation: unread > 0 ? "wws-ring 1.4s ease 2" : "none" }}>
-              <Icon name="bell" size={17} color={unread > 0 ? C.danger : C.text2} />
+              style={{ position: "relative", height: 38, minWidth: 38, padding: unread > 0 ? "0 13px" : 0, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, background: unread > 0 ? C.danger : C.surface, border: `1px solid ${unread > 0 ? C.danger : C.border2}`, borderRadius: 9, cursor: "pointer", color: unread > 0 ? "#fff" : C.text2, fontWeight: 800, fontSize: 13, animation: unread > 0 ? "wws-ring-red 1.5s ease infinite" : "none" }}>
+              <Icon name="bell" size={17} color={unread > 0 ? "#fff" : C.text2} />
               {unread > 0 && <span>{unread} new</span>}
             </button>
             <div style={{ display: "flex", alignItems: "center", gap: 9, paddingLeft: 12, borderLeft: `1px solid ${C.border}` }}>
