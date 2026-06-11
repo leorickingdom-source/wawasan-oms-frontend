@@ -104,6 +104,30 @@ const REWARD_SYSTEM_ENABLED = false;
 // stay in place; flip to true to bring the two tabs back.
 const STAFF_RANKING_ENABLED = false;
 
+// Split board — one order shown in every stage column it still has work in (a line in
+// Production while a sibling line is already in Packing), so the two run in parallel
+// instead of the whole order waiting at its slowest line. Dark by default; flip to true
+// once verified on the live board. Relies on the backend kanban `items[]` payload and
+// the item-PATCH `track` param (both shipped). When false the board is byte-identical.
+const SPLIT_BOARD_ENABLED = false;
+// Where a single line sits on the split board, from the two completion flags it already
+// carries: not produced → Production; produced but not packed → Packing; packed → done
+// (it waits in Packing until the whole order is advanced to Ready for Delivery).
+function itemProdDone(it) { return !!(it && (it.made || it.status === "done")); }
+function itemPackDone(it) { return !!(it && (it.pack_made || it.pack_status === "done")); }
+function itemPlace(it) {
+  if (!itemProdDone(it)) return "production";
+  if (!itemPackDone(it)) return "packing";
+  return "packed";
+}
+// Which tracks a role may tick on a split card (mirrors the backend item-PATCH guard).
+function canMarkTrack(role, track) {
+  if (role === "super_admin" || role === "production_lead") return true;
+  if (role === "production_staff") return track === "production";
+  if (role === "packing_staff") return track === "packing";
+  return false;
+}
+
 // Customer "importance" tiers removed 2026-06-11 — the board sorts by delivery date
 // instead. The backend `importance` column is kept (defaults 'standard') but unused.
 
@@ -593,11 +617,107 @@ function KanbanCard({ order, user, onOpen, onAdvance, onMoveBack, onReorderUp, o
   );
 }
 
+// One order's slice within a single split-board column — the lines that currently sit
+// in this stage, each with the status picker for THIS column's track. The same order
+// renders again in the other column for its lines there. Lead/Boss also see where else
+// it sits ("⇄ also in …") and the pack gate; departments just see their own lines.
+function SplitCard({ instance, stageKey, user, onOpen, onSetItem }) {
+  const o = instance;
+  const lines = instance._items || [];
+  const track = stageKey; // 'production' | 'packing'
+  const canMark = canMarkTrack(user.role, track);
+  const isLeadPlus = user.role === "super_admin" || user.role === "production_lead";
+  const cd = countdown(o.required_delivery_date);
+  const urgent = o.priority === "urgent";
+  const onHold = !!o.on_hold;
+  const showName = !!o.customer_name;
+  const stage = STAGES[track] || { color: C.text3 };
+  // Where else this order has live work, for the lead-only "also in" hint.
+  const otherCols = (() => {
+    const s = new Set((o.items || []).map((it) => { const p = itemPlace(it); return p === "packed" ? "packing" : p; }));
+    s.delete(track);
+    return [...s].filter((k) => k === "production" || k === "packing");
+  })();
+  const packedCount = (o.items || []).filter(itemPackDone).length;
+  const totalCount = (o.items || []).length;
+  return (
+    <div onClick={() => onOpen(o)}
+      style={{ position: "relative", background: C.surface, border: `1px solid ${urgent ? C.danger + "88" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "11px 12px", cursor: "pointer" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+        <span style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: urgent ? C.accent2 : C.text, letterSpacing: 0.3 }}>{o.invoice_number}</span>
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {urgent && <Pill color="#fff" bg={C.danger} border={C.danger}>Urgent</Pill>}
+          {onHold && <Pill color={C.hold}>On hold</Pill>}
+        </div>
+      </div>
+      <div style={{ fontSize: 13.5, color: showName ? C.text2 : C.text3, fontWeight: 600, margin: "5px 0 2px" }}>
+        {showName ? o.customer_name : `${(o.items || []).length} line${((o.items || []).length) === 1 ? "" : "s"} here`}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 0 8px", fontSize: 12 }}>
+        <Icon name="clock" size={12} color={cd.tone} />
+        <span style={{ color: C.text2 }}>{fmtDay(o.required_delivery_date)}</span>
+        {cd.text && <span style={{ color: cd.tone, fontWeight: 600 }}>· {cd.text}</span>}
+      </div>
+      {isLeadPlus && otherCols.length > 0 && (
+        <div style={{ fontSize: 10.5, color: C.text3, marginBottom: 8, display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+          ⇄ also in {otherCols.map((k) => <span key={k} style={{ background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 20, padding: "1px 7px", color: C.text2 }}>{(STAGES[k] || {}).label || k}</span>)}
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }} onClick={(e) => e.stopPropagation()}>
+        {lines.map((it) => {
+          const waiting = track === "packing" && itemPackDone(it);
+          const prodVal = it.status || (it.made ? "done" : "not_started");
+          const packVal = it.pack_status || (it.pack_made ? "done" : "not_started");
+          return (
+            <div key={it.id} style={{ borderTop: `1px solid ${C.border}`, paddingTop: 7 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+                <span style={{ fontFamily: MONO, fontSize: 11, color: C.text3 }}>{it.quantity}×</span>
+                <span style={{ fontSize: 12.5, color: C.text, lineHeight: 1.2 }}>{it.name}</span>
+              </div>
+              <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.text3, margin: "1px 0 6px" }}>{it.sku}</div>
+              {waiting ? (
+                <div style={{ fontSize: 11, color: C.ready, fontWeight: 700 }}>✓ packed{totalCount > packedCount ? <span style={{ color: C.text3, fontWeight: 600 }}> · waiting for order</span> : null}</div>
+              ) : track === "production" ? (
+                <>
+                  <StatusPicker value={prodVal} disabled={!canMark} onChange={(s) => onSetItem(o, it, s, "production")} />
+                  {canMark && (
+                    <button onClick={() => onSetItem(o, it, "done", "production")} title="No production needed — send this line straight to packing"
+                      style={{ marginTop: 5, appearance: "none", border: `1px solid ${C.border2}`, background: "transparent", color: C.text3, fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 7, cursor: "pointer" }}>⏭ Skip to packing</button>
+                  )}
+                </>
+              ) : (
+                <StatusPicker value={packVal} disabled={!canMark} onChange={(s) => onSetItem(o, it, s, "packing")} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {isLeadPlus && track === "packing" && totalCount > 0 && packedCount < totalCount && (
+        <div style={{ marginTop: 9, fontSize: 10.5, fontWeight: 600, color: C.packing, background: C.packing + "1A", border: `1px solid ${C.packing}44`, borderRadius: 7, padding: "5px 8px" }}>
+          ▢ {packedCount}/{totalCount} packed — moves to Ready for Delivery when all packed
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 9, borderTop: `1px solid ${C.border}`, paddingTop: 8 }}>
+        {o.pic_name
+          ? <><Avatar name={o.pic_name} color={o.pic_color} size={20} /><span style={{ fontSize: 12, color: C.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pic_name}</span></>
+          : <span style={{ fontSize: 11.5, color: C.text3 }}>Unassigned</span>}
+      </div>
+    </div>
+  );
+}
+
 // ─── Order Board ───────────────────────────────────────────────────────────────
 function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
   const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { api("GET", `/orders/${order.id}`).then(setDetail).catch(() => setDetail({ items: [] })); }, [order.id]);
+  // Assign the production PIC right here when sending an order to production (Boss/Admin
+  // only — mirrors the assign-pic endpoint). A move clears the PIC, so we set it after.
+  const canRoute = ["super_admin", "admin"].includes(user.role);
+  const offerPic = SPLIT_BOARD_ENABLED && order.stage === "order" && canRoute;
+  const [users, setUsers] = useState([]);
+  const [picId, setPicId] = useState("");
+  useEffect(() => { if (offerPic) api("GET", "/users").then(setUsers).catch(() => setUsers([])); /* eslint-disable-next-line */ }, []);
   const canMark = user && canMarkStage(user.role, order.stage);
   async function setStatus(it, status) {
     if (status === itemStatusKey(it)) return;
@@ -607,7 +727,7 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
   const items = (detail && detail.items) || [];
   const allMade = items.length > 0 && items.every((it) => it.made);
   const title = ADVANCE_LABEL[order.stage] || `Advance to ${(STAGE_LABELS[to] || {}).label || to}`;
-  async function go() { setBusy(true); try { await onConfirm(); } finally { setBusy(false); } }
+  async function go() { setBusy(true); try { await onConfirm(picId); } finally { setBusy(false); } }
   return (
     <Modal open onClose={onClose} title={title} width={520}>
       <div style={{ fontSize: 14, marginBottom: 4 }}>
@@ -628,7 +748,13 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
                 <div style={{ fontSize: 13.5, color: C.text }}>{it.name}</div>
               </div>
               {canMark
-                ? <StatusPicker value={stt.k} onChange={(s) => setStatus(it, s)} />
+                ? <div style={{ display: "flex", flexDirection: "column", gap: 5, alignItems: "flex-end" }}>
+                    <StatusPicker value={stt.k} onChange={(s) => setStatus(it, s)} />
+                    {SPLIT_BOARD_ENABLED && order.stage === "order" && stt.k !== "done" && (
+                      <button onClick={() => setStatus(it, "done")} title="No production needed — this line goes straight to packing"
+                        style={{ appearance: "none", border: `1px solid ${C.border2}`, background: "transparent", color: C.text3, fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 7, cursor: "pointer" }}>⏭ Skip to packing</button>
+                    )}
+                  </div>
                 : <div style={{ fontWeight: 700, color: stt.color, marginRight: 6, fontSize: 12.5 }}>{stt.label}</div>}
             </div>
             );
@@ -640,6 +766,18 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
       ) : (order.stage === "production" || order.stage === "packing") && items.length > 0 && !allMade ? (
         <div style={{ fontSize: 12.5, color: C.packing, marginBottom: 12 }}>⚠ Not all STKs are marked done yet — confirm only if your stage is actually complete.</div>
       ) : null}
+      {offerPic && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12.5, color: C.text2, fontWeight: 600, marginBottom: 6 }}>Assign person in charge <span style={{ color: C.text3, fontWeight: 400 }}>(optional — you can do it later)</span></div>
+          <select value={picId} onChange={(e) => setPicId(e.target.value)}
+            style={{ width: "100%", background: C.surface2, color: C.text, border: `1px solid ${C.border2}`, borderRadius: 9, padding: "10px 12px", fontSize: 13.5 }}>
+            <option value="">Unassigned — assign later</option>
+            {users.filter((u) => u.is_active && ["production_lead", "production_staff"].includes(u.role)).map((u) => (
+              <option key={u.id} value={u.id}>{u.name} · {ROLE_LABELS[u.role] || u.role}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
         <Btn onClick={go} disabled={busy || (to === "ready_for_delivery" && items.length > 0 && !allMade)}><Icon name="check" size={15} /> {busy ? "Moving…" : "Confirm & advance"}</Btn>
@@ -718,9 +856,13 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
   }, [weekOnly]);
 
   function advance(order, to) { setConfirmAdv({ order, to }); }
-  async function doAdvance() {
+  async function doAdvance(picId) {
     const { order, to } = confirmAdv;
-    try { await api("POST", `/orders/${order.id}/move`, { to_stage: to }); setConfirmAdv(null); load(); }
+    try {
+      await api("POST", `/orders/${order.id}/move`, { to_stage: to });
+      if (picId) await api("POST", `/orders/${order.id}/assign-pic`, { pic_id: picId });
+      setConfirmAdv(null); load();
+    }
     catch (e) { alert(e.message); }
   }
   function reverse(order) { setMoveBack(order); }
@@ -770,6 +912,25 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     return out;
   };
 
+  // Split board: re-bucket the active orders (Production + Packing) by line, so one
+  // order appears in each column it still has work in. Only used when the flag is on.
+  async function setSplitItem(o, it, status, track) {
+    try { await api("PATCH", `/orders/${o.id}/items/${it.id}`, { status, track }); load(); }
+    catch (e) { alert(e.message); }
+  }
+  function splitInstances(stageKey) {
+    const active = filt([...(((board && board.production)) || []), ...(((board && board.packing)) || [])]);
+    const out = [];
+    for (const o of active) {
+      const its = (o.items || []).filter((it) => {
+        const p = itemPlace(it);
+        return stageKey === "production" ? p === "production" : (p === "packing" || p === "packed");
+      });
+      if (its.length) out.push({ ...o, _items: its });
+    }
+    return out;
+  }
+
   const showStagePicker = stages.length > 1;
   const shownStages = (viewStage !== "all" && stages.includes(viewStage)) ? [viewStage] : stages;
 
@@ -797,7 +958,8 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
       <div style={{ display: "grid", gridTemplateColumns: shownStages.length === 1 ? `repeat(1, minmax(min(100%, 280px), 560px))` : `repeat(auto-fit, minmax(min(100%, 250px), 1fr))`, gap: 16, alignItems: "start" }}>
         {shownStages.map((s) => {
           const cfg = STAGES[s];
-          const orders = filt((board && board[s]) || []);
+          const splitCol = SPLIT_BOARD_ENABLED && (s === "production" || s === "packing");
+          const orders = splitCol ? splitInstances(s) : filt((board && board[s]) || []);
           return (
             <div key={s} style={{ background: C.bg2, border: `1px solid ${C.border}`, borderTop: `3px solid ${cfg.color}`, borderRadius: 13, padding: 12, minHeight: 200 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, padding: "2px 2px 0" }}>
@@ -809,7 +971,10 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                 {orders.length === 0 && <Empty label="No orders" />}
-                {orders.map((o, i) => canReorder ? (
+                {splitCol && orders.map((inst) => (
+                  <SplitCard key={inst.id} instance={inst} stageKey={s} user={user} onOpen={onOpenOrder} onSetItem={setSplitItem} />
+                ))}
+                {!splitCol && orders.map((o, i) => canReorder ? (
                   <div key={o.id} draggable
                     onDragStart={(e) => { setDragId(o.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", o.id); } catch (_) {} }}
                     onDragEnd={() => setDragId(null)}
