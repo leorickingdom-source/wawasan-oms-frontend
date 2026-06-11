@@ -705,16 +705,30 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
   });
   const setViewStage = (s) => { setViewStageRaw(s); try { localStorage.setItem("oms_board_stage", s); } catch (e) {} };
   const stages = visibleStages(user.role);
-  async function load() {
-    setLoading(true); setErr("");
+  const lastSigRef = useRef("");
+  const pausePollRef = useRef(false);
+  const persistingRef = useRef(false);
+  async function load(silent) {
+    if (!silent) setLoading(true);
+    setErr("");
     try {
       const d = await api("GET", `/orders/kanban${weekOnly ? "?week=current" : ""}`);
-      setBoard(d);
-      onCount && onCount(stages.reduce((a, s) => a + (d[s] ? d[s].length : 0), 0));
-    } catch (e) { setErr(e.message); setBoard({ order: [], production: [], packing: [], ready_for_delivery: [], on_hold: [] }); }
-    finally { setLoading(false); }
+      const sig = JSON.stringify(d);
+      if (sig !== lastSigRef.current) {            // only re-render when the board actually changed
+        lastSigRef.current = sig;
+        setBoard(d);
+        onCount && onCount(stages.reduce((a, s) => a + (d[s] ? d[s].length : 0), 0));
+      }
+    } catch (e) { if (!silent) { setErr(e.message); setBoard({ order: [], production: [], packing: [], ready_for_delivery: [], on_hold: [] }); } }
+    finally { if (!silent) setLoading(false); }
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [weekOnly, refreshKey]);
+  // Near-instant board: re-check every 3s, but never mid-drag, mid-confirm or mid-reorder, so it can't fight the user.
+  useEffect(() => { pausePollRef.current = !!(dragId || confirmAdv || moveBack); }, [dragId, confirmAdv, moveBack]);
+  useEffect(() => {
+    const t = setInterval(() => { if (!pausePollRef.current && !persistingRef.current) load(true); }, 3000);
+    return () => clearInterval(t); /* eslint-disable-next-line */
+  }, [weekOnly]);
 
   function advance(order, to) { setConfirmAdv({ order, to }); }
   async function doAdvance() {
@@ -738,8 +752,10 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     const next = orderedIds.map((id) => (setImp && id === setImp.id) ? { ...byId[id], importance: setImp.importance } : byId[id]);
     setBoard({ ...board, [stage]: next }); // optimistic
     setDragId(null);
-    try { await api("POST", "/orders/reorder", { stage, ordered_ids: orderedIds, set_importance: setImp || undefined }); }
+    persistingRef.current = true;                 // hold the 3s poll off until the reorder lands
+    try { await api("POST", "/orders/reorder", { stage, ordered_ids: orderedIds, set_importance: setImp || undefined }); lastSigRef.current = ""; }
     catch (e) { alert(e.message); load(); }
+    finally { persistingRef.current = false; }
   }
   // ▲▼ — move a card up/down WITHIN its own tier only (rank). Never changes the tier.
   function reorderMove(stage, id, dir) {
@@ -980,7 +996,7 @@ function FloorDisplay({ onExit }) {
       setBoard(b); setStats(s); cache.current = {};
     } catch (e) { /* keep last */ }
   }
-  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [weekOnly]);
+  useEffect(() => { load(); const t = setInterval(load, 3000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [weekOnly]);
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(t); }, []);
   // The wall is a fixed 1920×1080 canvas scaled to fill the screen, so it reads the
   // same proportion on 1080p, 1440p or a 4K TV (×2) — and from further back.
