@@ -657,7 +657,7 @@ function KanbanCard({ order, user, onOpen, onAdvance, onMoveBack, onReorderUp, o
 // in this stage, each with the status picker for THIS column's track. The same order
 // renders again in the other column for its lines there. Lead/Boss also see where else
 // it sits ("⇄ also in …") and the pack gate; departments just see their own lines.
-function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onLineMove, reorderable, onReorderUp, onReorderDown }) {
+function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onLineMove, reorderable, onReorderUp, onReorderDown, rank }) {
   const o = instance;
   const lines = instance._items || [];
   const track = stageKey; // 'production' | 'packing'
@@ -687,12 +687,15 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
       style={{ position: "relative", background: orderDone ? C.ready + "26" : C.surface, border: `1px solid ${orderDone ? C.ready + "88" : urgent ? C.danger + "88" : C.border}`, borderLeft: `3px solid ${stage.color}`, borderRadius: 11, padding: "11px 12px", cursor: "pointer" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
-          {reorderable && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 2 }} onClick={(e) => e.stopPropagation()} title="Move priority up / down">
+          {reorderable ? (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }} onClick={(e) => e.stopPropagation()} title={`Priority #${rank} in this stage — move up / down`}>
               <button onClick={() => onReorderUp && onReorderUp()} disabled={!onReorderUp} style={rBtn(!onReorderUp)} aria-label="Move up">▲</button>
+              {rank != null && <span style={{ fontSize: 11, fontWeight: 800, color: C.accent, lineHeight: 1 }}>{rank}</span>}
               <button onClick={() => onReorderDown && onReorderDown()} disabled={!onReorderDown} style={rBtn(!onReorderDown)} aria-label="Move down">▼</button>
             </div>
-          )}
+          ) : (rank != null && (
+            <span title={`Priority #${rank} in this stage`} style={{ flexShrink: 0, width: 20, height: 20, borderRadius: 6, background: C.accent, color: C.bg, fontWeight: 800, fontSize: 11, display: "grid", placeItems: "center" }}>{rank}</span>
+          ))}
           <span style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: urgent ? C.accent2 : C.text, letterSpacing: 0.3 }}>{o.invoice_number}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }} title={`PIC: ${o.pic_name || "Unassigned"}`}>
@@ -956,6 +959,31 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
     arr.splice(to, 0, me);
     persist(stage, arr.map((o) => o.id));
   }
+  // Split board reorder — its own path: operate on the VISIBLE column list (not the
+  // per-stage bucket), and the backend sets sort_order without a stage filter, so a split
+  // order can be moved from whichever column it appears in. `ids` = the column's order.
+  async function persistSplit(stage, ids) {
+    persistingRef.current = true;
+    try { await api("POST", "/orders/reorder", { stage, ordered_ids: ids }); lastSigRef.current = ""; load(); }
+    catch (e) { alert(e.message); }
+    finally { persistingRef.current = false; }
+  }
+  function reorderSplit(stage, ids, id, dir) {
+    const arr = [...ids];
+    const i = arr.indexOf(id); if (i < 0) return;
+    const j = dir < 0 ? i - 1 : i + 1; if (j < 0 || j >= arr.length) return;
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+    persistSplit(stage, arr);
+  }
+  function dropSplit(stage, ids, targetId) {
+    if (!dragId || dragId === targetId) { setDragId(null); return; }
+    const arr = [...ids];
+    const from = arr.indexOf(dragId), to = arr.indexOf(targetId);
+    setDragId(null);
+    if (from < 0 || to < 0) return;
+    arr.splice(from, 1); arr.splice(to, 0, dragId);
+    persistSplit(stage, arr);
+  }
   const filt = (arr) => {
     const q = search.trim().toLowerCase();
     let out = arr;
@@ -1021,19 +1049,23 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                 {orders.length === 0 && <Empty label="No orders" />}
-                {splitCol && orders.map((inst, i) => canReorder ? (
-                  <div key={inst.id} draggable
-                    onDragStart={(e) => { setDragId(inst.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", inst.id); } catch (_) {} }}
-                    onDragEnd={() => setDragId(null)}
-                    onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) {} }}
-                    onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropOnCard(s, inst.id); }}
-                    style={{ opacity: dragId === inst.id ? 0.4 : 1 }}>
+                {splitCol && orders.map((inst, i) => {
+                  const ids = orders.map((x) => x.id);
+                  const sc = (
                     <SplitCard instance={inst} stageKey={s} user={user} onOpen={onOpenOrder} onSetItem={setSplitItem} onLineMove={setLineMove} onAdvance={directAdvance}
-                      reorderable onReorderUp={i > 0 ? () => reorderMove(s, inst.id, -1) : null} onReorderDown={i < orders.length - 1 ? () => reorderMove(s, inst.id, 1) : null} />
-                  </div>
-                ) : (
-                  <SplitCard key={inst.id} instance={inst} stageKey={s} user={user} onOpen={onOpenOrder} onSetItem={setSplitItem} onLineMove={setLineMove} onAdvance={directAdvance} />
-                ))}
+                      rank={i + 1} reorderable={canReorder}
+                      onReorderUp={canReorder && i > 0 ? () => reorderSplit(s, ids, inst.id, -1) : null}
+                      onReorderDown={canReorder && i < orders.length - 1 ? () => reorderSplit(s, ids, inst.id, 1) : null} />
+                  );
+                  return canReorder ? (
+                    <div key={inst.id} draggable
+                      onDragStart={(e) => { setDragId(inst.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", inst.id); } catch (_) {} }}
+                      onDragEnd={() => setDragId(null)}
+                      onDragOver={(e) => { e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (_) {} }}
+                      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); dropSplit(s, ids, inst.id); }}
+                      style={{ opacity: dragId === inst.id ? 0.4 : 1 }}>{sc}</div>
+                  ) : <div key={inst.id}>{sc}</div>;
+                })}
                 {!splitCol && orders.map((o, i) => canReorder ? (
                   <div key={o.id} draggable
                     onDragStart={(e) => { setDragId(o.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", o.id); } catch (_) {} }}
