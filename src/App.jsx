@@ -222,6 +222,26 @@ function StatusPicker({ value, onChange, disabled, big }) {
     </div>
   );
 }
+// Split board — detail-modal picker that shows a line's Production track and its Packing
+// track side by side, so you can see which stage each line is in and set either. Packing
+// unlocks once the line is produced. (Single-track StatusPicker stays for the flag-off UI.)
+function ItemTrackPicker({ it, canProd, canPack, onSet, big }) {
+  const prodVal = it.prod_status || (it.prod_made ? "done" : "not_started");
+  const packVal = it.pack_status || (it.pack_made ? "done" : "not_started");
+  const produced = it.prod_made || it.prod_status === "done";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 9, width: big ? "100%" : 230 }}>
+      <div>
+        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5, color: STAGES.production.color, marginBottom: 4 }}>PRODUCTION</div>
+        <StatusPicker value={prodVal} disabled={!canProd} onChange={(s) => onSet(s, "production")} big={big} />
+      </div>
+      <div style={{ opacity: produced ? 1 : 0.5 }}>
+        <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5, color: STAGES.packing.color, marginBottom: 4 }}>PACKING{!produced && <span style={{ color: C.text3, fontWeight: 600, letterSpacing: 0 }}> · after production</span>}</div>
+        <StatusPicker value={packVal} disabled={!canPack || !produced} onChange={(s) => onSet(s, "packing")} big={big} />
+      </div>
+    </div>
+  );
+}
 function initials(name = "") {
   return name.trim().split(/\s+/).map((w) => w[0]).join("").toUpperCase().slice(0, 2) || "?";
 }
@@ -621,7 +641,7 @@ function KanbanCard({ order, user, onOpen, onAdvance, onMoveBack, onReorderUp, o
 // in this stage, each with the status picker for THIS column's track. The same order
 // renders again in the other column for its lines there. Lead/Boss also see where else
 // it sits ("⇄ also in …") and the pack gate; departments just see their own lines.
-function SplitCard({ instance, stageKey, user, onOpen, onSetItem }) {
+function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onMoveBack }) {
   const o = instance;
   const lines = instance._items || [];
   const track = stageKey; // 'production' | 'packing'
@@ -697,10 +717,22 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem }) {
           ▢ {packedCount}/{totalCount} packed — moves to Ready for Delivery when all packed
         </div>
       )}
-      <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 9, borderTop: `1px solid ${C.border}`, paddingTop: 8 }}>
-        {o.pic_name
-          ? <><Avatar name={o.pic_name} color={o.pic_color} size={20} /><span style={{ fontSize: 12, color: C.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pic_name}</span></>
-          : <span style={{ fontSize: 11.5, color: C.text3 }}>Unassigned</span>}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 7, marginTop: 9, borderTop: `1px solid ${C.border}`, paddingTop: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+          {o.pic_name
+            ? <><Avatar name={o.pic_name} color={o.pic_color} size={20} /><span style={{ fontSize: 12, color: C.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pic_name}</span></>
+            : <span style={{ fontSize: 11.5, color: C.text3 }}>Unassigned</span>}
+        </div>
+        {stageKey === o.stage && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={(e) => e.stopPropagation()}>
+            {onMoveBack && ((user.role === "super_admin" && o.stage !== "order") || (user.role === "production_lead" && o.stage === "packing")) && !o.on_hold && (
+              <button onClick={() => onMoveBack(o)} title="Move back a stage…" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, borderRadius: 8, background: "#2a1414", border: `1px solid #5b2526`, color: C.danger, cursor: "pointer", fontSize: 15, lineHeight: 1 }}>↩</button>
+            )}
+            {onAdvance && canAdvanceStage(user.role, o.stage) && !o.on_hold && (
+              <IconBtn icon="arrowRight" onClick={() => onAdvance(o, BOARD_STAGES[BOARD_STAGES.indexOf(o.stage) + 1] || "delivered")} title={user.role === "super_admin" ? `Advance to ${(STAGE_LABELS[BOARD_STAGES[BOARD_STAGES.indexOf(o.stage) + 1]] || {}).label || "next"}` : (ADVANCE_LABEL[o.stage] || "Advance")} color={C.ready} bg="#13301f" border="#1f5036" />
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -972,7 +1004,7 @@ function OrderBoard({ user, search, weekOnly, statusFilter, onOpenOrder, refresh
               <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
                 {orders.length === 0 && <Empty label="No orders" />}
                 {splitCol && orders.map((inst) => (
-                  <SplitCard key={inst.id} instance={inst} stageKey={s} user={user} onOpen={onOpenOrder} onSetItem={setSplitItem} />
+                  <SplitCard key={inst.id} instance={inst} stageKey={s} user={user} onOpen={onOpenOrder} onSetItem={setSplitItem} onAdvance={advance} onMoveBack={reverse} />
                 ))}
                 {!splitCol && orders.map((o, i) => canReorder ? (
                   <div key={o.id} draggable
@@ -1360,12 +1392,20 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
     try { await api("POST", `/orders/${orderId}/move`, { to_stage: "cancelled", reason: reason || "Cancelled" }); onUpdated && onUpdated(); onClose && onClose(); }
     catch (e) { alert(e.message); } finally { setBusy(false); }
   }
-  async function setItemStatus(it, status) {
-    if (status === itemStatusKey(it)) return;
+  async function setItemStatus(it, status, track) {
+    const cur = track === "packing" ? (it.pack_status || (it.pack_made ? "done" : "not_started"))
+              : track === "production" ? (it.prod_status || (it.prod_made ? "done" : "not_started"))
+              : itemStatusKey(it);
+    if (status === cur) return;
     const prev = order;
     // Update just this line in place so the page doesn't reload or jump under the user.
-    setOrder((o) => (o && o.items) ? { ...o, items: o.items.map((x) => x.id === it.id ? { ...x, status, made: status === "done" } : x) } : o);
-    try { await api("PATCH", `/orders/${orderId}/items/${it.id}`, { status }); onUpdated && onUpdated(); }
+    setOrder((o) => (o && o.items) ? { ...o, items: o.items.map((x) => x.id === it.id ? {
+      ...x,
+      ...(track === "packing" ? { pack_status: status, pack_made: status === "done" }
+        : track === "production" ? { prod_status: status, prod_made: status === "done", status, made: status === "done" }
+        : { status, made: status === "done" }),
+    } : x) } : o);
+    try { await api("PATCH", `/orders/${orderId}/items/${it.id}`, track ? { status, track } : { status }); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); setOrder(prev); }
   }
   async function setFlag(body) {
@@ -1434,6 +1474,12 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
   if (order._error) return <div style={{ color: "#fca5a5" }}>⚠ {order._error}</div>;
   const cfg = STAGE_LABELS[order.stage] || { label: order.stage, color: C.text3 };
   const canMark = roleCanMark && canMarkStage(user.role, order.stage);
+  // Split board: each line has a production track + a packing track, shown as two pickers
+  // in the Items tab. canMark stays the legacy single-stage gate; these gate each track.
+  const activeOrder = order.stage === "production" || order.stage === "packing";
+  const canTrackProd = roleCanMark && canMarkTrack(user.role, "production");
+  const canTrackPack = roleCanMark && canMarkTrack(user.role, "packing");
+  const splitItems = SPLIT_BOARD_ENABLED && activeOrder;
   const tabs = isFloor ? ["items", "details"] : isDispatch ? ["details", "items"] : ["details", "items", "timeline", "attachments"];
   const picRoles = STAGE_PIC_ROLES[order.stage];
   const picUsers = picRoles ? users.filter((u) => picRoles.includes(u.role)) : users;
@@ -1589,7 +1635,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
         const byName = Object.fromEntries(catalog.map((c) => [c.name, c]));
         return (
         <div>
-          {roleCanMark && !canMark && (
+          {roleCanMark && !canMark && !splitItems && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 9, padding: "9px 12px", fontSize: 12.5, color: C.text2, marginBottom: 14 }}>
               <span aria-hidden>🔒</span>
               <span>This order is in <b style={{ color: cfg.color }}>{cfg.label}</b> — STK status is locked to that stage. Ops or the boss can change it here.</span>
@@ -1628,14 +1674,16 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
                 }
                 return (
                   <div key={it.id} style={{ border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, marginBottom: 10 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: canMark ? 10 : 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: (canMark || splitItems) ? 10 : 0 }}>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ color: C.text, fontWeight: 600, fontSize: 14.5 }}>{it.name}</div>
                         <div style={{ fontFamily: MONO, color: C.text3, fontSize: 12 }}>{it.sku} · {Math.round(it.quantity)} {it.unit}</div>
                       </div>
-                      {!canMark && <span style={{ flexShrink: 0, alignSelf: "flex-start", display: "inline-block", padding: "3px 9px", borderRadius: 20, fontSize: 11.5, fontWeight: 700, color: st.color, background: st.color + "1f", border: `1px solid ${st.color}44` }}>{st.label}</span>}
+                      {!canMark && !splitItems && <span style={{ flexShrink: 0, alignSelf: "flex-start", display: "inline-block", padding: "3px 9px", borderRadius: 20, fontSize: 11.5, fontWeight: 700, color: st.color, background: st.color + "1f", border: `1px solid ${st.color}44` }}>{st.label}</span>}
                     </div>
-                    {canMark && <StatusPicker value={st.k} onChange={(s) => setItemStatus(it, s)} big />}
+                    {splitItems
+                      ? <ItemTrackPicker it={it} canProd={canTrackProd} canPack={canTrackPack} onSet={(s, tr) => setItemStatus(it, s, tr)} big />
+                      : canMark && <StatusPicker value={st.k} onChange={(s) => setItemStatus(it, s)} big />}
                     {canAmend && <div style={{ marginTop: canMark ? 10 : 8 }}><Btn size="sm" variant="ghost" onClick={() => startAmend(it)}>Edit line</Btn></div>}
                   </div>
                 );
@@ -1668,7 +1716,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
                   <td style={{ padding: "8px 10px", color: C.text }}>{it.name}</td>
                   <td style={{ padding: "8px 10px", fontWeight: 700, color: C.text }}>{Math.round(it.quantity)}</td>
                   <td style={{ padding: "8px 10px", color: C.text3 }}>{it.unit}</td>
-                  <td style={{ padding: "8px 10px" }}>{canMark ? prog : pill}</td>
+                  <td style={{ padding: "8px 10px" }}>{splitItems ? <ItemTrackPicker it={it} canProd={canTrackProd} canPack={canTrackPack} onSet={(s, tr) => setItemStatus(it, s, tr)} /> : canMark ? prog : pill}</td>
                   {canAmend && <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}><Btn size="sm" variant="ghost" onClick={() => startAmend(it)}>Edit</Btn></td>}
                 </tr>
               );})}
