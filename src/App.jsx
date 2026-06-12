@@ -1339,7 +1339,7 @@ function FloorDisplay({ onExit }) {
         </button>
         </>)}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
-          <span style={{ fontFamily: MONO, fontSize: 92, fontWeight: 800, color: C.text, letterSpacing: 3 }}>{clock}</span>
+          <span style={{ fontFamily: MONO, fontSize: 120, fontWeight: 800, color: C.text, letterSpacing: 3 }}>{clock}</span>
         </div>
       </div>
 
@@ -1384,7 +1384,7 @@ function FloorDisplay({ onExit }) {
                       ? ((o.items || []).length > 0 && (o.items || []).every(itemPackDone))
                       : ((o.stage === "production" || o.stage === "packing") && (o.item_count || 0) > 0 && (o.made_count || 0) >= o.item_count);
                     return (
-                      <div key={o.id} style={{ background: allDone ? C.green + "33" : urgent ? C.danger + "1A" : C.surface, border: `${allDone ? 2 : 1}px solid ${allDone ? C.green : urgent ? C.danger + "88" : late ? C.danger + "55" : C.border}`, borderLeft: `5px solid ${cfg.color}`, borderRadius: 10, padding: "13px 16px" }}>
+                      <div key={o.id} style={{ background: allDone ? C.green + "33" : (urgent || late) ? C.danger + "1A" : C.surface, border: `${allDone ? 2 : 1}px solid ${allDone ? C.green : (urgent || late) ? C.danger + "88" : C.border}`, borderLeft: `5px solid ${cfg.color}`, borderRadius: 10, padding: "13px 16px" }}>
                         <div style={{ fontFamily: MONO, fontSize: 28, fontWeight: 800, color: allDone ? C.text : late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 7 }}>
                           {urgent && <Pill color="#fff" bg={C.danger} border={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>Urgent</Pill>}
@@ -2870,35 +2870,48 @@ function MoMReport() {
 // automatic weekly export is switched on; for now the rows are a sample so the layout
 // can be seen, and the format buttons download the latest report as a stand-in.
 function ReportArchive({ onDownload, busy }) {
-  const weeks = useMemo(() => {
-    const base = new Date(); const monday = new Date(base);
-    monday.setDate(base.getDate() - ((base.getDay() + 6) % 7)); monday.setHours(0, 0, 0, 0);
+  const [scope, setScope] = useState("weekly");
+  const rows = useMemo(() => {
+    const base = new Date();
+    const dm = (dt) => dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+    if (scope === "monthly") {
+      return Array.from({ length: 6 }, (_, i) => {
+        const s = new Date(base.getFullYear(), base.getMonth() - i, 1);
+        const e = new Date(s.getFullYear(), s.getMonth() + 1, 0);
+        const g = new Date(s.getFullYear(), s.getMonth() + 1, 1, 8, 0, 0);
+        return { g, current: i === 0, label: s.toLocaleDateString("en-GB", { month: "long", year: "numeric" }) };
+      });
+    }
+    const monday = new Date(base); monday.setDate(base.getDate() - ((base.getDay() + 6) % 7)); monday.setHours(0, 0, 0, 0);
     return Array.from({ length: 6 }, (_, i) => {
       const s = new Date(monday); s.setDate(monday.getDate() - 7 * i);
       const e = new Date(s); e.setDate(s.getDate() + 6);
       const g = new Date(e); g.setDate(e.getDate() + 1); g.setHours(8, 0, 0, 0);
-      return { s, e, g, current: i === 0 };
+      return { g, current: i === 0, label: `${dm(s)} – ${dm(e)} ${s.getFullYear()}` };
     });
-  }, []);
-  const dm = (dt) => dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  }, [scope]);
   const dmy = (dt) => dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
-  const fmtBtn = (label, key) => <Btn variant="soft" size="sm" disabled={!!busy} onClick={() => onDownload(key)}>{busy === key ? "…" : label}</Btn>;
+  const fmtBtn = (label, key) => <Btn variant="soft" size="sm" disabled={!!busy} onClick={() => onDownload(key, scope)}>{busy === key ? "…" : label}</Btn>;
+  const curLabel = scope === "monthly" ? "This month" : "This week";
+  const pending = scope === "monthly" ? "Pending month-end" : "Pending Monday";
   return (
     <div>
-      <div style={{ background: C.accent + "12", border: `1px solid ${C.accent}44`, borderRadius: 10, padding: "12px 16px", marginBottom: 14, fontSize: 13, color: C.text2 }}>
-        <b style={{ color: C.text }}>Preview.</b> Once the automatic weekly export is switched on, every Monday's report pack is saved here to download anytime — no PC needed. The rows below are a sample; the PDF / Excel / CSV buttons download this week's report as a stand-in so you can see the file.
+      <div style={{ display: "inline-flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, marginBottom: 14 }}>
+        {[["weekly", "Weekly"], ["monthly", "Monthly"]].map(([k, lbl]) => (
+          <button key={k} onClick={() => setScope(k)} style={{ background: scope === k ? C.surface2 : "transparent", border: "none", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 13, fontWeight: scope === k ? 700 : 500, color: scope === k ? C.text : C.text2 }}>{lbl}</button>
+        ))}
       </div>
       <Card style={{ padding: 0, overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
-          <thead><tr style={{ background: C.bg2 }}>{["Week", "Generated", "Download"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+          <thead><tr style={{ background: C.bg2 }}>{[scope === "monthly" ? "Month" : "Week", "Generated", "Download"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
           <tbody>
-            {weeks.map((w, i) => (
+            {rows.map((r, i) => (
               <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
                 <td style={{ padding: "12px 16px", color: C.text, fontWeight: 600, whiteSpace: "nowrap" }}>
-                  {dm(w.s)} – {dm(w.e)} {w.s.getFullYear()}
-                  {w.current && <Pill color={C.accent} style={{ marginLeft: 8 }}>This week</Pill>}
+                  {r.label}
+                  {r.current && <Pill color={C.accent} style={{ marginLeft: 8 }}>{curLabel}</Pill>}
                 </td>
-                <td style={{ padding: "12px 16px", color: C.text3, whiteSpace: "nowrap" }}>{w.current ? "Pending Monday" : `${dmy(w.g)} · 08:00`} <Pill color={C.text3} style={{ marginLeft: 6 }}>Sample</Pill></td>
+                <td style={{ padding: "12px 16px", color: C.text3, whiteSpace: "nowrap" }}>{r.current ? pending : `${dmy(r.g)} · 08:00`}</td>
                 <td style={{ padding: "10px 16px" }}><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{fmtBtn("PDF", "pdf")}{fmtBtn("Excel", "xlsx")}{fmtBtn("CSV", "csv")}</div></td>
               </tr>
             ))}
@@ -2960,28 +2973,35 @@ function Reports({ user }) {
   const META = { production: "Production", packing: "Packing", delivery: "Delivery" };
   const kpiRows = (key, dd) => (metricDefs[key] ? metricDefs[key](dd).map(([k, v]) => [k, v == null ? "" : String(v)]) : []);
   const fileTag = usingRange ? `${from}_${to}` : period;
-  async function fetchReportData() {
+  async function fetchReportData(qArg = q) {
     const keys = tabsForRole.filter((k) => metricDefs[k]);
-    const parts = await Promise.all(keys.map((k) => api("GET", `/reports/${k}?${q}`).then((dd) => [k, dd]).catch(() => [k, {}])));
+    const parts = await Promise.all(keys.map((k) => api("GET", `/reports/${k}?${qArg}`).then((dd) => [k, dd]).catch(() => [k, {}])));
     const data = Object.fromEntries(parts);
     // Boss always gets individual performance in the export, even though the on-screen
     // Staff/PIC tabs are parked behind STAFF_RANKING_ENABLED.
-    if (tabsForRole.includes("staff") || user.role === "super_admin") data._staff = await api("GET", `/reports/staff?${q}`).then((dd) => dd.staff || []).catch(() => []);
-    if (tabsForRole.includes("pic") || user.role === "super_admin") data._pics = await api("GET", `/reports/pic?${q}`).then((dd) => dd.pics || []).catch(() => []);
+    if (tabsForRole.includes("staff") || user.role === "super_admin") data._staff = await api("GET", `/reports/staff?${qArg}`).then((dd) => dd.staff || []).catch(() => []);
+    if (tabsForRole.includes("pic") || user.role === "super_admin") data._pics = await api("GET", `/reports/pic?${qArg}`).then((dd) => dd.pics || []).catch(() => []);
     // The non-metric tabs are part of the on-screen report too, so the export must carry them.
-    if (tabsForRole.includes("orders")) data._orders = await api("GET", `/reports/orders?${q}`).then((dd) => dd.orders || []).catch(() => []);
-    if (tabsForRole.includes("efficiency")) data._eff = await api("GET", `/reports/efficiency?${q}`).then((dd) => dd).catch(() => null);
-    if (tabsForRole.includes("mistakes")) data._mistakes = await api("GET", `/reports/mistakes?${q}`).then((dd) => dd).catch(() => null);
+    if (tabsForRole.includes("orders")) data._orders = await api("GET", `/reports/orders?${qArg}`).then((dd) => dd.orders || []).catch(() => []);
+    if (tabsForRole.includes("efficiency")) data._eff = await api("GET", `/reports/efficiency?${qArg}`).then((dd) => dd).catch(() => null);
+    if (tabsForRole.includes("mistakes")) data._mistakes = await api("GET", `/reports/mistakes?${qArg}`).then((dd) => dd).catch(() => null);
     return data;
   }
+  // Exports accept an optional scope (qArg/tag/label) so the Archive can request weekly
+  // OR monthly; with no args they fall back to the on-screen period. Guards against an
+  // onClick event being passed as the first arg.
+  const exQ = (a) => (typeof a === "string" ? a : q);
+  const exTag = (a) => (typeof a === "string" ? a : fileTag);
+  const exLabel = (a) => (typeof a === "string" ? a : rangeLabel);
   // Per-order row shared by every export format.
   const orderRow = (o) => [o.invoice_number, o.customer_name || "", (STAGE_LABELS[o.stage] || {}).label || o.stage, o.done_count, o.item_count, o.pct, o.days_in_stage, o.cycle_hours, o.required_delivery_date, o.delivered ? (o.on_time ? "Delivered on-time" : "Delivered late") : (o.late ? "Late" : "In progress"), o.pic_name || ""];
   const ORDER_HEAD = ["Invoice", "Customer", "Stage", "STKs done", "STKs total", "% done", "Days in stage", "Cycle (h)", "Due", "Status", "PIC"];
-  async function exportCsv() {
+  async function exportCsv(qArg, tagArg, labelArg) {
+    const qq = exQ(qArg), tg = exTag(tagArg), lb = exLabel(labelArg);
     setBusy("csv");
     try {
-      const data = await fetchReportData();
-      const rows = [["WAWASAN LTS TRADING SDN BHD — Reports"], ["Range", rangeLabel], []];
+      const data = await fetchReportData(qq);
+      const rows = [["WAWASAN LTS TRADING SDN BHD — Reports"], ["Range", lb], []];
       for (const key of tabsForRole.filter((k) => metricDefs[k])) {
         const dd = data[key] || {};
         rows.push([META[key]], ["Metric", "Value"], ...kpiRows(key, dd));
@@ -3004,17 +3024,18 @@ function Reports({ user }) {
         if (m.amendments && m.amendments.list.length) rows.push(["Amendments — orders corrected"], ["Invoice", "By", "Change", "When"], ...m.amendments.list.map((a) => [a.invoice_number || "", a.user_name || "", a.details || "edited", a.created_at]), []);
         if (m.late && m.late.list.length) rows.push(["Late deliveries"], ["Invoice", "Days late", "Driver"], ...m.late.list.map((o) => [o.invoice_number, o.days_late, o.driver || ""]), []);
       }
-      downloadCsv(`reports-${fileTag}.csv`, rows);
+      downloadCsv(`reports-${tg}.csv`, rows);
     } finally { setBusy(""); }
   }
-  async function exportExcel() {
+  async function exportExcel(qArg, tagArg, labelArg) {
+    const qq = exQ(qArg), tg = exTag(tagArg), lb = exLabel(labelArg);
     setBusy("xlsx");
     try {
-      const data = await fetchReportData();
+      const data = await fetchReportData(qq);
       const wb = XLSX.utils.book_new();
       for (const key of tabsForRole.filter((k) => metricDefs[k])) {
         const dd = data[key] || {};
-        const rows = [[`${META[key]} — ${rangeLabel}`], [], ["Metric", "Value"], ...kpiRows(key, dd)];
+        const rows = [[`${META[key]} — ${lb}`], [], ["Metric", "Value"], ...kpiRows(key, dd)];
         if ((dd.by_delivery_man || []).length) rows.push([], ["Driver", "Deliveries", "On time"], ...dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
         if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), META[key]);
@@ -3032,13 +3053,14 @@ function Reports({ user }) {
         const rows = [["Amendments", m.amendments ? m.amendments.count : 0], ["Late deliveries", m.late ? m.late.count : 0], ["Failed", m.failed_count], ["Cancelled", m.cancelled_count], ["On hold now", m.on_hold_count], ["Waiting stock", m.waiting_stock_count], [], ["Amendment invoice", "By", "Change", "When"], ...((m.amendments && m.amendments.list) || []).map((a) => [a.invoice_number || "", a.user_name || "", a.details || "edited", a.created_at]), [], ["Late invoice", "Days late", "Driver"], ...((m.late && m.late.list) || []).map((o) => [o.invoice_number, o.days_late, o.driver || ""])];
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "Mistakes");
       }
-      XLSX.writeFile(wb, `reports-${fileTag}.xlsx`);
+      XLSX.writeFile(wb, `reports-${tg}.xlsx`);
     } finally { setBusy(""); }
   }
-  async function exportPdf() {
+  async function exportPdf(qArg, tagArg, labelArg) {
+    const qq = exQ(qArg), tg = exTag(tagArg), lb = exLabel(labelArg);
     setBusy("pdf");
     try {
-      const data = await fetchReportData();
+      const data = await fetchReportData(qq);
       // jspdf-autotable's default export can arrive as the fn or as { default: fn } depending on the bundler.
       const autoTable = typeof autoTableImport === "function" ? autoTableImport : (autoTableImport && autoTableImport.default);
       // jsPDF's built-in fonts are WinAnsi — swap dashes/arrows so they don't render as boxes.
@@ -3060,7 +3082,7 @@ function Reports({ user }) {
       doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(...G.text);
       doc.text("WAWASAN LTS TRADING SDN BHD - Reports", M, y + 5);
       doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(...G.text3);
-      doc.text(`Full operations report  -  ${ascii(rangeLabel)}`, M, y + 11);
+      doc.text(`Full operations report  -  ${ascii(lb)}`, M, y + 11);
       y += 20;
 
       const heading = (t) => {
@@ -3158,7 +3180,7 @@ function Reports({ user }) {
         if (m.amendments && m.amendments.list.length) darkTable(["Invoice", "By", "Change", "When"], m.amendments.list.map((a) => [a.invoice_number || "", a.user_name || "", a.details || "edited", a.created_at ? new Date(a.created_at).toLocaleDateString("en-GB") : ""]));
         if (m.late && m.late.list.length) darkTable(["Invoice", "Days late", "Driver"], m.late.list.map((o) => [o.invoice_number, o.days_late, o.driver || ""]));
       }
-      doc.save(`reports-${fileTag}.pdf`);
+      doc.save(`reports-${tg}.pdf`);
     } catch (e) {
       alert(`PDF export failed: ${e && e.message ? e.message : e}`);
     } finally { setBusy(""); }
@@ -3203,7 +3225,10 @@ function Reports({ user }) {
       {tab === "mistakes" && <MistakesReport period={period} from={from} to={to} />}
       {tab === "scorecard" && <ScoreboardReport period={period} />}
       {tab === "trend" && <MoMReport />}
-      {tab === "archive" && <ReportArchive onDownload={(fmt) => (fmt === "pdf" ? exportPdf() : fmt === "xlsx" ? exportExcel() : exportCsv())} busy={busy} />}
+      {tab === "archive" && <ReportArchive busy={busy} onDownload={(fmt, scope) => {
+        const qq = `period=${scope}`, tg = scope, lb = scope === "monthly" ? "This month" : "This week";
+        (fmt === "pdf" ? exportPdf : fmt === "xlsx" ? exportExcel : exportCsv)(qq, tg, lb);
+      }} />}
       {!CUSTOM.includes(tab) && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 18 }}>
           {(metrics[tab] || []).map(([label, value]) => <MetricCard key={label} label={label} value={value} tone={metricTone(label)} />)}
