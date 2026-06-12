@@ -1291,6 +1291,10 @@ function FloorDisplay({ onExit }) {
   const spotAllDone = spot && (spot.stage === "production" || spot.stage === "packing") && (spot.item_count || 0) > 0 && (spot.made_count || 0) >= spot.item_count;
   const spotUrgentDone = spotAllDone && spot.priority === "urgent";
   const wallScale = Math.min(vp.w / 1920, vp.h / 1080);
+  // Idle chrome: like the Exit button, the interactive controls (view toggle, stage
+  // filters, This week) fade out after 5s of no activity so the wall stays clean — a
+  // mouse move or touch brings them back.
+  const ctlFade = { opacity: chrome ? 1 : 0, pointerEvents: chrome ? "auto" : "none", transition: "opacity .45s" };
 
   return (
     <div style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 2000, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1308,7 +1312,7 @@ function FloorDisplay({ onExit }) {
           </div>
         </div>
         {REWARD_SYSTEM_ENABLED && (
-          <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4 }}>
+          <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, ...ctlFade }}>
             {[["board", "Board"], ["scoreboard", "Scoreboard"]].map(([k, lbl]) => {
               const on = view === k;
               return <button key={k} onClick={() => setView(k)} style={{ background: on ? C.surface2 : "transparent", border: "none", borderRadius: 7, padding: "9px 16px", cursor: "pointer", fontSize: 14, fontWeight: on ? 800 : 600, color: on ? C.accent : C.text2 }}>{lbl}</button>;
@@ -1317,7 +1321,7 @@ function FloorDisplay({ onExit }) {
         )}
         <StatCard label="Completed today" value={stats.completed_today} color={C.green} />
         <StatCard label="Active orders" value={stats.active} color={C.accent} />
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginLeft: 6 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginLeft: 6, ...ctlFade }}>
           {["all", ...BOARD_STAGES].map((s) => {
             const active = filter === s;
             const color = s === "all" ? C.accent : STAGES[s].color;
@@ -1327,11 +1331,11 @@ function FloorDisplay({ onExit }) {
             );
           })}
         </div>
-        <button onClick={() => setWeekOnly((w) => !w)} style={{ padding: "9px 16px", borderRadius: 9, border: `1px solid ${weekOnly ? C.accent + "66" : C.border}`, background: weekOnly ? C.accent + "22" : "transparent", color: weekOnly ? C.accent : C.text2, fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8 }}>
+        <button onClick={() => setWeekOnly((w) => !w)} style={{ padding: "9px 16px", borderRadius: 9, border: `1px solid ${weekOnly ? C.accent + "66" : C.border}`, background: weekOnly ? C.accent + "22" : "transparent", color: weekOnly ? C.accent : C.text2, fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8, ...ctlFade }}>
           <Icon name="calendar" size={15} color={weekOnly ? C.accent : C.text3} /> This week
         </button>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
-          <span style={{ fontFamily: MONO, fontSize: 64, fontWeight: 700, color: C.text, letterSpacing: 2 }}>{clock}</span>
+          <span style={{ fontFamily: MONO, fontSize: 92, fontWeight: 800, color: C.text, letterSpacing: 3 }}>{clock}</span>
         </div>
       </div>
 
@@ -2858,12 +2862,55 @@ function MoMReport() {
 }
 
 // ─── Reports ─────────────────────────────────────────────────────────────────
+// Dummy preview of the weekly report archive. Real per-week packs land here once the
+// automatic weekly export is switched on; for now the rows are a sample so the layout
+// can be seen, and the format buttons download the latest report as a stand-in.
+function ReportArchive({ onDownload, busy }) {
+  const weeks = useMemo(() => {
+    const base = new Date(); const monday = new Date(base);
+    monday.setDate(base.getDate() - ((base.getDay() + 6) % 7)); monday.setHours(0, 0, 0, 0);
+    return Array.from({ length: 6 }, (_, i) => {
+      const s = new Date(monday); s.setDate(monday.getDate() - 7 * i);
+      const e = new Date(s); e.setDate(s.getDate() + 6);
+      const g = new Date(e); g.setDate(e.getDate() + 1); g.setHours(8, 0, 0, 0);
+      return { s, e, g, current: i === 0 };
+    });
+  }, []);
+  const dm = (dt) => dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  const dmy = (dt) => dt.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+  const fmtBtn = (label, key) => <Btn variant="soft" size="sm" disabled={!!busy} onClick={() => onDownload(key)}>{busy === key ? "…" : label}</Btn>;
+  return (
+    <div>
+      <div style={{ background: C.accent + "12", border: `1px solid ${C.accent}44`, borderRadius: 10, padding: "12px 16px", marginBottom: 14, fontSize: 13, color: C.text2 }}>
+        <b style={{ color: C.text }}>Preview.</b> Once the automatic weekly export is switched on, every Monday's report pack is saved here to download anytime — no PC needed. The rows below are a sample; the PDF / Excel / CSV buttons download this week's report as a stand-in so you can see the file.
+      </div>
+      <Card style={{ padding: 0, overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5 }}>
+          <thead><tr style={{ background: C.bg2 }}>{["Week", "Generated", "Download"].map((h) => <th key={h} style={{ textAlign: "left", padding: "12px 16px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {weeks.map((w, i) => (
+              <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                <td style={{ padding: "12px 16px", color: C.text, fontWeight: 600, whiteSpace: "nowrap" }}>
+                  {dm(w.s)} – {dm(w.e)} {w.s.getFullYear()}
+                  {w.current && <Pill color={C.accent} style={{ marginLeft: 8 }}>This week</Pill>}
+                </td>
+                <td style={{ padding: "12px 16px", color: C.text3, whiteSpace: "nowrap" }}>{w.current ? "Pending Monday" : `${dmy(w.g)} · 08:00`} <Pill color={C.text3} style={{ marginLeft: 6 }}>Sample</Pill></td>
+                <td style={{ padding: "10px 16px" }}><div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{fmtBtn("PDF", "pdf")}{fmtBtn("Excel", "xlsx")}{fmtBtn("CSV", "csv")}</div></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+    </div>
+  );
+}
+
 function Reports({ user }) {
   const tabsForRole = user.role === "production_lead"
     ? ["production", "packing", ...(STAFF_RANKING_ENABLED ? ["staff", "pic"] : []), ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : [])]
-    : ["production", "packing", "delivery", "efficiency", "mistakes", ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : []), "trend", "orders", ...(STAFF_RANKING_ENABLED ? ["staff", "pic"] : [])];
-  const CUSTOM = ["orders", "staff", "pic", "efficiency", "mistakes", "scorecard", "trend"]; // tabs with their own component (no metric cards/trend)
-  const TAB_LABEL = { staff: "Staff", pic: "Person in charge", efficiency: "Efficiency", mistakes: "Mistakes", scorecard: "Scoreboard", trend: "Trend" };
+    : ["production", "packing", "delivery", "efficiency", "mistakes", ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : []), "trend", "orders", ...(STAFF_RANKING_ENABLED ? ["staff", "pic"] : []), "archive"];
+  const CUSTOM = ["orders", "staff", "pic", "efficiency", "mistakes", "scorecard", "trend", "archive"]; // tabs with their own component (no metric cards/trend)
+  const TAB_LABEL = { staff: "Staff", pic: "Person in charge", efficiency: "Efficiency", mistakes: "Mistakes", scorecard: "Scoreboard", trend: "Trend", archive: "Archive" };
   const PERIOD_LABEL = { daily: "Today", weekly: "This week", monthly: "This month" };
   const TAB_DESC = {
     production: "Throughput, on-time rate and reworks in production",
@@ -2876,6 +2923,7 @@ function Reports({ user }) {
     pic: "Live workload per person in charge",
     scorecard: "Reward score per department or person",
     trend: "Month-over-month: better or worse?",
+    archive: "Weekly report packs, saved to download anytime",
   };
   const [tab, setTab] = useState(tabsForRole[0]);
   const [period, setPeriod] = useState("weekly");
@@ -3100,6 +3148,7 @@ function Reports({ user }) {
       {tab === "mistakes" && <MistakesReport period={period} from={from} to={to} />}
       {tab === "scorecard" && <ScoreboardReport period={period} />}
       {tab === "trend" && <MoMReport />}
+      {tab === "archive" && <ReportArchive onDownload={(fmt) => (fmt === "pdf" ? exportPdf() : fmt === "xlsx" ? exportExcel() : exportCsv())} busy={busy} />}
       {!CUSTOM.includes(tab) && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 14, marginBottom: 18 }}>
           {(metrics[tab] || []).map(([label, value]) => <MetricCard key={label} label={label} value={value} tone={metricTone(label)} />)}
@@ -3862,6 +3911,7 @@ function Remarks({ user }) {
 function Audit() {
   const [d, setD] = useState(null);
   const [allLogs, setAllLogs] = useState(false);
+  const [cap, setCap] = useState(200); // rows fetched from the server; grows by 200 on "Show next"
   const [period, setPeriod] = useState("all"); // all | weekly | monthly | custom
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -3874,12 +3924,14 @@ function Audit() {
     if (period === "weekly") { const x = new Date(); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); f = ymd(x); }
     else if (period === "monthly") { const x = new Date(); f = ymd(new Date(x.getFullYear(), x.getMonth(), 1)); }
     else if (period === "custom") { f = from; t = to; }
-    const p = new URLSearchParams({ limit: "200" });
+    const p = new URLSearchParams({ limit: String(cap) });
     if (f) p.set("from", f);
     if (t) p.set("to", `${t} 23:59:59`);
-    setD(null); setAllLogs(false);
+    setD(null);
     api("GET", `/reports/audit?${p.toString()}`).then(setD).catch(() => setD({ logs: [] }));
-  }, [period, from, to]);
+  }, [period, from, to, cap]);
+  // Changing the range/period resets back to the fast newest-200 view.
+  useEffect(() => { setAllLogs(false); setCap(200); }, [period, from, to]);
 
   const allLogsData = d && d.logs ? d.logs : [];
   const userOpts = [...new Set(allLogsData.map((l) => l.user_name).filter(Boolean))].sort();
@@ -3951,7 +4003,12 @@ function Audit() {
               </tbody>
             </table>
           </Card>
-          {logs.length > 3 && <div style={{ marginTop: 12 }}><Btn variant="ghost" size="sm" onClick={() => setAllLogs((v) => !v)}>{allLogs ? "Show less ▲" : `Show all ${logs.length}${total > logs.length ? ` of ${total}` : ""} ▼`}</Btn></div>}
+          {(logs.length > 3 || (d && d.total != null && d.total > allLogsData.length)) && (
+            <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              {logs.length > 3 && <Btn variant="ghost" size="sm" onClick={() => setAllLogs((v) => !v)}>{allLogs ? "Show less ▲" : `Show all ${logs.length}${total > logs.length ? ` of ${total}` : ""} ▼`}</Btn>}
+              {d && d.total != null && d.total > allLogsData.length && <Btn variant="soft" size="sm" onClick={() => { setCap((c) => c + 200); setAllLogs(true); }}>Show next {Math.min(200, d.total - allLogsData.length)} of {d.total} ▼</Btn>}
+            </div>
+          )}
         </>
       )}
     </div>
