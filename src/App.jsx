@@ -790,13 +790,12 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
   const [detail, setDetail] = useState(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => { api("GET", `/orders/${order.id}`).then(setDetail).catch(() => setDetail({ items: [] })); }, [order.id]);
-  // Assign the production PIC right here when sending an order to production (Boss/Admin
-  // only — mirrors the assign-pic endpoint). A move clears the PIC, so we set it after.
+  // Sending an order to production (Boss/Admin) lets them set the expiry date here.
+  // PIC is NOT assigned inline anymore — the backend notifies Production Lead + Admin
+  // that the order entered the stage with no PIC, for them to assign.
   const canRoute = ["super_admin", "admin"].includes(user.role);
-  const offerPic = SPLIT_BOARD_ENABLED && order.stage === "order" && canRoute;
-  const [users, setUsers] = useState([]);
-  const [picId, setPicId] = useState("");
-  useEffect(() => { if (offerPic) api("GET", "/users").then(setUsers).catch(() => setUsers([])); /* eslint-disable-next-line */ }, []);
+  const offerExpiry = SPLIT_BOARD_ENABLED && order.stage === "order" && canRoute;
+  const [expiry, setExpiry] = useState((order.expiry_date || "").slice(0, 10));
   const canMark = user && canMarkStage(user.role, order.stage);
   async function setStatus(it, status) {
     if (status === itemStatusKey(it)) return;
@@ -806,7 +805,15 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
   const items = (detail && detail.items) || [];
   const allMade = items.length > 0 && items.every((it) => it.made);
   const title = ADVANCE_LABEL[order.stage] || `Advance to ${(STAGE_LABELS[to] || {}).label || to}`;
-  async function go() { setBusy(true); try { await onConfirm(picId); } finally { setBusy(false); } }
+  async function go() {
+    setBusy(true);
+    try {
+      if (offerExpiry && expiry && expiry !== (order.expiry_date || "").slice(0, 10)) {
+        await api("PATCH", `/orders/${order.id}`, { expiry_date: expiry });
+      }
+      await onConfirm();
+    } finally { setBusy(false); }
+  }
   return (
     <Modal open onClose={onClose} title={title} width={520}>
       <div style={{ fontSize: 14, marginBottom: 4 }}>
@@ -839,16 +846,11 @@ function AdvanceConfirmModal({ order, to, user, onConfirm, onClose }) {
       ) : (order.stage === "production" || order.stage === "packing") && items.length > 0 && !allMade ? (
         <div style={{ fontSize: 12.5, color: C.packing, marginBottom: 12 }}>⚠ Not all STKs are marked done yet — confirm only if your stage is actually complete.</div>
       ) : null}
-      {offerPic && (
+      {offerExpiry && (
         <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 12.5, color: C.text2, fontWeight: 600, marginBottom: 6 }}>Assign person in charge <span style={{ color: C.text3, fontWeight: 400 }}>(optional — you can do it later)</span></div>
-          <select value={picId} onChange={(e) => setPicId(e.target.value)}
-            style={{ width: "100%", background: C.surface2, color: C.text, border: `1px solid ${C.border2}`, borderRadius: 9, padding: "10px 12px", fontSize: 13.5 }}>
-            <option value="">Unassigned — assign later</option>
-            {users.filter((u) => u.is_active && ["production_lead", "production_staff"].includes(u.role)).map((u) => (
-              <option key={u.id} value={u.id}>{u.name} · {ROLE_LABELS[u.role] || u.role}</option>
-            ))}
-          </select>
+          <div style={{ fontSize: 12.5, color: C.text2, fontWeight: 600, marginBottom: 6 }}>Expiry date <span style={{ color: C.text3, fontWeight: 400 }}>(optional)</span></div>
+          <input type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)}
+            style={{ width: "100%", background: C.surface2, color: C.text, border: `1px solid ${C.border2}`, borderRadius: 9, padding: "10px 12px", fontSize: 13.5, colorScheme: "dark" }} />
         </div>
       )}
       <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
@@ -1738,13 +1740,13 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
                 : <Pill color={order.priority === "urgent" ? C.danger : C.text2}>{order.priority === "urgent" ? "Urgent" : "Normal"}</Pill>
             } />
             <LV label="Expiry date" v={
-              canMove
+              canRoute
                 ? <input type="date" value={(order.expiry_date || "").slice(0, 10)} onChange={(e) => setExpiry(e.target.value)} style={{ padding: "5px 9px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13.5, fontWeight: 600, color: C.text, colorScheme: "dark" }} />
                 : <span>{order.expiry_date ? fmtDay(order.expiry_date) : "—"}</span>
             } />
             {/* importance tier removed — the delivery deadline is editable above */}
-            {/* canRoute (Boss/Admin) edit the PIC in Stage actions below — don't show it twice. */}
-            {!canRoute && <LV label="Person in charge" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />}
+            {/* PIC is not shown in the detail for Production Head and below; Boss/Admin
+                manage it in Stage actions, the Lead assigns it via Lead actions. */}
           </div>
           <button onClick={() => setMoreOpen((o) => !o)} style={{ marginTop: 14, background: "none", border: `1px solid ${C.border2}`, color: C.text2, borderRadius: 8, fontSize: 12.5, padding: "7px 12px", cursor: "pointer" }}>{moreOpen ? "Hide details ▴" : "More details ▾"}</button>
           {moreOpen && (
@@ -3035,6 +3037,11 @@ function Reports({ user }) {
     const exportsPeople = ["super_admin", "admin"].includes(user.role);
     if (tabsForRole.includes("staff") || exportsPeople) data._staff = await api("GET", `/reports/staff?${qArg}`).then((dd) => dd.staff || []).catch(() => []);
     if (exportsPeople) data._pics = await api("GET", `/reports/pic?${qArg}`).then((dd) => dd.pics || []).catch(() => []);
+    // Full per-person performance (the StaffDetail drill-down numbers shown on screen),
+    // one /reports/staff/:id per active person, so the export carries the same figures.
+    if (exportsPeople && (data._staff || []).length) {
+      data._staffDetail = (await Promise.all(data._staff.map((s) => api("GET", `/reports/staff/${s.id}?${qArg}`).then((d) => d).catch(() => null)))).filter((d) => d && d.staff);
+    }
     // The non-metric tabs are part of the on-screen report too, so the export must carry them.
     if (tabsForRole.includes("orders")) data._orders = await api("GET", `/reports/orders?${qArg}`).then((dd) => dd.orders || []).catch(() => []);
     if (tabsForRole.includes("efficiency")) data._eff = await api("GET", `/reports/efficiency?${qArg}`).then((dd) => dd).catch(() => null);
@@ -3069,6 +3076,9 @@ function Reports({ user }) {
   // Per-order row shared by every export format.
   const orderRow = (o) => [o.invoice_number, o.customer_name || "", (STAGE_LABELS[o.stage] || {}).label || o.stage, o.done_count, o.item_count, o.pct, o.days_in_stage, o.cycle_hours, o.required_delivery_date, o.delivered ? (o.on_time ? "Delivered on-time" : "Delivered late") : (o.late ? "Late" : "In progress"), o.pic_name || ""];
   const ORDER_HEAD = ["Invoice", "Customer", "Stage", "STKs done", "STKs total", "% done", "Days in stage", "Cycle (h)", "Due", "Status", "PIC"];
+  // Per-person performance row — mirrors the on-screen StaffDetail drill-down.
+  const STAFF_DETAIL_HEAD = ["Name", "Role", "Stages completed", "Items made", "Items packed", "On-time %", "On-time", "Reworks", "Active days"];
+  const staffDetailRow = (d) => [d.staff.name, ROLE_LABELS[d.staff.role] || d.staff.role, d.volume.completions, d.volume.items_made, d.volume.items_packed, d.reliability.on_time_rate == null ? "—" : d.reliability.on_time_rate + "%", `${d.reliability.on_time_count}/${d.reliability.on_time_total}`, d.reliability.reworks, d.speed.active_days];
   async function exportCsv(qArg, tagArg, labelArg) {
     const qq = exQ(qArg), tg = exTag(tagArg), lb = exLabel(labelArg);
     setBusy("csv");
@@ -3082,7 +3092,7 @@ function Reports({ user }) {
         if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
         rows.push([]);
       }
-      if (data._staff) rows.push(["Individual performance"], ["Name", "Role", "Stages completed", "Items done", "Reworks"], ...data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks]), []);
+      if (data._staffDetail && data._staffDetail.length) rows.push(["Individual performance"], STAFF_DETAIL_HEAD, ...data._staffDetail.map(staffDetailRow), []);
       if (data._pics) rows.push(["Person in charge"], ["Name", "Role", "Open now", "Production", "Packing", "Overdue", "On hold", "Completed"], ...data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.active_prod, p.active_pack, p.overdue, p.on_hold, p.completed]), []);
       if (data._orders) rows.push(["Orders — per-order progress"], ORDER_HEAD, ...data._orders.map(orderRow), []);
       if (data._eff) {
@@ -3120,7 +3130,7 @@ function Reports({ user }) {
         if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), META[key]);
       }
-      if (data._staff) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Name", "Role", "Stages completed", "Items done", "Reworks"], ...data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks])]), "Individual");
+      if (data._staffDetail && data._staffDetail.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([STAFF_DETAIL_HEAD, ...data._staffDetail.map(staffDetailRow)]), "Individual");
       if (data._pics) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Name", "Role", "Open now", "Production", "Packing", "Overdue", "On hold", "Completed"], ...data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.active_prod, p.active_pack, p.overdue, p.on_hold, p.completed])]), "PIC");
       if (data._orders) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([ORDER_HEAD, ...data._orders.map(orderRow)]), "Orders");
       if (data._eff) {
@@ -3248,7 +3258,7 @@ function Reports({ user }) {
         trendChart(dd.daily_trend, key === "delivery" ? "line" : "bar", key === "delivery" ? G.green : G.accent);
         if ((dd.by_delivery_man || []).length) darkTable(["Driver", "Deliveries", "On time"], dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
       }
-      if (data._staff && data._staff.length) { heading("Individual performance"); darkTable(["Name", "Role", "Done", "Items", "Reworks"], data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks])); }
+      if (data._staffDetail && data._staffDetail.length) { heading("Individual performance"); darkTable(STAFF_DETAIL_HEAD, data._staffDetail.map(staffDetailRow)); }
       if (data._pics && data._pics.length) { heading("Person in charge"); darkTable(["Name", "Role", "Open", "Prod", "Pack", "Overdue", "On hold", "Completed"], data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.active_prod, p.active_pack, p.overdue, p.on_hold, p.completed])); }
       if (data._orders && data._orders.length) {
         heading("Orders - per-order progress");
@@ -3535,6 +3545,10 @@ function Delivery({ user, onOpenOrder }) {
   async function assign() {
     if (!form.order_id) { alert("Pick an order to schedule."); return; }
     if (!form.scheduled_date) { alert("Pick a scheduled delivery date."); return; }
+    const selOrder = (ready || []).find((o) => o.id === form.order_id);
+    if (!(form.address && form.address.trim()) && !(selOrder && selOrder.delivery_address)) {
+      alert("Enter a delivery address."); return;
+    }
     if (form.channel === "in_house") {
       if (!form.deliverer_id) { alert("Assign a driver for the in-house delivery."); return; }
     } else if (!form.tracking_no.trim()) {
