@@ -1943,7 +1943,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Btn variant="soft" size="sm" onClick={() => setFlag({ on_hold: !order.on_hold, reason: reason || undefined })} disabled={busy}>{order.on_hold ? "Release hold" : "Put on hold"}</Btn>
-            {canMove && <Btn variant="soft" size="sm" onClick={() => setFlag({ waiting_stock: !order.waiting_stock })} disabled={busy}>{order.waiting_stock ? "Clear waiting stock" : "Flag waiting stock"}</Btn>}
+            <Btn variant="soft" size="sm" onClick={() => setFlag({ waiting_stock: !order.waiting_stock })} disabled={busy}>{order.waiting_stock ? "Clear waiting stock" : "Flag waiting stock"}</Btn>
             {canMove && <Btn variant="danger" size="sm" onClick={cancelOrder} disabled={busy}>Cancel order</Btn>}
           </div>
         </div>
@@ -2950,6 +2950,7 @@ function Reports({ user }) {
   const [tab, setTab] = useState(tabsForRole[0]);
   const [period, setPeriod] = useState("weekly");
   const [exportScope, setExportScope] = useState("weekly"); // weekly|monthly — what the Export buttons produce (independent of the on-screen period)
+  const canExport = ["super_admin", "admin"].includes(user.role); // Production Head may view reports but not print/export them
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [staffId, setStaffId] = useState("");
@@ -3197,6 +3198,7 @@ function Reports({ user }) {
         <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, flexWrap: "wrap" }}>
           {tabsForRole.map((t) => <button key={t} onClick={() => setTab(t)} style={{ background: tab === t ? C.surface2 : "transparent", border: "none", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 13, fontWeight: tab === t ? 700 : 500, color: tab === t ? C.text : C.text2, textTransform: "capitalize" }}>{TAB_LABEL[t] || t}</button>)}
         </div>
+        {canExport && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ fontSize: 12, color: C.text3, fontWeight: 700 }}>Export</span>
           <div style={{ display: "flex", gap: 3, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 9, padding: 3 }}>
@@ -3208,6 +3210,7 @@ function Reports({ user }) {
           <Btn variant="soft" size="sm" onClick={() => exportExcel(`period=${exportScope}`, exportScope, exportScope === "monthly" ? "This month" : "This week")} disabled={!!busy}>{busy === "xlsx" ? "Exporting…" : "Excel"}</Btn>
           <Btn variant="soft" size="sm" onClick={() => exportCsv(`period=${exportScope}`, exportScope, exportScope === "monthly" ? "This month" : "This week")} disabled={!!busy}>{busy === "csv" ? "Exporting…" : "CSV"}</Btn>
         </div>
+        )}
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
         <div style={{ display: "flex", gap: 3, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 9, padding: 3 }}>
