@@ -163,7 +163,7 @@ const NAV = [
   { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "delivery_team", "admin", "production_lead"] },
   { id: "floor", label: "Floor Display", icon: "display" }, // every role; rendered as a distinct launch button, not a workspace tab
   { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "production_lead"] },
-  { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead", "production_staff"] },
+  { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead", "production_staff", "admin"] },
   { id: "audit", label: "Audit Trail", icon: "audit", roles: ["super_admin", "admin"] },
   { id: "users", label: "User Management", icon: "users", roles: ["super_admin", "admin"] },
   { id: "settings", label: "System Settings", icon: "settings", roles: ["super_admin", "admin"] },
@@ -1384,7 +1384,7 @@ function FloorDisplay({ onExit }) {
                       ? ((o.items || []).length > 0 && (o.items || []).every(itemPackDone))
                       : ((o.stage === "production" || o.stage === "packing") && (o.item_count || 0) > 0 && (o.made_count || 0) >= o.item_count);
                     return (
-                      <div key={o.id} style={{ background: allDone ? C.green + "33" : (urgent || late) ? C.danger + "1A" : C.surface, border: `${allDone ? 2 : 1}px solid ${allDone ? C.green : (urgent || late) ? C.danger + "88" : C.border}`, borderLeft: `5px solid ${cfg.color}`, borderRadius: 10, padding: "13px 16px" }}>
+                      <div key={o.id} style={{ background: allDone ? C.green + "33" : (urgent && late) ? C.danger + "3A" : (urgent || late) ? C.danger + "1A" : C.surface, border: `${allDone || (urgent && late) ? 2 : 1}px solid ${allDone ? C.green : (urgent && late) ? C.danger : (urgent || late) ? C.danger + "88" : C.border}`, borderLeft: `5px solid ${cfg.color}`, borderRadius: 10, padding: "13px 16px" }}>
                         <div style={{ fontFamily: MONO, fontSize: 28, fontWeight: 800, color: allDone ? C.text : late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 7 }}>
                           {urgent && <Pill color="#fff" bg={C.danger} border={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>Urgent</Pill>}
@@ -2924,7 +2924,7 @@ function ReportArchive({ onDownload, busy }) {
 
 function Reports({ user }) {
   const tabsForRole = user.role === "production_lead"
-    ? ["production", "packing", ...(STAFF_RANKING_ENABLED ? ["staff", "pic"] : []), ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : [])]
+    ? ["production", "packing", "efficiency", ...(STAFF_RANKING_ENABLED ? ["staff", "pic"] : []), ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : [])]
     : ["production", "packing", "delivery", "efficiency", "mistakes", ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : []), "trend", "orders", ...(STAFF_RANKING_ENABLED ? ["staff", "pic"] : []), "archive"];
   const CUSTOM = ["orders", "staff", "pic", "efficiency", "mistakes", "scorecard", "trend", "archive"]; // tabs with their own component (no metric cards/trend)
   const TAB_LABEL = { staff: "Staff", pic: "Person in charge", efficiency: "Efficiency", mistakes: "Mistakes", scorecard: "Scoreboard", trend: "Trend", archive: "Archive" };
@@ -2944,6 +2944,7 @@ function Reports({ user }) {
   };
   const [tab, setTab] = useState(tabsForRole[0]);
   const [period, setPeriod] = useState("weekly");
+  const [exportScope, setExportScope] = useState("weekly"); // weekly|monthly — what the Export buttons produce (independent of the on-screen period)
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [staffId, setStaffId] = useState("");
@@ -3191,10 +3192,16 @@ function Reports({ user }) {
         <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, flexWrap: "wrap" }}>
           {tabsForRole.map((t) => <button key={t} onClick={() => setTab(t)} style={{ background: tab === t ? C.surface2 : "transparent", border: "none", borderRadius: 8, padding: "7px 16px", cursor: "pointer", fontSize: 13, fontWeight: tab === t ? 700 : 500, color: tab === t ? C.text : C.text2, textTransform: "capitalize" }}>{TAB_LABEL[t] || t}</button>)}
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <Btn variant="soft" size="sm" onClick={exportPdf} disabled={!!busy}>{busy === "pdf" ? "Exporting…" : "PDF"}</Btn>
-          <Btn variant="soft" size="sm" onClick={exportExcel} disabled={!!busy}>{busy === "xlsx" ? "Exporting…" : "Excel"}</Btn>
-          <Btn variant="soft" size="sm" onClick={exportCsv} disabled={!!busy}>{busy === "csv" ? "Exporting…" : "CSV"}</Btn>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: C.text3, fontWeight: 700 }}>Export</span>
+          <div style={{ display: "flex", gap: 3, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 9, padding: 3 }}>
+            {[["weekly", "Weekly"], ["monthly", "Monthly"]].map(([k, lbl]) => (
+              <button key={k} onClick={() => setExportScope(k)} style={{ background: exportScope === k ? C.surface2 : "transparent", border: "none", borderRadius: 7, padding: "6px 12px", cursor: "pointer", fontSize: 12.5, fontWeight: exportScope === k ? 700 : 500, color: exportScope === k ? C.text : C.text2 }}>{lbl}</button>
+            ))}
+          </div>
+          <Btn variant="soft" size="sm" onClick={() => exportPdf(`period=${exportScope}`, exportScope, exportScope === "monthly" ? "This month" : "This week")} disabled={!!busy}>{busy === "pdf" ? "Exporting…" : "PDF"}</Btn>
+          <Btn variant="soft" size="sm" onClick={() => exportExcel(`period=${exportScope}`, exportScope, exportScope === "monthly" ? "This month" : "This week")} disabled={!!busy}>{busy === "xlsx" ? "Exporting…" : "Excel"}</Btn>
+          <Btn variant="soft" size="sm" onClick={() => exportCsv(`period=${exportScope}`, exportScope, exportScope === "monthly" ? "This month" : "This week")} disabled={!!busy}>{busy === "csv" ? "Exporting…" : "CSV"}</Btn>
         </div>
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
