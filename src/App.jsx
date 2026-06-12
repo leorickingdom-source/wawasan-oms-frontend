@@ -2543,64 +2543,47 @@ function StaffReport({ period, from, to, staffId }) {
   );
 }
 
-// Per person-in-charge, split by track: Production PICs and Packing PICs each get
-// their own table (a Lead can appear in both). Tap a row → the StaffDetail drill-down.
-function PicReport({ period, from, to, staffId }) {
+// One track's person-in-charge table (Production or Packing), shown inside that
+// department's report tab. Open = that track's live load; Overdue / On-hold / Completed
+// are person-wide. Tap a row → the StaffDetail individual drill-down.
+function PicTrackTable({ track, period, from, to }) {
   const [raw, setRaw] = useState(null);
   const [openId, setOpenId] = useState(null);
   useEffect(() => { setRaw(null); api("GET", `/reports/pic?${reportQuery(period, from, to)}`).then((d) => setRaw(d.pics || [])).catch(() => setRaw([])); }, [period, from, to]);
-  const all = raw == null ? null : (staffId ? raw.filter((p) => p.id === staffId) : raw);
-  function exportCsv() {
-    const rows = [["Person in charge", "Role", "Open now", "Production", "Packing", "Overdue", "On hold", "Completed (period)"]];
-    for (const p of all) rows.push([p.name, ROLE_LABELS[p.role] || p.role, p.active, p.active_prod, p.active_pack, p.overdue, p.on_hold, p.completed]);
-    downloadCsv(`pic-report-${period}.csv`, rows);
-  }
-  if (!all) return <Loading label="Loading people…" />;
-  const prod = all.filter((p) => ["production_lead", "production_staff"].includes(p.role) || p.active_prod > 0);
-  const pack = all.filter((p) => ["packing_staff", "production_lead"].includes(p.role) || p.active_pack > 0);
-  if (prod.length === 0 && pack.length === 0) return <Empty label="No one is in charge of orders yet." />;
-
-  const section = (title, color, list, trackKey) => (
-    <div style={{ marginBottom: 22 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+  if (!raw) return null;
+  const isProd = track === "prod";
+  const roles = isProd ? ["production_lead", "production_staff"] : ["packing_staff", "production_lead"];
+  const openOf = (p) => (isProd ? p.active_prod : p.active_pack) || 0;
+  const list = raw.filter((p) => roles.includes(p.role) || openOf(p) > 0);
+  if (list.length === 0) return null;
+  const color = isProd ? C.production : C.packing;
+  const title = isProd ? "Production" : "Packing";
+  return (
+    <Card style={{ marginTop: 18 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
         <span style={{ width: 9, height: 9, borderRadius: "50%", background: color, display: "inline-block" }} />
         <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, margin: 0 }}>{title} · person in charge</h3>
-        <span style={{ fontSize: 12, color: C.text3 }}>{list.length} {list.length === 1 ? "person" : "people"}</span>
+        <span style={{ fontSize: 12, color: C.text3 }}>{list.length} {list.length === 1 ? "person" : "people"} · tap for detail</span>
       </div>
-      {list.length === 0 ? <Empty label={`No ${title.toLowerCase()} PIC assigned.`} /> : (
-        <Card style={{ padding: 0, overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead><tr style={{ background: C.bg2 }}>{["Person", "Role", "Open now", "Overdue", "On hold", "Completed"].map((h, i) => <th key={h} style={{ textAlign: i > 1 ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}<th style={{ borderBottom: `1px solid ${C.border}` }} /></tr></thead>
-            <tbody>
-              {list.map((p) => (
-                <tr key={p.id} onClick={() => setOpenId(p.id)} title="View full detail" style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = C.surface2)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                  <td style={{ padding: "9px 14px", color: C.text }}><span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}><Avatar name={p.name} color={p.avatar_color} size={24} />{p.name}</span></td>
-                  <td style={{ padding: "9px 14px", color: C.text2 }}>{ROLE_LABELS[p.role] || p.role}</td>
-                  <td style={{ padding: "9px 14px", textAlign: "right", color: (trackKey === "prod" ? p.active_prod : p.active_pack) > 0 ? color : C.text3, fontWeight: 700 }}>{trackKey === "prod" ? p.active_prod : p.active_pack}</td>
-                  <td style={{ padding: "9px 14px", textAlign: "right", color: p.overdue > 0 ? C.danger : C.text3 }}>{p.overdue}</td>
-                  <td style={{ padding: "9px 14px", textAlign: "right", color: p.on_hold > 0 ? C.hold : C.text3 }}>{p.on_hold}</td>
-                  <td style={{ padding: "9px 14px", textAlign: "right", color: C.ready, fontWeight: 700 }}>{p.completed}</td>
-                  <td style={{ padding: "9px 14px", textAlign: "right", color: C.accent2, fontFamily: MONO }}>›</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      )}
-    </div>
-  );
-
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-        <span style={{ fontSize: 13, color: C.text3 }}>Open now is that track's live load · Overdue / On-hold / Completed are person-wide · tap a name for full detail</span>
-        <Btn variant="soft" size="sm" onClick={exportCsv}>Export PIC CSV</Btn>
-      </div>
-      {section("Production", C.production, prod, "prod")}
-      {section("Packing", C.packing, pack, "pack")}
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead><tr>{["Person", "Role", "Open now", "Overdue", "On hold", "Completed"].map((h, i) => <th key={h} style={{ textAlign: i > 1 ? "right" : "left", padding: "7px 8px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}<th style={{ borderBottom: `1px solid ${C.border}` }} /></tr></thead>
+        <tbody>
+          {list.map((p) => (
+            <tr key={p.id} onClick={() => setOpenId(p.id)} title="View full detail" style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = C.surface2)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+              <td style={{ padding: "8px 8px", color: C.text }}><span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}><Avatar name={p.name} color={p.avatar_color} size={24} />{p.name}</span></td>
+              <td style={{ padding: "8px 8px", color: C.text2 }}>{ROLE_LABELS[p.role] || p.role}</td>
+              <td style={{ padding: "8px 8px", textAlign: "right", color: openOf(p) > 0 ? color : C.text3, fontWeight: 700 }}>{openOf(p)}</td>
+              <td style={{ padding: "8px 8px", textAlign: "right", color: p.overdue > 0 ? C.danger : C.text3 }}>{p.overdue}</td>
+              <td style={{ padding: "8px 8px", textAlign: "right", color: p.on_hold > 0 ? C.hold : C.text3 }}>{p.on_hold}</td>
+              <td style={{ padding: "8px 8px", textAlign: "right", color: C.ready, fontWeight: 700 }}>{p.completed}</td>
+              <td style={{ padding: "8px 8px", textAlign: "right", color: C.accent2, fontFamily: MONO }}>›</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
       {openId && <StaffDetail staffId={openId} period={period} from={from} to={to} onClose={() => setOpenId(null)} />}
-    </div>
+    </Card>
   );
 }
 
@@ -2980,10 +2963,12 @@ function ReportArchive({ onDownload, busy }) {
 function Reports({ user }) {
   // "pic" = live workload per person in charge (operational, per-track) — always on.
   // "staff" = per-person productivity ranking — stays behind STAFF_RANKING_ENABLED.
+  // Person-in-charge is shown per-track INSIDE the Production and Packing tabs
+  // (PicTrackTable below the metrics), not as its own tab. "staff" ranking stays parked.
   const tabsForRole = user.role === "production_lead"
-    ? ["production", "packing", "efficiency", "pic", ...(STAFF_RANKING_ENABLED ? ["staff"] : []), ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : [])]
-    : ["production", "packing", "delivery", "efficiency", "mistakes", ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : []), "trend", "orders", "pic", ...(STAFF_RANKING_ENABLED ? ["staff"] : []), "archive"];
-  const CUSTOM = ["orders", "staff", "pic", "efficiency", "mistakes", "scorecard", "trend", "archive"]; // tabs with their own component (no metric cards/trend)
+    ? ["production", "packing", "efficiency", ...(STAFF_RANKING_ENABLED ? ["staff"] : []), ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : [])]
+    : ["production", "packing", "delivery", "efficiency", "mistakes", ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : []), "trend", "orders", ...(STAFF_RANKING_ENABLED ? ["staff"] : []), "archive"];
+  const CUSTOM = ["orders", "staff", "efficiency", "mistakes", "scorecard", "trend", "archive"]; // tabs with their own component (no metric cards/trend)
   const TAB_LABEL = { staff: "Staff", pic: "Person in charge", efficiency: "Efficiency", mistakes: "Mistakes", scorecard: "Scoreboard", trend: "Trend", archive: "Archive" };
   const PERIOD_LABEL = { daily: "Today", weekly: "This week", monthly: "This month" };
   const TAB_DESC = {
@@ -3328,7 +3313,6 @@ function Reports({ user }) {
       </div>
       {tab === "orders" && <OrdersReport period={period} from={from} to={to} />}
       {tab === "staff" && <StaffReport period={period} from={from} to={to} staffId={staffId} />}
-      {tab === "pic" && <PicReport period={period} from={from} to={to} staffId={staffId} />}
       {tab === "efficiency" && <EfficiencyReport period={period} from={from} to={to} />}
       {tab === "mistakes" && <MistakesReport period={period} from={from} to={to} />}
       {tab === "scorecard" && <ScoreboardReport period={period} />}
@@ -3345,6 +3329,8 @@ function Reports({ user }) {
       {!CUSTOM.includes(tab) && trend.length > 0 && (
         <TrendChart data={trend} kind={tab === "delivery" ? "line" : "bar"} color={tab === "delivery" ? C.ready : C.accent} label={tab === "packing" ? "Packed" : tab === "delivery" ? "Delivered" : "Completed"} />
       )}
+      {tab === "production" && <PicTrackTable track="prod" period={period} from={from} to={to} />}
+      {tab === "packing" && <PicTrackTable track="pack" period={period} from={from} to={to} />}
       {tab === "delivery" && (d.by_channel || []).length > 0 && (() => {
         const CH = { in_house: { label: "🚚 In-house van", color: C.order }, shopee: { label: "📦 Shopee (SPX)", color: "#ee4d2d" }, lazada: { label: "📦 Lazada (LEX)", color: "#a78bfa" } };
         return (
