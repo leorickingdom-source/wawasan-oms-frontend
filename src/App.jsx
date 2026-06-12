@@ -3979,12 +3979,13 @@ function Remarks({ user }) {
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [allArchive, setAllArchive] = useState(false);
-  const [archView, setArchView] = useState("weekly"); // weekly | monthly grouping of the archive
+  const [tab, setTab] = useState("weekly"); // weekly | monthly top-level tab
+  const [archOpen, setArchOpen] = useState(false); // archive collapsed by default
   const [monthly, setMonthly] = useState([]); // Boss-authored month summaries
   const [monthContent, setMonthContent] = useState("");
   const [mBusy, setMBusy] = useState(false);
   const [mSaved, setMSaved] = useState(false);
-  const canPost = ["super_admin", "production_lead"].includes(user.role);
+  const canPost = ["production_lead"].includes(user.role); // only the Production Head types the weekly remark
   const canEditMonthly = user.role === "super_admin"; // Boss writes the monthly summary
   const curMonthKey = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; })();
   const monthKeyOf = (dateStr) => { const d = new Date(dateStr); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
@@ -4034,90 +4035,114 @@ function Remarks({ user }) {
     };
     for (const r of list) m[ensure(r.week_start)].weeks.push(r);
     for (const mr of monthly) m[ensure(mr.month_start)].summary = mr;
-    if (canEditMonthly && !m[curMonthKey]) ensure(`${curMonthKey}-01`);
     return Object.keys(m).sort().reverse().map((k) => m[k]);
   })();
+  const curMonthLabel = new Date().toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const curMonthSummary = monthly.find((m) => monthKeyOf(m.month_start) === curMonthKey) || null;
+  const showMonthlyTab = ["super_admin", "admin"].includes(user.role); // Monthly tab hidden from production_lead
+  const activeTab = showMonthlyTab ? tab : "weekly";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 920 }}>
-      <Card style={{ padding: "20px 22px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, width: "fit-content" }}>
+        <button onClick={() => setTab("weekly")} style={{ background: activeTab === "weekly" ? C.surface2 : "transparent", border: "none", borderRadius: 7, padding: "8px 18px", cursor: "pointer", fontSize: 13.5, fontWeight: activeTab === "weekly" ? 800 : 600, color: activeTab === "weekly" ? C.accent : C.text2 }}>Weekly</button>
+        {showMonthlyTab && <button onClick={() => setTab("monthly")} style={{ background: activeTab === "monthly" ? C.surface2 : "transparent", border: "none", borderRadius: 7, padding: "8px 18px", cursor: "pointer", fontSize: 13.5, fontWeight: activeTab === "monthly" ? 800 : 600, color: activeTab === "monthly" ? C.accent : C.text2 }}>Monthly</button>}
+      </div>
+
+      {activeTab === "weekly" ? (<>
+        <Card style={{ padding: "20px 22px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
             <Icon name="message" size={20} color={C.accent} />
             <span style={{ fontSize: 16, fontWeight: 800, color: C.text }}>This week — {weekLabel}</span>
           </div>
-        </div>
-        {canPost ? (
-          <>
-            <textarea value={content} onChange={(e) => { setContent(e.target.value); setSaved(false); }} rows={4}
-              placeholder="Production notes for this week…"
-              style={{ width: "100%", padding: "12px 14px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 10, color: C.text, fontSize: 14, resize: "vertical", lineHeight: 1.5 }} />
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
-              <Btn onClick={save} disabled={busy || !content.trim()}><Icon name="check" size={15} /> {busy ? "Saving…" : "Save remark"}</Btn>
-              {saved && <span style={{ color: C.ready, fontSize: 13 }}>Saved ✓</span>}
-              {cur && <span style={{ color: C.text3, fontSize: 12.5 }}>Last updated {fmtDateTime(cur.updated_at || cur.created_at)} · {cur.author_name}</span>}
-            </div>
-          </>
-        ) : (
-          <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{cur ? cur.content : <span style={{ color: C.text3 }}>No remark yet this week.</span>}</div>
-        )}
-      </Card>
-
-      <Card style={{ padding: "20px 22px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-          <h3 style={{ fontSize: 16, fontWeight: 800, color: C.text, margin: 0 }}>Archive</h3>
-          <div style={{ display: "flex", gap: 3, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 9, padding: 3 }}>
-            {[["weekly", "Weekly"], ["monthly", "Monthly"]].map(([k, lbl]) => (
-              <button key={k} onClick={() => setArchView(k)} style={{ background: archView === k ? C.surface2 : "transparent", border: "none", borderRadius: 7, padding: "6px 12px", cursor: "pointer", fontSize: 12.5, fontWeight: archView === k ? 700 : 500, color: archView === k ? C.text : C.text2 }}>{lbl}</button>
-            ))}
-          </div>
-        </div>
-        {archView === "monthly" ? (
-          monthGroups.length === 0 ? <Empty label="No remarks yet." /> : monthGroups.map((g) => (
-            <div key={g.key} style={{ marginBottom: 22 }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: C.accent, textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 10 }}>{g.label}{g.weeks.length ? ` · ${g.weeks.length} week${g.weeks.length === 1 ? "" : "s"}` : ""}</div>
-              {canEditMonthly && g.key === curMonthKey ? (
-                <div style={{ background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: C.text3, marginBottom: 8 }}>Monthly summary (Boss)</div>
-                  <textarea value={monthContent} onChange={(e) => { setMonthContent(e.target.value); setMSaved(false); }} rows={3} placeholder="Boss summary for this month…" style={{ width: "100%", padding: "10px 12px", background: C.bg2, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 14, resize: "vertical", lineHeight: 1.5 }} />
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10 }}>
-                    <Btn size="sm" onClick={saveMonth} disabled={mBusy || !monthContent.trim()}><Icon name="check" size={14} /> {mBusy ? "Saving…" : "Save summary"}</Btn>
-                    {mSaved && <span style={{ color: C.ready, fontSize: 13 }}>Saved ✓</span>}
-                  </div>
-                </div>
-              ) : g.summary ? (
-                <div style={{ background: C.accent + "12", border: `1px solid ${C.accent}33`, borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: C.accent, marginBottom: 6 }}>Monthly summary · {g.summary.author_name || "Boss"}</div>
-                  <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{g.summary.content}</div>
-                </div>
-              ) : null}
-              {g.weeks.map((r) => (
-                <div key={r.id} style={{ paddingBottom: 12, marginBottom: 12, borderBottom: `1px solid ${C.border}` }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+          {canPost ? (
+            <>
+              <textarea value={content} onChange={(e) => { setContent(e.target.value); setSaved(false); }} rows={4}
+                placeholder="Production notes for this week…"
+                style={{ width: "100%", padding: "12px 14px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 10, color: C.text, fontSize: 14, resize: "vertical", lineHeight: 1.5 }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+                <Btn onClick={save} disabled={busy || !content.trim()}><Icon name="check" size={15} /> {busy ? "Saving…" : "Save remark"}</Btn>
+                {saved && <span style={{ color: C.ready, fontSize: 13 }}>Saved ✓</span>}
+                {cur && <span style={{ color: C.text3, fontSize: 12.5 }}>Last updated {fmtDateTime(cur.updated_at || cur.created_at)} · {cur.author_name}</span>}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{cur ? cur.content : <span style={{ color: C.text3 }}>No remark yet this week.</span>}</div>
+          )}
+        </Card>
+        <Card style={{ padding: "20px 22px" }}>
+          <button onClick={() => setArchOpen((v) => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: 12, background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 800, color: C.text, margin: 0 }}>Past weeks · {archive.length}</h3>
+            <span style={{ color: C.text3, fontSize: 14 }}>{archOpen ? "▲" : "▼"}</span>
+          </button>
+          {archOpen && (
+            <div style={{ marginTop: 16 }}>
+              {archive.length === 0 && <Empty label="No archived remarks yet." />}
+              {shownArchive.map((r) => (
+                <div key={r.id} style={{ paddingBottom: 16, marginBottom: 16, borderBottom: `1px solid ${C.border}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
                     <Pill color={C.accent} style={{ fontSize: 12, padding: "3px 11px" }}>{isoWeekLabel(r.week_start)}</Pill>
-                    <span style={{ fontFamily: MONO, fontSize: 12, color: C.text3 }}>{r.author_name}</span>
+                    <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.text3 }}>{fmtDateTime(r.created_at)} · {r.author_name}</span>
                   </div>
                   <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{r.content}</div>
                 </div>
               ))}
+              {archive.length > 3 && <Btn variant="ghost" size="sm" onClick={() => setAllArchive((v) => !v)}>{allArchive ? "Show less ▲" : `Show all ${archive.length} ▼`}</Btn>}
             </div>
-          ))
-        ) : (
-          <>
-            {archive.length === 0 && <Empty label="No archived remarks yet." />}
-            {shownArchive.map((r) => (
-              <div key={r.id} style={{ paddingBottom: 16, marginBottom: 16, borderBottom: `1px solid ${C.border}` }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
-                  <Pill color={C.accent} style={{ fontSize: 12, padding: "3px 11px" }}>{isoWeekLabel(r.week_start)}</Pill>
-                  <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.text3 }}>{fmtDateTime(r.created_at)} · {r.author_name}</span>
-                </div>
-                <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{r.content}</div>
+          )}
+        </Card>
+      </>) : (<>
+        <Card style={{ padding: "20px 22px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <Icon name="calendar" size={20} color={C.accent} />
+            <span style={{ fontSize: 16, fontWeight: 800, color: C.text }}>This month — {curMonthLabel}</span>
+          </div>
+          {canEditMonthly ? (
+            <>
+              <textarea value={monthContent} onChange={(e) => { setMonthContent(e.target.value); setMSaved(false); }} rows={3}
+                placeholder="Boss summary for this month…"
+                style={{ width: "100%", padding: "12px 14px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 10, color: C.text, fontSize: 14, resize: "vertical", lineHeight: 1.5 }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
+                <Btn onClick={saveMonth} disabled={mBusy || !monthContent.trim()}><Icon name="check" size={15} /> {mBusy ? "Saving…" : "Save summary"}</Btn>
+                {mSaved && <span style={{ color: C.ready, fontSize: 13 }}>Saved ✓</span>}
+                {curMonthSummary && <span style={{ color: C.text3, fontSize: 12.5 }}>Last updated {fmtDateTime(curMonthSummary.updated_at || curMonthSummary.created_at)} · {curMonthSummary.author_name}</span>}
               </div>
-            ))}
-            {archive.length > 3 && <Btn variant="ghost" size="sm" onClick={() => setAllArchive((v) => !v)}>{allArchive ? "Show less ▲" : `Show all ${archive.length} ▼`}</Btn>}
-          </>
-        )}
-      </Card>
+            </>
+          ) : (
+            <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{curMonthSummary ? curMonthSummary.content : <span style={{ color: C.text3 }}>No summary yet this month.</span>}</div>
+          )}
+        </Card>
+        <Card style={{ padding: "20px 22px" }}>
+          <button onClick={() => setArchOpen((v) => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", gap: 12, background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 800, color: C.text, margin: 0 }}>Past months · {monthGroups.length}</h3>
+            <span style={{ color: C.text3, fontSize: 14 }}>{archOpen ? "▲" : "▼"}</span>
+          </button>
+          {archOpen && (
+            <div style={{ marginTop: 16 }}>
+              {monthGroups.length === 0 ? <Empty label="No remarks yet." /> : monthGroups.map((g) => (
+                <div key={g.key} style={{ marginBottom: 22 }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: C.accent, textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 10 }}>{g.label}{g.weeks.length ? ` · ${g.weeks.length} week${g.weeks.length === 1 ? "" : "s"}` : ""}</div>
+                  {g.summary && (
+                    <div style={{ background: C.accent + "12", border: `1px solid ${C.accent}33`, borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: C.accent, marginBottom: 6 }}>Monthly summary · {g.summary.author_name || "Boss"}</div>
+                      <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{g.summary.content}</div>
+                    </div>
+                  )}
+                  {g.weeks.map((r) => (
+                    <div key={r.id} style={{ paddingBottom: 12, marginBottom: 12, borderBottom: `1px solid ${C.border}` }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+                        <Pill color={C.accent} style={{ fontSize: 12, padding: "3px 11px" }}>{isoWeekLabel(r.week_start)}</Pill>
+                        <span style={{ fontFamily: MONO, fontSize: 12, color: C.text3 }}>{r.author_name}</span>
+                      </div>
+                      <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{r.content}</div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </>)}
     </div>
   );
 }
