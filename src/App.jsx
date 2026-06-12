@@ -1291,28 +1291,30 @@ function FloorDisplay({ onExit }) {
   const spotAllDone = spot && (spot.stage === "production" || spot.stage === "packing") && (spot.item_count || 0) > 0 && (spot.made_count || 0) >= spot.item_count;
   const spotUrgentDone = spotAllDone && spot.priority === "urgent";
   const wallScale = Math.min(vp.w / 1920, vp.h / 1080);
-  // Idle chrome: like the Exit button, the interactive controls (view toggle, stage
-  // filters, This week) fade out after 5s of no activity so the wall stays clean — a
-  // mouse move or touch brings them back.
-  const ctlFade = { opacity: chrome ? 1 : 0, pointerEvents: chrome ? "auto" : "none", transition: "opacity .45s" };
+  // Idle chrome: the interactive controls (Exit, view toggle, stage filters, This
+  // week) UNMOUNT after 5s of no activity — not just fade — so the header collapses
+  // and the board reflows to fill the freed space. A mouse move or touch brings them
+  // back.
 
   return (
     <div style={{ position: "fixed", inset: 0, background: C.bg, zIndex: 2000, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ width: 1920, height: 1080, flexShrink: 0, transform: `scale(${wallScale})`, transformOrigin: "center center", display: "flex", flexDirection: "column", padding: 22, boxSizing: "border-box" }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", marginBottom: 18 }}>
-        <Btn variant="primary" onClick={onExit} title="Exit full-screen (or press Esc)"
-          style={{ padding: "13px 24px", fontSize: 16, fontWeight: 800, opacity: chrome ? 1 : 0, pointerEvents: chrome ? "auto" : "none", transition: "opacity .45s" }}>
-          <Icon name="x" size={19} color="#231304" /> Exit (Esc)
-        </Btn>
+        {chrome && (
+          <Btn variant="primary" onClick={onExit} title="Exit full-screen (or press Esc)"
+            style={{ padding: "13px 24px", fontSize: 16, fontWeight: 800 }}>
+            <Icon name="x" size={19} color="#231304" /> Exit (Esc)
+          </Btn>
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <Logo size={46} />
           <div style={{ fontSize: 36, fontWeight: 800, letterSpacing: 0.5 }}>
             <span style={{ color: C.text }}>WAWASAN LTS </span><span style={{ color: C.accent }}>{view === "scoreboard" ? "SCOREBOARD" : "PRODUCTION FLOOR"}</span>
           </div>
         </div>
-        {REWARD_SYSTEM_ENABLED && (
-          <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, ...ctlFade }}>
+        {REWARD_SYSTEM_ENABLED && chrome && (
+          <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4 }}>
             {[["board", "Board"], ["scoreboard", "Scoreboard"]].map(([k, lbl]) => {
               const on = view === k;
               return <button key={k} onClick={() => setView(k)} style={{ background: on ? C.surface2 : "transparent", border: "none", borderRadius: 7, padding: "9px 16px", cursor: "pointer", fontSize: 14, fontWeight: on ? 800 : 600, color: on ? C.accent : C.text2 }}>{lbl}</button>;
@@ -1321,7 +1323,8 @@ function FloorDisplay({ onExit }) {
         )}
         <StatCard label="Completed today" value={stats.completed_today} color={C.green} />
         <StatCard label="Active orders" value={stats.active} color={C.accent} />
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginLeft: 6, ...ctlFade }}>
+        {chrome && (<>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginLeft: 6 }}>
           {["all", ...BOARD_STAGES].map((s) => {
             const active = filter === s;
             const color = s === "all" ? C.accent : STAGES[s].color;
@@ -1331,9 +1334,10 @@ function FloorDisplay({ onExit }) {
             );
           })}
         </div>
-        <button onClick={() => setWeekOnly((w) => !w)} style={{ padding: "9px 16px", borderRadius: 9, border: `1px solid ${weekOnly ? C.accent + "66" : C.border}`, background: weekOnly ? C.accent + "22" : "transparent", color: weekOnly ? C.accent : C.text2, fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8, ...ctlFade }}>
+        <button onClick={() => setWeekOnly((w) => !w)} style={{ padding: "9px 16px", borderRadius: 9, border: `1px solid ${weekOnly ? C.accent + "66" : C.border}`, background: weekOnly ? C.accent + "22" : "transparent", color: weekOnly ? C.accent : C.text2, fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8 }}>
           <Icon name="calendar" size={15} color={weekOnly ? C.accent : C.text3} /> This week
         </button>
+        </>)}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
           <span style={{ fontFamily: MONO, fontSize: 92, fontWeight: 800, color: C.text, letterSpacing: 3 }}>{clock}</span>
         </div>
@@ -2960,10 +2964,19 @@ function Reports({ user }) {
     const keys = tabsForRole.filter((k) => metricDefs[k]);
     const parts = await Promise.all(keys.map((k) => api("GET", `/reports/${k}?${q}`).then((dd) => [k, dd]).catch(() => [k, {}])));
     const data = Object.fromEntries(parts);
-    if (tabsForRole.includes("staff")) data._staff = await api("GET", `/reports/staff?${q}`).then((dd) => dd.staff || []).catch(() => []);
-    if (tabsForRole.includes("pic")) data._pics = await api("GET", `/reports/pic?${q}`).then((dd) => dd.pics || []).catch(() => []);
+    // Boss always gets individual performance in the export, even though the on-screen
+    // Staff/PIC tabs are parked behind STAFF_RANKING_ENABLED.
+    if (tabsForRole.includes("staff") || user.role === "super_admin") data._staff = await api("GET", `/reports/staff?${q}`).then((dd) => dd.staff || []).catch(() => []);
+    if (tabsForRole.includes("pic") || user.role === "super_admin") data._pics = await api("GET", `/reports/pic?${q}`).then((dd) => dd.pics || []).catch(() => []);
+    // The non-metric tabs are part of the on-screen report too, so the export must carry them.
+    if (tabsForRole.includes("orders")) data._orders = await api("GET", `/reports/orders?${q}`).then((dd) => dd.orders || []).catch(() => []);
+    if (tabsForRole.includes("efficiency")) data._eff = await api("GET", `/reports/efficiency?${q}`).then((dd) => dd).catch(() => null);
+    if (tabsForRole.includes("mistakes")) data._mistakes = await api("GET", `/reports/mistakes?${q}`).then((dd) => dd).catch(() => null);
     return data;
   }
+  // Per-order row shared by every export format.
+  const orderRow = (o) => [o.invoice_number, o.customer_name || "", (STAGE_LABELS[o.stage] || {}).label || o.stage, o.done_count, o.item_count, o.pct, o.days_in_stage, o.cycle_hours, o.required_delivery_date, o.delivered ? (o.on_time ? "Delivered on-time" : "Delivered late") : (o.late ? "Late" : "In progress"), o.pic_name || ""];
+  const ORDER_HEAD = ["Invoice", "Customer", "Stage", "STKs done", "STKs total", "% done", "Days in stage", "Cycle (h)", "Due", "Status", "PIC"];
   async function exportCsv() {
     setBusy("csv");
     try {
@@ -2976,8 +2989,21 @@ function Reports({ user }) {
         if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
         rows.push([]);
       }
-      if (data._staff) rows.push(["Staff productivity"], ["Name", "Role", "Stages completed", "Items done", "Reworks"], ...data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks]), []);
+      if (data._staff) rows.push(["Individual performance"], ["Name", "Role", "Stages completed", "Items done", "Reworks"], ...data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks]), []);
       if (data._pics) rows.push(["Person in charge"], ["Name", "Role", "Open now", "Overdue", "On hold", "Completed"], ...data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed]), []);
+      if (data._orders) rows.push(["Orders — per-order progress"], ORDER_HEAD, ...data._orders.map(orderRow), []);
+      if (data._eff) {
+        const e = data._eff;
+        rows.push(["Efficiency"], ["Avg cycle (order→delivered, h)", e.avg_cycle_hours ?? "—"], ["On-time delivery %", e.on_time_rate ?? "—"], ["Bottleneck stage", e.bottleneck ? e.bottleneck.stage : "—"], []);
+        if ((e.stage_dwell || []).length) rows.push(["Avg time in stage (h)"], ["Stage", "Avg hours", "Orders"], ...e.stage_dwell.map((s) => [s.stage, s.avg_hours, s.n]), []);
+        if ((e.aging || []).length) rows.push(["Aging — oldest open orders"], ["Invoice", "Stage", "Days open", "Days late"], ...e.aging.map((o) => [o.invoice_number, o.stage, o.days_open, o.days_late]), []);
+      }
+      if (data._mistakes) {
+        const m = data._mistakes;
+        rows.push(["Mistakes"], ["Amendments", m.amendments ? m.amendments.count : 0], ["Late deliveries", m.late ? m.late.count : 0], ["Failed deliveries", m.failed_count], ["Cancelled", m.cancelled_count], ["On hold now", m.on_hold_count], ["Waiting stock", m.waiting_stock_count], []);
+        if (m.amendments && m.amendments.list.length) rows.push(["Amendments — orders corrected"], ["Invoice", "By", "Change", "When"], ...m.amendments.list.map((a) => [a.invoice_number || "", a.user_name || "", a.details || "edited", a.created_at]), []);
+        if (m.late && m.late.list.length) rows.push(["Late deliveries"], ["Invoice", "Days late", "Driver"], ...m.late.list.map((o) => [o.invoice_number, o.days_late, o.driver || ""]), []);
+      }
       downloadCsv(`reports-${fileTag}.csv`, rows);
     } finally { setBusy(""); }
   }
@@ -2993,8 +3019,19 @@ function Reports({ user }) {
         if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), META[key]);
       }
-      if (data._staff) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Name", "Role", "Stages completed", "Items done", "Reworks"], ...data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks])]), "Staff");
+      if (data._staff) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Name", "Role", "Stages completed", "Items done", "Reworks"], ...data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks])]), "Individual");
       if (data._pics) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Name", "Role", "Open now", "Overdue", "On hold", "Completed"], ...data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed])]), "PIC");
+      if (data._orders) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([ORDER_HEAD, ...data._orders.map(orderRow)]), "Orders");
+      if (data._eff) {
+        const e = data._eff;
+        const rows = [["Avg cycle (h)", e.avg_cycle_hours ?? ""], ["On-time delivery %", e.on_time_rate ?? ""], ["Bottleneck stage", e.bottleneck ? e.bottleneck.stage : ""], [], ["Stage", "Avg hours", "Orders"], ...(e.stage_dwell || []).map((s) => [s.stage, s.avg_hours, s.n]), [], ["Aging invoice", "Stage", "Days open", "Days late"], ...(e.aging || []).map((o) => [o.invoice_number, o.stage, o.days_open, o.days_late])];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "Efficiency");
+      }
+      if (data._mistakes) {
+        const m = data._mistakes;
+        const rows = [["Amendments", m.amendments ? m.amendments.count : 0], ["Late deliveries", m.late ? m.late.count : 0], ["Failed", m.failed_count], ["Cancelled", m.cancelled_count], ["On hold now", m.on_hold_count], ["Waiting stock", m.waiting_stock_count], [], ["Amendment invoice", "By", "Change", "When"], ...((m.amendments && m.amendments.list) || []).map((a) => [a.invoice_number || "", a.user_name || "", a.details || "edited", a.created_at]), [], ["Late invoice", "Days late", "Driver"], ...((m.late && m.late.list) || []).map((o) => [o.invoice_number, o.days_late, o.driver || ""])];
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "Mistakes");
+      }
       XLSX.writeFile(wb, `reports-${fileTag}.xlsx`);
     } finally { setBusy(""); }
   }
@@ -3023,7 +3060,7 @@ function Reports({ user }) {
       doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(...G.text);
       doc.text("WAWASAN LTS TRADING SDN BHD - Reports", M, y + 5);
       doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(...G.text3);
-      doc.text(`Department performance  -  ${ascii(rangeLabel)}`, M, y + 11);
+      doc.text(`Full operations report  -  ${ascii(rangeLabel)}`, M, y + 11);
       y += 20;
 
       const heading = (t) => {
@@ -3101,8 +3138,26 @@ function Reports({ user }) {
         trendChart(dd.daily_trend, key === "delivery" ? "line" : "bar", key === "delivery" ? G.green : G.accent);
         if ((dd.by_delivery_man || []).length) darkTable(["Driver", "Deliveries", "On time"], dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
       }
-      if (data._staff && data._staff.length) { heading("Staff productivity"); darkTable(["Name", "Role", "Done", "Items", "Reworks"], data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks])); }
+      if (data._staff && data._staff.length) { heading("Individual performance"); darkTable(["Name", "Role", "Done", "Items", "Reworks"], data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks])); }
       if (data._pics && data._pics.length) { heading("Person in charge"); darkTable(["Name", "Role", "Open", "Overdue", "On hold", "Completed"], data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed])); }
+      if (data._orders && data._orders.length) {
+        heading("Orders - per-order progress");
+        darkTable(["Invoice", "Customer", "Stage", "STKs", "%", "Days", "Status", "PIC"], data._orders.map((o) => [o.invoice_number, o.customer_name || "", (STAGE_LABELS[o.stage] || {}).label || o.stage, `${o.done_count}/${o.item_count}`, o.pct, o.days_in_stage, o.delivered ? (o.on_time ? "On-time" : "Late") : (o.late ? "Late" : "In progress"), o.pic_name || ""]));
+      }
+      if (data._eff) {
+        const e = data._eff;
+        heading("Efficiency");
+        kpiCards([["Avg cycle order->delivered", e.avg_cycle_hours == null ? "-" : (Number(e.avg_cycle_hours) >= 48 ? Math.round(Number(e.avg_cycle_hours) / 24) + "d" : Number(e.avg_cycle_hours).toFixed(1) + "h")], ["On-time delivery", e.on_time_rate == null ? "-" : e.on_time_rate + "%"], ["Bottleneck stage", e.bottleneck ? e.bottleneck.stage : "-"]]);
+        if ((e.stage_dwell || []).length) darkTable(["Stage", "Avg hours", "Orders"], e.stage_dwell.map((s) => [s.stage, Number(s.avg_hours).toFixed(1), s.n]));
+        if ((e.aging || []).length) darkTable(["Aging invoice", "Stage", "Days open", "Days late"], e.aging.map((o) => [o.invoice_number, o.stage, o.days_open, o.days_late]));
+      }
+      if (data._mistakes) {
+        const m = data._mistakes;
+        heading("Mistakes");
+        kpiCards([["Amendments", m.amendments ? m.amendments.count : 0], ["Late deliveries", m.late ? m.late.count : 0], ["Failed", m.failed_count], ["Cancelled", m.cancelled_count], ["On hold now", m.on_hold_count], ["Waiting stock", m.waiting_stock_count]]);
+        if (m.amendments && m.amendments.list.length) darkTable(["Invoice", "By", "Change", "When"], m.amendments.list.map((a) => [a.invoice_number || "", a.user_name || "", a.details || "edited", a.created_at ? new Date(a.created_at).toLocaleDateString("en-GB") : ""]));
+        if (m.late && m.late.list.length) darkTable(["Invoice", "Days late", "Driver"], m.late.list.map((o) => [o.invoice_number, o.days_late, o.driver || ""]));
+      }
       doc.save(`reports-${fileTag}.pdf`);
     } catch (e) {
       alert(`PDF export failed: ${e && e.message ? e.message : e}`);
@@ -4020,8 +4075,6 @@ function Users({ user }) {
   const [list, setList] = useState(null);
   const [show, setShow] = useState(false);
   const [f, setF] = useState({ name: "", email: "", role: "production_staff", password: "" });
-  const [resetFor, setResetFor] = useState(null);
-  const [newPw, setNewPw] = useState("");
   const [q, setQ] = useState("");
   const [roleF, setRoleF] = useState("");
   const [showDisabled, setShowDisabled] = useState(false); // disabled staff collapsed by default
@@ -4030,10 +4083,6 @@ function Users({ user }) {
   useEffect(() => { load(); }, []);
   async function create() { try { await api("POST", "/users", f); setShow(false); setF({ name: "", email: "", role: "production_staff", password: "" }); load(); } catch (e) { alert(e.message); } }
   async function toggle(u) { try { await api("PATCH", `/users/${u.id}`, { is_active: !u.is_active }); load(); } catch (e) { alert(e.message); } }
-  async function resetPw() {
-    if (newPw.length < 8) { alert("New password must be at least 8 characters."); return; }
-    try { await api("PATCH", `/users/${resetFor.id}`, { password: newPw }); setResetFor(null); setNewPw(""); alert("Password reset."); } catch (e) { alert(e.message); }
-  }
   async function delUser(u) {
     if (!confirm(`Permanently delete ${u.name}? This cannot be undone.`)) return;
     try { await api("DELETE", `/users/${u.id}`); load(); } catch (e) { alert(e.message); }
@@ -4064,7 +4113,6 @@ function Users({ user }) {
       <td style={{ padding: "11px 16px" }}><Pill color={u.is_active ? C.ready : C.danger}>{u.is_active ? "Active" : "Disabled"}</Pill></td>
       <td style={{ padding: "11px 16px" }}>
         <div style={{ display: "flex", gap: 6 }}>
-          {canManage(u) && <Btn size="sm" variant="ghost" onClick={() => { setResetFor(u); setNewPw(""); }}>Reset PW</Btn>}
           {u.id !== user.id && canManage(u) && <Btn size="sm" variant="ghost" onClick={() => toggle(u)}>{u.is_active ? "Disable" : "Enable"}</Btn>}
           {u.id !== user.id && canManage(u) && !u.is_active && <Btn size="sm" variant="danger" onClick={() => delUser(u)}>Delete</Btn>}
         </div>
@@ -4110,10 +4158,6 @@ function Users({ user }) {
         <Field label="Temporary password" type="password" name="new-password" autoComplete="new-password" value={f.password} onChange={(v) => setF((p) => ({ ...p, password: v }))} required />
         <p style={{ fontSize: 12, color: C.text3, margin: "-4px 0 10px" }}>The new staff member can change this after their first login.</p>
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}><Btn variant="ghost" onClick={() => setShow(false)}>Cancel</Btn><Btn onClick={create}>Create</Btn></div>
-      </Modal>
-      <Modal open={!!resetFor} onClose={() => setResetFor(null)} title={resetFor ? `Reset password — ${resetFor.name}` : "Reset password"} width={420}>
-        <Field label="New password (min 8 chars)" type="password" name="new-password" autoComplete="new-password" value={newPw} onChange={setNewPw} required />
-        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}><Btn variant="ghost" onClick={() => setResetFor(null)}>Cancel</Btn><Btn onClick={resetPw}>Set password</Btn></div>
       </Modal>
     </div>
   );
