@@ -2543,43 +2543,63 @@ function StaffReport({ period, from, to, staffId }) {
   );
 }
 
-// Per person-in-charge: live open workload + how much they completed this period.
+// Per person-in-charge, split by track: Production PICs and Packing PICs each get
+// their own table (a Lead can appear in both). Tap a row → the StaffDetail drill-down.
 function PicReport({ period, from, to, staffId }) {
   const [raw, setRaw] = useState(null);
+  const [openId, setOpenId] = useState(null);
   useEffect(() => { setRaw(null); api("GET", `/reports/pic?${reportQuery(period, from, to)}`).then((d) => setRaw(d.pics || [])).catch(() => setRaw([])); }, [period, from, to]);
-  const data = raw == null ? null : (staffId ? raw.filter((p) => p.id === staffId) : raw);
+  const all = raw == null ? null : (staffId ? raw.filter((p) => p.id === staffId) : raw);
   function exportCsv() {
     const rows = [["Person in charge", "Role", "Open now", "Production", "Packing", "Overdue", "On hold", "Completed (period)"]];
-    for (const p of data) rows.push([p.name, ROLE_LABELS[p.role] || p.role, p.active, p.active_prod, p.active_pack, p.overdue, p.on_hold, p.completed]);
+    for (const p of all) rows.push([p.name, ROLE_LABELS[p.role] || p.role, p.active, p.active_prod, p.active_pack, p.overdue, p.on_hold, p.completed]);
     downloadCsv(`pic-report-${period}.csv`, rows);
   }
-  if (!data) return <Loading label="Loading people…" />;
-  if (data.length === 0) return <Empty label="No one is in charge of orders yet." />;
+  if (!all) return <Loading label="Loading people…" />;
+  const prod = all.filter((p) => ["production_lead", "production_staff"].includes(p.role) || p.active_prod > 0);
+  const pack = all.filter((p) => ["packing_staff", "production_lead"].includes(p.role) || p.active_pack > 0);
+  if (prod.length === 0 && pack.length === 0) return <Empty label="No one is in charge of orders yet." />;
+
+  const section = (title, color, list, trackKey) => (
+    <div style={{ marginBottom: 22 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span style={{ width: 9, height: 9, borderRadius: "50%", background: color, display: "inline-block" }} />
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, margin: 0 }}>{title} · person in charge</h3>
+        <span style={{ fontSize: 12, color: C.text3 }}>{list.length} {list.length === 1 ? "person" : "people"}</span>
+      </div>
+      {list.length === 0 ? <Empty label={`No ${title.toLowerCase()} PIC assigned.`} /> : (
+        <Card style={{ padding: 0, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr style={{ background: C.bg2 }}>{["Person", "Role", "Open now", "Overdue", "On hold", "Completed"].map((h, i) => <th key={h} style={{ textAlign: i > 1 ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}<th style={{ borderBottom: `1px solid ${C.border}` }} /></tr></thead>
+            <tbody>
+              {list.map((p) => (
+                <tr key={p.id} onClick={() => setOpenId(p.id)} title="View full detail" style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = C.surface2)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                  <td style={{ padding: "9px 14px", color: C.text }}><span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}><Avatar name={p.name} color={p.avatar_color} size={24} />{p.name}</span></td>
+                  <td style={{ padding: "9px 14px", color: C.text2 }}>{ROLE_LABELS[p.role] || p.role}</td>
+                  <td style={{ padding: "9px 14px", textAlign: "right", color: (trackKey === "prod" ? p.active_prod : p.active_pack) > 0 ? color : C.text3, fontWeight: 700 }}>{trackKey === "prod" ? p.active_prod : p.active_pack}</td>
+                  <td style={{ padding: "9px 14px", textAlign: "right", color: p.overdue > 0 ? C.danger : C.text3 }}>{p.overdue}</td>
+                  <td style={{ padding: "9px 14px", textAlign: "right", color: p.on_hold > 0 ? C.hold : C.text3 }}>{p.on_hold}</td>
+                  <td style={{ padding: "9px 14px", textAlign: "right", color: C.ready, fontWeight: 700 }}>{p.completed}</td>
+                  <td style={{ padding: "9px 14px", textAlign: "right", color: C.accent2, fontFamily: MONO }}>›</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+    </div>
+  );
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-        <span style={{ fontSize: 13, color: C.text3 }}>Open now splits into Production / Packing (per-track PIC) · Overdue / On-hold live · Completed counts this period</span>
+        <span style={{ fontSize: 13, color: C.text3 }}>Open now is that track's live load · Overdue / On-hold / Completed are person-wide · tap a name for full detail</span>
         <Btn variant="soft" size="sm" onClick={exportCsv}>Export PIC CSV</Btn>
       </div>
-      <Card style={{ padding: 0, overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead><tr style={{ background: C.bg2 }}>{["Person in charge", "Role", "Open now", "Prod", "Pack", "Overdue", "On hold", "Completed"].map((h, i) => <th key={h} style={{ textAlign: i > 1 ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
-          <tbody>
-            {data.map((p) => (
-              <tr key={p.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                <td style={{ padding: "9px 14px", color: C.text }}><span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}><Avatar name={p.name} color={p.avatar_color} size={24} />{p.name}</span></td>
-                <td style={{ padding: "9px 14px", color: C.text2 }}>{ROLE_LABELS[p.role] || p.role}</td>
-                <td style={{ padding: "9px 14px", textAlign: "right", color: C.text, fontWeight: 700 }}>{p.active}</td>
-                <td style={{ padding: "9px 14px", textAlign: "right", color: p.active_prod > 0 ? C.production : C.text3 }}>{p.active_prod}</td>
-                <td style={{ padding: "9px 14px", textAlign: "right", color: p.active_pack > 0 ? C.packing : C.text3 }}>{p.active_pack}</td>
-                <td style={{ padding: "9px 14px", textAlign: "right", color: p.overdue > 0 ? C.danger : C.text3 }}>{p.overdue}</td>
-                <td style={{ padding: "9px 14px", textAlign: "right", color: p.on_hold > 0 ? C.hold : C.text3 }}>{p.on_hold}</td>
-                <td style={{ padding: "9px 14px", textAlign: "right", color: C.ready, fontWeight: 700 }}>{p.completed}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+      {section("Production", C.production, prod, "prod")}
+      {section("Packing", C.packing, pack, "pack")}
+      {openId && <StaffDetail staffId={openId} period={period} from={from} to={to} onClose={() => setOpenId(null)} />}
     </div>
   );
 }
