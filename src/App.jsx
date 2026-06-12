@@ -163,7 +163,7 @@ const NAV = [
   { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "delivery_team", "admin", "production_lead"] },
   { id: "floor", label: "Floor Display", icon: "display" }, // every role; rendered as a distinct launch button, not a workspace tab
   { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "production_lead", "admin"] },
-  { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead", "production_staff", "admin"] },
+  { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead", "admin"] },
   { id: "audit", label: "Audit Trail", icon: "audit", roles: ["super_admin", "admin"] },
   { id: "users", label: "User Management", icon: "users", roles: ["super_admin", "admin"] },
   { id: "settings", label: "System Settings", icon: "settings", roles: ["super_admin", "admin"] },
@@ -1513,6 +1513,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
   // Back-office Admin (deputy) may route an order — set PIC + priority + deadline —
   // and put it on hold (soft, reversible). Advancing stages and Cancel stay Boss-only.
   const canRoute = ["super_admin", "admin"].includes(user.role);
+  const canAssignPic = ["super_admin", "admin", "production_lead"].includes(user.role); // floor supervisor may assign the PIC too
   const roleCanMark = ["super_admin", "production_lead", "production_staff", "packing_staff"].includes(user.role);
   const isLead = user.role === "production_lead";
   const isFloor = ["production_staff", "packing_staff"].includes(user.role); // pure floor worker — keep their view minimal
@@ -1523,7 +1524,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
   async function load() { try { const o = await api("GET", `/orders/${orderId}`); setOrder(o); setNotes(o.notes || ""); } catch (e) { setOrder({ _error: e.message }); } }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [orderId]);
   useEffect(() => { api("GET", `/delivery?order_id=${orderId}`).then((d) => setDelivery((d && d[0]) || null)).catch(() => setDelivery(null)); }, [orderId]);
-  useEffect(() => { if (canRoute) api("GET", "/users").then(setUsers).catch(() => setUsers([])); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { if (canAssignPic) api("GET", "/users").then(setUsers).catch(() => setUsers([])); /* eslint-disable-next-line */ }, []);
   useEffect(() => { if (canAmend) api("GET", "/orders/skus").then((d) => setCatalog(d || [])).catch(() => setCatalog([])); /* eslint-disable-next-line */ }, []);
 
   async function doMove(to, why) {
@@ -1914,6 +1915,14 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
       {isLead && (
         <div style={{ marginTop: 22, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, marginBottom: 8 }}>Lead actions</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12.5, color: C.text2, minWidth: 28 }}>In charge</span>
+            <select value={order.pic_id || ""} onChange={(e) => assignPic(e.target.value)} style={{ flex: 1, minWidth: 180, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }}>
+              <option value="" style={{ background: C.bg2 }}>Unassigned</option>
+              {order.pic_id && !picUsers.some((u) => u.id === order.pic_id) && <option value={order.pic_id} style={{ background: C.bg2 }}>{order.pic_name || "Current PIC"}</option>}
+              {picUsers.map((u) => <option key={u.id} value={u.id} style={{ background: C.bg2 }}>{u.name} — {ROLE_LABELS[u.role] || u.role}</option>)}
+            </select>
+          </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Btn variant="soft" size="sm" onClick={() => setFlag({ on_hold: !order.on_hold, reason: reason || undefined })} disabled={busy}>{order.on_hold ? "Release hold" : "Put on hold"}</Btn>
             <Btn variant="soft" size="sm" onClick={() => setFlag({ waiting_stock: !order.waiting_stock })} disabled={busy}>{order.waiting_stock ? "Clear waiting stock" : "Flag waiting stock"}</Btn>
