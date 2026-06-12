@@ -3395,6 +3395,10 @@ function Delivery({ user, onOpenOrder }) {
   const [q, setQ] = useState("");
   const canAssign = ["super_admin", "delivery_team", "admin"].includes(user.role);
   const canDeliver = ["super_admin", "delivery_team", "admin"].includes(user.role);
+  // Printing route lists / Delivery Orders is a dispatch action (and Print DO marks the
+  // order printed), so it's gated to the dispatch roles. production_lead sees Delivery
+  // read-only: browse the lists and open an order, but no buttons.
+  const canPrint = canAssign || canDeliver;
   const stacked = useViewport() < 1100; // phones + tablets (incl. iPad portrait) → cards, not a wide table
 
   async function load() {
@@ -3523,6 +3527,8 @@ function Delivery({ user, onOpenOrder }) {
   const proofCell = (dv, pill) => {
     if (!dv || !dv.has_pod) return pill ? <Pill color={C.hold} style={{ fontSize: 10 }}>⚠ No proof</Pill> : <span style={{ color: C.hold }}>⚠ None yet</span>;
     if (!dv.pod_url) return pill ? <Pill color={C.ready} style={{ fontSize: 10 }}>✓ Proof</Pill> : <span style={{ color: C.ready }}>✓ Attached</span>;
+    // View-only roles (production_lead) see the proof status but can't open the photo.
+    if (!canPrint) return pill ? <Pill color={C.ready} style={{ fontSize: 10 }}>✓ Proof</Pill> : <span style={{ color: C.ready }}>✓ Attached</span>;
     const open = () => setProofView({ url: dv.pod_url, inv: dv.invoice_number });
     return pill
       ? <button onClick={open} title="View proof photo" style={{ background: "none", border: 0, padding: 0, cursor: "pointer" }}><Pill color={C.ready} style={{ fontSize: 10, cursor: "pointer" }}>👁 View proof</Pill></button>
@@ -3611,8 +3617,8 @@ function Delivery({ user, onOpenOrder }) {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
           <h3 style={{ fontSize: 15, fontWeight: 700, color: C.text }}>Scheduled · {fActive.length}</h3>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Btn variant="soft" size="sm" onClick={() => printRouteList(fActive)}>Print route list</Btn>
-            <Btn variant="soft" size="sm" onClick={printAllDOs}>🖨 Print DOs</Btn>
+            {canPrint && <Btn variant="soft" size="sm" onClick={() => printRouteList(fActive)}>Print route list</Btn>}
+            {canPrint && <Btn variant="soft" size="sm" onClick={printAllDOs}>🖨 Print DOs</Btn>}
           </div>
         </div>
         {stacked ? (
@@ -3633,7 +3639,7 @@ function Delivery({ user, onOpenOrder }) {
                 {canDeliver && <label style={{ ...proofBtn, flex: 1, justifyContent: "center", padding: "11px" }}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(dv.order_id, f); }} /></label>}
                 {canDeliver && <Btn variant="success" style={{ flex: 2, justifyContent: "center" }} onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
                 {canAssign && <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => openEdit(dv)}>Edit</Btn>}
-                <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => printOneDO(dv.order_id)}>{dv.do_printed_at ? "🖨 Reprint" : "🖨 DO"}</Btn>
+                {canPrint && <Btn variant="soft" style={{ flex: 1, justifyContent: "center" }} onClick={() => printOneDO(dv.order_id)}>{dv.do_printed_at ? "🖨 Reprint" : "🖨 DO"}</Btn>}
               </>}
             />
           ))
@@ -3661,7 +3667,7 @@ function Delivery({ user, onOpenOrder }) {
                       {canAssign && <Btn size="sm" variant="soft" onClick={() => openEdit(dv)}>Edit</Btn>}
                       {canDeliver && <label style={proofBtn}>📎 Proof<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(dv.order_id, f); }} /></label>}
                       {canDeliver && <Btn size="sm" variant="success" onClick={() => setConfirmDeliver(dv)}>Mark delivered</Btn>}
-                      <Btn size="sm" variant="soft" onClick={() => printOneDO(dv.order_id)}>{dv.do_printed_at ? "🖨 Reprint" : "🖨 DO"}</Btn>
+                      {canPrint && <Btn size="sm" variant="soft" onClick={() => printOneDO(dv.order_id)}>{dv.do_printed_at ? "🖨 Reprint" : "🖨 DO"}</Btn>}
                     </div>
                   </td>
                 </tr>
