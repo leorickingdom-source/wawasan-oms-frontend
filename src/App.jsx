@@ -2311,8 +2311,8 @@ function OrdersReport({ period, from, to }) {
   useEffect(() => { setData(null); api("GET", `/reports/orders?${reportQuery(period, from, to)}`).then((d) => setData(d.orders || [])).catch(() => setData([])); }, [period, from, to]);
   const fmtDur = (h) => h == null ? "—" : h >= 48 ? `${Math.round(h / 24)}d` : `${h}h`;
   function exportCsv() {
-    const rows = [["Invoice", "Customer", "Stage", "STKs done", "STKs total", "% done", "Days in stage", "Cycle (h)", "Due", "Status", "PIC"]];
-    for (const o of data) rows.push([o.invoice_number, o.customer_name || "", (STAGE_LABELS[o.stage] || {}).label || o.stage, o.done_count, o.item_count, o.pct, o.days_in_stage, o.cycle_hours, o.required_delivery_date, o.delivered ? (o.on_time ? "Delivered on-time" : "Delivered late") : (o.late ? "Late" : "In progress"), o.pic_name || ""]);
+    const rows = [["Invoice", "Customer", "Stage", "STKs made", "STKs packed", "STKs total", "% made", "% packed", "Days in stage", "Cycle (h)", "Due", "Status", "Prod PIC", "Pack PIC", "Driver"]];
+    for (const o of data) rows.push([o.invoice_number, o.customer_name || "", (STAGE_LABELS[o.stage] || {}).label || o.stage, o.done_count, o.packed_count, o.item_count, o.pct, o.pack_pct, o.days_in_stage, o.cycle_hours, o.required_delivery_date, o.delivered ? (o.on_time ? "Delivered on-time" : "Delivered late") : (o.late ? "Late" : "In progress"), o.pic_name || "", o.pack_pic_name || "", o.carrier_name || ""]);
     const cust = Object.values(data.reduce((m, o) => { const k = o.customer_name || "—"; const r = m[k] || (m[k] = { name: k, orders: 0, delivered: 0, on_time: 0, late: 0 }); r.orders++; if (o.delivered) { r.delivered++; if (o.on_time) r.on_time++; } if (o.late) r.late++; return m; }, {})).sort((a, b) => b.orders - a.orders);
     rows.push([], ["By customer", "Orders", "Delivered", "On-time", "Late"], ...cust.map((c) => [c.name, c.orders, c.delivered, c.on_time, c.late]));
     downloadCsv(`orders-report-${period}.csv`, rows);
@@ -2350,9 +2350,15 @@ function OrdersReport({ period, from, to }) {
                   <td style={{ padding: "9px 14px", fontFamily: MONO, color: C.text }}>{o.invoice_number}</td>
                   <td style={{ padding: "9px 14px", color: C.text2 }}>{o.customer_name || "—"}</td>
                   <td style={{ padding: "9px 14px" }}><Pill color={cfg.color}>{cfg.label}</Pill></td>
-                  <td style={{ padding: "9px 14px", minWidth: 130 }}>
-                    <div style={{ fontSize: 12, color: C.text2, marginBottom: 3 }}>{o.done_count}/{o.item_count} STKs · {o.pct}%</div>
-                    <div style={{ height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}><div style={{ height: "100%", width: `${o.pct}%`, background: o.pct >= 100 ? C.ready : C.accent }} /></div>
+                  <td style={{ padding: "9px 14px", minWidth: 160 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: C.text2, marginBottom: 3 }}>
+                      <span style={{ width: 28, color: C.production, fontWeight: 600 }}>Prod</span>{o.done_count}/{o.item_count}
+                      <div style={{ flex: 1, height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}><div style={{ height: "100%", width: `${o.pct}%`, background: o.pct >= 100 ? C.ready : C.production }} /></div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: C.text2 }}>
+                      <span style={{ width: 28, color: C.packing, fontWeight: 600 }}>Pack</span>{o.packed_count}/{o.item_count}
+                      <div style={{ flex: 1, height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}><div style={{ height: "100%", width: `${o.pack_pct}%`, background: o.pack_pct >= 100 ? C.ready : C.packing }} /></div>
+                    </div>
                   </td>
                   <td style={{ padding: "9px 14px", color: C.text2 }}>{o.days_in_stage}d</td>
                   <td style={{ padding: "9px 14px", color: C.text2 }}>{fmtDur(o.cycle_hours)}</td>
@@ -2373,15 +2379,24 @@ function OrdersReport({ period, from, to }) {
                       </div>
                       <div>
                         <div style={{ fontSize: 11, fontWeight: 700, color: C.text3, marginBottom: 6, letterSpacing: 0.4 }}>STK STATUS</div>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <Pill color={C.ready}>Done: {o.done_count}</Pill>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
+                          <span style={{ fontSize: 11, color: C.production, minWidth: 62, fontWeight: 600 }}>Production</span>
+                          <Pill color={C.ready}>Made: {o.done_count}</Pill>
                           <Pill color={C.packing}>Making: {o.in_progress_count}</Pill>
                           <Pill color={C.text3}>To do: {o.not_started_count}</Pill>
                         </div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                          <span style={{ fontSize: 11, color: C.packing, minWidth: 62, fontWeight: 600 }}>Packing</span>
+                          <Pill color={C.ready}>Packed: {o.packed_count}</Pill>
+                          <Pill color={C.packing}>Packing: {o.pack_in_progress_count}</Pill>
+                          <Pill color={C.text3}>To do: {o.pack_not_started_count}</Pill>
+                        </div>
                       </div>
                       <div>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: C.text3, marginBottom: 6, letterSpacing: 0.4 }}>PIC</div>
-                        <div style={{ fontSize: 13, color: C.text2 }}>{o.pic_name || "Unassigned"}</div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: C.text3, marginBottom: 6, letterSpacing: 0.4 }}>PIC & DELIVERY</div>
+                        <div style={{ fontSize: 12.5, color: C.text2 }}><span style={{ color: C.production, fontWeight: 600 }}>Prod:</span> {o.pic_name || "Unassigned"}</div>
+                        <div style={{ fontSize: 12.5, color: C.text2, marginTop: 3 }}><span style={{ color: C.packing, fontWeight: 600 }}>Pack:</span> {o.pack_pic_name || "Unassigned"}</div>
+                        <div style={{ fontSize: 12.5, color: C.text2, marginTop: 3 }}><span style={{ color: C.ready, fontWeight: 600 }}>Driver:</span> {o.carrier_name || "—"}</div>
                       </div>
                     </div>
                   </td>
@@ -2560,6 +2575,7 @@ function StaffReport({ period, from, to, staffId }) {
 function PicTrackTable({ track, period, from, to }) {
   const [raw, setRaw] = useState(null);
   const [openId, setOpenId] = useState(null);
+  const [showAll, setShowAll] = useState(false);
   useEffect(() => { setRaw(null); api("GET", `/reports/pic?${reportQuery(period, from, to)}`).then((d) => setRaw(d.pics || [])).catch(() => setRaw([])); }, [period, from, to]);
   if (!raw) return null;
   const isProd = track === "prod";
@@ -2569,6 +2585,8 @@ function PicTrackTable({ track, period, from, to }) {
   if (list.length === 0) return null;
   const color = isProd ? C.production : C.packing;
   const title = isProd ? "Production" : "Packing";
+  const LIM = 8;
+  const shown = showAll ? list : list.slice(0, LIM);
   return (
     <Card style={{ marginTop: 18 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
@@ -2579,7 +2597,7 @@ function PicTrackTable({ track, period, from, to }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead><tr>{["Person", "Role", "Open now", "Overdue", "On hold", "Completed"].map((h, i) => <th key={h} style={{ textAlign: i > 1 ? "right" : "left", padding: "7px 8px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}<th style={{ borderBottom: `1px solid ${C.border}` }} /></tr></thead>
         <tbody>
-          {list.map((p) => (
+          {shown.map((p) => (
             <tr key={p.id} onClick={() => setOpenId(p.id)} title="View full detail" style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}
               onMouseEnter={(e) => (e.currentTarget.style.background = C.surface2)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
               <td style={{ padding: "8px 8px", color: C.text }}><span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}><Avatar name={p.name} color={p.avatar_color} size={24} />{p.name}</span></td>
@@ -2593,6 +2611,7 @@ function PicTrackTable({ track, period, from, to }) {
           ))}
         </tbody>
       </table>
+      {list.length > LIM && <div style={{ marginTop: 8 }}><Btn variant="ghost" size="sm" onClick={() => setShowAll((v) => !v)}>{showAll ? "Show less ▲" : `Show all ${list.length} ▼`}</Btn></div>}
       {openId && <StaffDetail staffId={openId} period={period} from={from} to={to} onClose={() => setOpenId(null)} />}
     </Card>
   );
@@ -2654,6 +2673,7 @@ function TrendChart({ data, kind = "bar", color = C.accent, label = "Count" }) {
 // aging WIP. Backed by /reports/efficiency. Boss/Ops only.
 function EfficiencyReport({ period, from, to }) {
   const [d, setD] = useState(null);
+  const [agingAll, setAgingAll] = useState(false);
   useEffect(() => { setD(null); api("GET", `/reports/efficiency?${reportQuery(period, from, to)}`).then(setD).catch(() => setD(false)); }, [period, from, to]);
   if (d == null) return <Loading label="Loading efficiency…" />;
   if (d === false) return <Empty label="Could not load efficiency." />;
@@ -2697,7 +2717,7 @@ function EfficiencyReport({ period, from, to }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Stage", "Days open", "Days late"].map((h, i) => <th key={h} style={{ textAlign: i > 1 ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
-              {aging.map((o) => (
+              {(agingAll ? aging : aging.slice(0, 8)).map((o) => (
                 <tr key={o.invoice_number} style={{ borderBottom: `1px solid ${C.border}` }}>
                   <td style={{ padding: "9px 14px", fontFamily: MONO, color: C.accent2 }}>{o.invoice_number}</td>
                   <td style={{ padding: "9px 14px", color: C.text2, textTransform: "capitalize" }}>{STG[o.stage] || String(o.stage).replace(/_/g, " ")}</td>
@@ -2708,6 +2728,7 @@ function EfficiencyReport({ period, from, to }) {
             </tbody>
           </table>
         )}
+        {aging.length > 8 && <div style={{ padding: "8px 14px", borderTop: `1px solid ${C.border}` }}><Btn variant="ghost" size="sm" onClick={() => setAgingAll((v) => !v)}>{agingAll ? "Show less ▲" : `Show all ${aging.length} ▼`}</Btn></div>}
       </Card>
     </div>
   );
@@ -2758,11 +2779,18 @@ function DeliveryCarrierDetail({ carrier, period, from, to, onClose }) {
 
 function MistakesReport({ period, from, to }) {
   const [d, setD] = useState(null);
+  const [exp, setExp] = useState({}); // which lists are expanded past the first few
   useEffect(() => { setD(null); api("GET", `/reports/mistakes?${reportQuery(period, from, to)}`).then(setD).catch(() => setD(false)); }, [period, from, to]);
   if (d == null) return <Loading label="Loading mistakes…" />;
   if (d === false) return <Empty label="Could not load mistakes." />;
   const secT = { fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".5px", color: C.text3, margin: "18px 2px 9px" };
   const fmtWhen = (s) => s ? new Date(s).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+  // Collapse long lists to the first few, with a Show all / Show less toggle.
+  const CLIP = 5;
+  const clip = (key, list) => (exp[key] ? list : list.slice(0, CLIP));
+  const moreBtn = (key, len) => len > CLIP
+    ? <div style={{ padding: "8px 14px", borderTop: `1px solid ${C.border}` }}><Btn variant="ghost" size="sm" onClick={() => setExp((e) => ({ ...e, [key]: !e[key] }))}>{exp[key] ? "Show less ▲" : `Show all ${len} ▼`}</Btn></div>
+    : null;
   const cards = [
     ["Amendments", d.amendments.count, C.danger], ["Late deliveries", d.late.count, C.danger], ["Failed deliveries", d.failed_count, C.danger],
     ["Send-backs", (d.sendbacks && d.sendbacks.count) || 0, C.hold],
@@ -2780,7 +2808,7 @@ function MistakesReport({ period, from, to }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead><tr style={{ background: C.bg2 }}>{["Invoice", "By", "Change", "When"].map((h) => <th key={h} style={{ textAlign: "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
-              {d.amendments.list.map((a, i) => (
+              {clip("amend", d.amendments.list).map((a, i) => (
                 <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
                   <td style={{ padding: "9px 14px", fontFamily: MONO, color: C.accent2 }}>{a.invoice_number || "—"}</td>
                   <td style={{ padding: "9px 14px", color: C.text2 }}>{a.user_name || "—"}</td>
@@ -2791,6 +2819,7 @@ function MistakesReport({ period, from, to }) {
             </tbody>
           </table>
         )}
+        {moreBtn("amend", d.amendments.list.length)}
       </Card>
 
       {d.late.list.length > 0 && (<>
@@ -2799,7 +2828,7 @@ function MistakesReport({ period, from, to }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Days late", "Driver"].map((h, i) => <th key={h} style={{ textAlign: i === 1 ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
-              {d.late.list.map((o, i) => (
+              {clip("late", d.late.list).map((o, i) => (
                 <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
                   <td style={{ padding: "9px 14px", fontFamily: MONO, color: C.accent2 }}>{o.invoice_number}</td>
                   <td style={{ padding: "9px 14px", textAlign: "right" }}><Pill color={C.danger}>+{o.days_late}</Pill></td>
@@ -2808,6 +2837,7 @@ function MistakesReport({ period, from, to }) {
               ))}
             </tbody>
           </table>
+          {moreBtn("late", d.late.list.length)}
         </Card>
       </>)}
 
@@ -2817,7 +2847,7 @@ function MistakesReport({ period, from, to }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Moved", "By", "Reason", "When"].map((h) => <th key={h} style={{ textAlign: "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
-              {d.sendbacks.list.map((s, i) => (
+              {clip("sb", d.sendbacks.list).map((s, i) => (
                 <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
                   <td style={{ padding: "9px 14px", fontFamily: MONO, color: C.accent2 }}>{s.invoice_number || "—"}</td>
                   <td style={{ padding: "9px 14px", color: C.text2 }}>{(STAGE_LABELS[s.from_stage] || {}).label || s.from_stage} → {(STAGE_LABELS[s.to_stage] || {}).label || s.to_stage}</td>
@@ -2828,6 +2858,7 @@ function MistakesReport({ period, from, to }) {
               ))}
             </tbody>
           </table>
+          {moreBtn("sb", d.sendbacks.list.length)}
         </Card>
       </>)}
 
@@ -2837,7 +2868,7 @@ function MistakesReport({ period, from, to }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead><tr style={{ background: C.bg2 }}>{["STK", "Product", "Send-backs"].map((h, i) => <th key={h} style={{ textAlign: i === 2 ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
             <tbody>
-              {d.sendbacks.items.map((it, i) => (
+              {clip("items", d.sendbacks.items).map((it, i) => (
                 <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
                   <td style={{ padding: "9px 14px", fontFamily: MONO, color: C.text }}>{it.sku || "—"}</td>
                   <td style={{ padding: "9px 14px", color: C.text2 }}>{it.name || "—"}</td>
@@ -2846,6 +2877,7 @@ function MistakesReport({ period, from, to }) {
               ))}
             </tbody>
           </table>
+          {moreBtn("items", d.sendbacks.items.length)}
         </Card>
       </>)}
 
@@ -3086,6 +3118,7 @@ function Reports({ user }) {
   const [d, setD] = useState({});
   const [busy, setBusy] = useState("");
   const [carrier, setCarrier] = useState(null); // delivery By-carrier drill-down target
+  const [allCarriers, setAllCarriers] = useState(false);
   const usingRange = !!(from && to);
   const q = reportQuery(period, from, to);
   const rangeLabel = usingRange ? `${from} → ${to}` : (PERIOD_LABEL[period] || period);
@@ -3155,8 +3188,8 @@ function Reports({ user }) {
     return mlist.find((s) => { const d = new Date(s.month_start); return `${d.getFullYear()}-${d.getMonth()}` === k; }) || null;
   };
   // Per-order row shared by every export format.
-  const orderRow = (o) => [o.invoice_number, o.customer_name || "", (STAGE_LABELS[o.stage] || {}).label || o.stage, o.done_count, o.item_count, o.pct, o.days_in_stage, o.cycle_hours, o.required_delivery_date, o.delivered ? (o.on_time ? "Delivered on-time" : "Delivered late") : (o.late ? "Late" : "In progress"), o.pic_name || ""];
-  const ORDER_HEAD = ["Invoice", "Customer", "Stage", "STKs done", "STKs total", "% done", "Days in stage", "Cycle (h)", "Due", "Status", "PIC"];
+  const orderRow = (o) => [o.invoice_number, o.customer_name || "", (STAGE_LABELS[o.stage] || {}).label || o.stage, o.done_count, o.packed_count, o.item_count, o.pct, o.pack_pct, o.days_in_stage, o.cycle_hours, o.required_delivery_date, o.delivered ? (o.on_time ? "Delivered on-time" : "Delivered late") : (o.late ? "Late" : "In progress"), o.pic_name || "", o.pack_pic_name || "", o.carrier_name || ""];
+  const ORDER_HEAD = ["Invoice", "Customer", "Stage", "STKs made", "STKs packed", "STKs total", "% made", "% packed", "Days in stage", "Cycle (h)", "Due", "Status", "Prod PIC", "Pack PIC", "Driver"];
   // Per-person performance row — mirrors the on-screen StaffDetail drill-down.
   const STAFF_DETAIL_HEAD = ["Name", "Role", "Stages completed", "Items made", "Items packed", "On-time %", "On-time", "Reworks", "Active days"];
   const staffDetailRow = (d) => [d.staff.name, ROLE_LABELS[d.staff.role] || d.staff.role, d.volume.completions, d.volume.items_made, d.volume.items_packed, d.reliability.on_time_rate == null ? "—" : d.reliability.on_time_rate + "%", `${d.reliability.on_time_count}/${d.reliability.on_time_total}`, d.reliability.reworks, d.speed.active_days];
@@ -3345,7 +3378,7 @@ function Reports({ user }) {
       if (data._pics && data._pics.length) { heading("Person in charge"); darkTable(["Name", "Role", "Open", "Prod", "Pack", "Overdue", "On hold", "Completed"], data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.active_prod, p.active_pack, p.overdue, p.on_hold, p.completed])); }
       if (data._orders && data._orders.length) {
         heading("Orders - per-order progress");
-        darkTable(["Invoice", "Customer", "Stage", "STKs", "%", "Days", "Status", "PIC"], data._orders.map((o) => [o.invoice_number, o.customer_name || "", (STAGE_LABELS[o.stage] || {}).label || o.stage, `${o.done_count}/${o.item_count}`, o.pct, o.days_in_stage, o.delivered ? (o.on_time ? "On-time" : "Late") : (o.late ? "Late" : "In progress"), o.pic_name || ""]));
+        darkTable(["Invoice", "Customer", "Stage", "Made", "Packed", "Days", "Status", "Prod PIC", "Pack PIC"], data._orders.map((o) => [o.invoice_number, o.customer_name || "", (STAGE_LABELS[o.stage] || {}).label || o.stage, `${o.done_count}/${o.item_count}`, `${o.packed_count}/${o.item_count}`, o.days_in_stage, o.delivered ? (o.on_time ? "On-time" : "Late") : (o.late ? "Late" : "In progress"), o.pic_name || "", o.pack_pic_name || ""]));
       }
       if (data._eff) {
         const e = data._eff;
@@ -3462,7 +3495,7 @@ function Reports({ user }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead><tr>{["Carrier", "Deliveries", "On-time", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "7px 8px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
             <tbody>
-              {d.by_carrier.map((x) => (
+              {(allCarriers ? d.by_carrier : d.by_carrier.slice(0, 8)).map((x) => (
                 <tr key={`${x.kind}:${x.key}`} onClick={() => setCarrier({ kind: x.kind, key: x.key, name: x.name })} title="View deliveries"
                   style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = C.surface2)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
@@ -3474,6 +3507,7 @@ function Reports({ user }) {
               ))}
             </tbody>
           </table>
+          {d.by_carrier.length > 8 && <div style={{ marginTop: 8 }}><Btn variant="ghost" size="sm" onClick={() => setAllCarriers((v) => !v)}>{allCarriers ? "Show less ▲" : `Show all ${d.by_carrier.length} ▼`}</Btn></div>}
         </Card>
       )}
       {carrier && <DeliveryCarrierDetail carrier={carrier} period={period} from={from} to={to} onClose={() => setCarrier(null)} />}
