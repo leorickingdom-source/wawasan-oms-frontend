@@ -50,7 +50,7 @@ const ADVANCE_LABEL = { order: "Send to production", production: "Mark productio
 const STAGE_PIC_ROLES = { order: ["production_lead", "production_staff"], production: ["production_lead", "production_staff"], packing: ["packing_staff"], ready_for_delivery: ["delivery_team"] };
 function canAdvanceStage(role, stage) {
   if (stage === "ready_for_delivery") return false; // completion happens in the Delivery workspace
-  if (role === "super_admin") return true;
+  if (role === "super_admin" || role === "admin") return true;
   if (role === "production_lead" && (stage === "production" || stage === "packing")) return true;
   if (stage === "production" && role === "production_staff") return true;
   if (stage === "packing" && role === "packing_staff") return true;
@@ -60,7 +60,7 @@ function canAdvanceStage(role, stage) {
 // mirrors the backend gate so staff don't see buttons that would only error.
 // Managers anytime; staff only on the stage they own.
 function canMarkStage(role, stage) {
-  if (role === "super_admin") return true;
+  if (role === "super_admin" || role === "admin") return true;
   if (role === "production_lead") return stage === "production" || stage === "packing";
   if (role === "production_staff") return stage === "production";
   if (role === "packing_staff") return stage === "packing";
@@ -122,7 +122,7 @@ function itemPlace(it) {
 }
 // Which tracks a role may tick on a split card (mirrors the backend item-PATCH guard).
 function canMarkTrack(role, track) {
-  if (role === "super_admin" || role === "production_lead") return true;
+  if (role === "super_admin" || role === "admin" || role === "production_lead") return true;
   if (role === "production_staff") return track === "production";
   if (role === "packing_staff") return track === "packing";
   return false;
@@ -662,7 +662,7 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
   const lines = instance._items || [];
   const track = stageKey; // 'production' | 'packing'
   const canMark = canMarkTrack(user.role, track);
-  const canMoveLine = user.role === "super_admin" || user.role === "production_lead";
+  const canMoveLine = user.role === "super_admin" || user.role === "admin" || user.role === "production_lead";
   const isLeadPlus = canMoveLine;
   const backStyle = { marginTop: 5, appearance: "none", border: "1px solid #5b2526", background: "#2a1414", color: "#fca5a5", fontSize: 11, fontWeight: 600, padding: "4px 9px", borderRadius: 7, cursor: "pointer" };
   const rBtn = (dis) => ({ cursor: dis ? "default" : "pointer", opacity: dis ? 0.3 : 1, lineHeight: 1, fontSize: 11, padding: "4px 9px", background: C.surface2, border: `1px solid ${C.border2}`, borderRadius: 6, color: C.text2 });
