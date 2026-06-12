@@ -46,8 +46,11 @@ const BOARD_STAGES = ["order", "production", "packing", "ready_for_delivery"];
 const MAX_UPLOAD_MB = 5;
 const FORWARD_STAGE = { order: "production", production: "packing", packing: "ready_for_delivery", ready_for_delivery: "delivered" };
 const ADVANCE_LABEL = { order: "Send to production", production: "Mark production complete", packing: "Mark packed", ready_for_delivery: "Mark delivered" };
-// Which roles can be the PIC at each stage (shown in the PIC picker).
-const STAGE_PIC_ROLES = { order: ["production_lead", "production_staff"], production: ["production_lead", "production_staff"], packing: ["packing_staff"], ready_for_delivery: ["delivery_team"] };
+// Per-track PIC: who can own each track. The split board runs an order's Production and
+// Packing in parallel, so each track has its own "in charge" (production = pic_id,
+// packing = packing_pic_id). Delivery is owned by the driver, not a PIC.
+const PROD_PIC_ROLES = ["production_lead", "production_staff"];
+const PACK_PIC_ROLES = ["packing_staff", "production_lead"];
 function canAdvanceStage(role, stage) {
   if (stage === "ready_for_delivery") return false; // completion happens in the Delivery workspace
   if (role === "super_admin" || role === "admin") return true;
@@ -155,6 +158,16 @@ function deliveryTag(o) {
   if (o.delivery_status === "pending") return { label: "Pending", color: C.packing };
   if (o.delivery_status === "in_transit") return { label: "In transit", color: C.order };
   return { label: "Ready for Delivery", color: C.ready };
+}
+
+// "Who carries it" label for the delivery lists: a marketplace hand-off shows its
+// courier + tracking (📦 SPX / LEX); an in-house delivery shows the driver.
+function shipLabel(dv) {
+  if (dv && dv.channel && dv.channel !== "in_house") {
+    const c = dv.channel === "shopee" ? "SPX" : "LEX";
+    return `📦 ${c}${dv.tracking_no ? " · " + dv.tracking_no : ""}`;
+  }
+  return (dv && dv.delivery_man_name) || "—";
 }
 
 const NAV = [
@@ -633,7 +646,9 @@ function KanbanCard({ order, user, onOpen, onAdvance, onMoveBack, onReorderUp, o
       })()}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderTop: `1px solid ${C.border}`, paddingTop: 9 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
-          {order.pic_name
+          {order.stage === "ready_for_delivery"
+            ? <span style={{ fontSize: 12, color: C.text3 }}>Delivery — see driver</span>
+            : order.pic_name
             ? <><Avatar name={order.pic_name} color={order.pic_color} size={23} /><span style={{ fontSize: 12.5, color: C.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{order.pic_name}</span></>
             : <span style={{ fontSize: 12, color: C.text3 }}>Unassigned</span>}
         </div>
@@ -661,6 +676,11 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
   const o = instance;
   const lines = instance._items || [];
   const track = stageKey; // 'production' | 'packing'
+  // Per-track PIC: this column shows ITS own owner (Production = pic_id, Packing = packing_pic_id),
+  // so a production person no longer appears "in charge" of the packing card and vice-versa.
+  const pic = track === "packing"
+    ? { name: o.pack_pic_name, color: o.pack_pic_color, lab: "Pack PIC" }
+    : { name: o.pic_name, color: o.pic_color, lab: "Prod PIC" };
   const canMark = canMarkTrack(user.role, track);
   const canMoveLine = user.role === "super_admin" || user.role === "admin" || user.role === "production_lead";
   const isLeadPlus = canMoveLine;
@@ -698,10 +718,10 @@ function SplitCard({ instance, stageKey, user, onOpen, onSetItem, onAdvance, onL
           ))}
           <span style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: urgent ? C.accent2 : C.text, letterSpacing: 0.3 }}>{o.invoice_number}</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }} title={`PIC: ${o.pic_name || "Unassigned"}`}>
-          {o.pic_name
-            ? <><Avatar name={o.pic_name} color={o.pic_color} size={22} /><span style={{ fontSize: 12, color: C.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 96 }}>{o.pic_name}</span></>
-            : <span style={{ fontSize: 11, color: C.text3 }}>Unassigned</span>}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }} title={`${pic.lab}: ${pic.name || "Unassigned"}`}>
+          {pic.name
+            ? <><Avatar name={pic.name} color={pic.color} size={22} /><span style={{ fontSize: 12, color: C.text2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 96 }}>{pic.name}</span></>
+            : <span style={{ fontSize: 11, color: C.text3 }}>{pic.lab} · Unassigned</span>}
         </div>
       </div>
       {(urgent || onHold) && (
@@ -1559,8 +1579,8 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
     try { await api("PATCH", `/orders/${orderId}/flags`, body); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); }
   }
-  async function assignPic(picId) {
-    try { await api("POST", `/orders/${orderId}/assign-pic`, { pic_id: picId || null }); await load(); onUpdated && onUpdated(); }
+  async function assignPic(picId, track) {
+    try { await api("POST", `/orders/${orderId}/assign-pic`, { pic_id: picId || null, track: track || "production" }); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); }
   }
   async function setDeadline(v) {
@@ -1628,8 +1648,30 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
   const canTrackPack = roleCanMark && canMarkTrack(user.role, "packing");
   const splitItems = SPLIT_BOARD_ENABLED && activeOrder;
   const tabs = isFloor ? ["items", "details"] : isDispatch ? ["details", "items"] : ["details", "items", "timeline", "attachments"];
-  const picRoles = STAGE_PIC_ROLES[order.stage];
-  const picUsers = picRoles ? users.filter((u) => picRoles.includes(u.role)) : users;
+  // Per-track PIC pickers: one for Production (pic_id), one for Packing (packing_pic_id).
+  const prodPicUsers = users.filter((u) => PROD_PIC_ROLES.includes(u.role));
+  const packPicUsers = users.filter((u) => PACK_PIC_ROLES.includes(u.role));
+  const picSelStyle = { flex: 1, minWidth: 180, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text };
+  const picPickers = (
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12.5, color: C.production, minWidth: 84, fontWeight: 600 }}>Production PIC</span>
+        <select value={order.pic_id || ""} onChange={(e) => assignPic(e.target.value, "production")} style={picSelStyle}>
+          <option value="" style={{ background: C.bg2 }}>Unassigned</option>
+          {order.pic_id && !prodPicUsers.some((u) => u.id === order.pic_id) && <option value={order.pic_id} style={{ background: C.bg2 }}>{order.pic_name || "Current PIC"}</option>}
+          {prodPicUsers.map((u) => <option key={u.id} value={u.id} style={{ background: C.bg2 }}>{u.name} — {ROLE_LABELS[u.role] || u.role}</option>)}
+        </select>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12.5, color: C.packing, minWidth: 84, fontWeight: 600 }}>Packing PIC</span>
+        <select value={order.packing_pic_id || ""} onChange={(e) => assignPic(e.target.value, "packing")} style={picSelStyle}>
+          <option value="" style={{ background: C.bg2 }}>Unassigned</option>
+          {order.packing_pic_id && !packPicUsers.some((u) => u.id === order.packing_pic_id) && <option value={order.packing_pic_id} style={{ background: C.bg2 }}>{order.pack_pic_name || "Current PIC"}</option>}
+          {packPicUsers.map((u) => <option key={u.id} value={u.id} style={{ background: C.bg2 }}>{u.name} — {ROLE_LABELS[u.role] || u.role}</option>)}
+        </select>
+      </div>
+    </>
+  );
 
   return (
     <div>
@@ -1915,14 +1957,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
       {isLead && (
         <div style={{ marginTop: 22, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, marginBottom: 8 }}>Lead actions</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12.5, color: C.text2, minWidth: 28 }}>In charge</span>
-            <select value={order.pic_id || ""} onChange={(e) => assignPic(e.target.value)} style={{ flex: 1, minWidth: 180, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }}>
-              <option value="" style={{ background: C.bg2 }}>Unassigned</option>
-              {order.pic_id && !picUsers.some((u) => u.id === order.pic_id) && <option value={order.pic_id} style={{ background: C.bg2 }}>{order.pic_name || "Current PIC"}</option>}
-              {picUsers.map((u) => <option key={u.id} value={u.id} style={{ background: C.bg2 }}>{u.name} — {ROLE_LABELS[u.role] || u.role}</option>)}
-            </select>
-          </div>
+          {picPickers}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Btn variant="soft" size="sm" onClick={() => setFlag({ on_hold: !order.on_hold, reason: reason || undefined })} disabled={busy}>{order.on_hold ? "Release hold" : "Put on hold"}</Btn>
             <Btn variant="soft" size="sm" onClick={() => setFlag({ waiting_stock: !order.waiting_stock })} disabled={busy}>{order.waiting_stock ? "Clear waiting stock" : "Flag waiting stock"}</Btn>
@@ -1933,14 +1968,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
       {canRoute && (
         <div style={{ marginTop: 22, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
           <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, marginBottom: 8 }}>{canMove ? "Stage actions" : "Order actions"}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 12.5, color: C.text2, minWidth: 28 }}>In charge</span>
-            <select value={order.pic_id || ""} onChange={(e) => assignPic(e.target.value)} style={{ flex: 1, minWidth: 180, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }}>
-              <option value="" style={{ background: C.bg2 }}>Unassigned</option>
-              {order.pic_id && !picUsers.some((u) => u.id === order.pic_id) && <option value={order.pic_id} style={{ background: C.bg2 }}>{order.pic_name || "Current PIC"}</option>}
-              {picUsers.map((u) => <option key={u.id} value={u.id} style={{ background: C.bg2 }}>{u.name} — {ROLE_LABELS[u.role] || u.role}</option>)}
-            </select>
-          </div>
+          {picPickers}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Btn variant="soft" size="sm" onClick={() => setFlag({ on_hold: !order.on_hold, reason: reason || undefined })} disabled={busy}>{order.on_hold ? "Release hold" : "Put on hold"}</Btn>
             <Btn variant="soft" size="sm" onClick={() => setFlag({ waiting_stock: !order.waiting_stock })} disabled={busy}>{order.waiting_stock ? "Clear waiting stock" : "Flag waiting stock"}</Btn>
@@ -3434,7 +3462,7 @@ function Delivery({ user, onOpenOrder }) {
   const [allCompleted, setAllCompleted] = useState(false);
   const [confirmDeliver, setConfirmDeliver] = useState(null);
   const [proofView, setProofView] = useState(null); // { url, inv } — proof-photo lightbox
-  const [form, setForm] = useState({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "" });
+  const [form, setForm] = useState({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "", channel: "in_house", tracking_no: "" });
   const [newDeliverer, setNewDeliverer] = useState({ name: "", phone: "" });
   const [otherCourier, setOtherCourier] = useState("");
   const [editDelivery, setEditDelivery] = useState(null);
@@ -3466,6 +3494,9 @@ function Delivery({ user, onOpenOrder }) {
 
   async function assign() {
     if (!form.order_id) { alert("Pick an order to schedule."); return; }
+    if (form.channel !== "in_house" && !form.tracking_no.trim()) {
+      alert("Enter the tracking / AWB number for the courier hand-off."); return;
+    }
     try {
       let payload = form;
       if (form.deliverer_id === "__other__") {
@@ -3474,7 +3505,7 @@ function Delivery({ user, onOpenOrder }) {
         payload = { ...form, deliverer_id: dl.id };
       }
       await api("POST", "/delivery", payload);
-      setShow(false); setForm({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "" }); setOtherCourier("");
+      setShow(false); setForm({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "", channel: "in_house", tracking_no: "" }); setOtherCourier("");
       load();
     } catch (e) { alert(e.message); }
   }
@@ -3680,7 +3711,7 @@ function Delivery({ user, onOpenOrder }) {
               </>}
               rows={[
                 ["Customer", dv.customer_name || "—"],
-                ["Driver", dv.delivery_man_name || "—"],
+                ["Driver", shipLabel(dv)],
                 ["Due", <span style={{ color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</span>],
                 ["Proof", proofCell(dv, false)],
               ]}
@@ -3702,7 +3733,7 @@ function Delivery({ user, onOpenOrder }) {
                 <tr key={dv.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                   <td style={{ padding: "11px 16px", fontFamily: MONO }}><button onClick={() => onOpenOrder && onOpenOrder(dv.order_id)} title="Open order details" style={{ background: "none", border: 0, padding: 0, fontFamily: MONO, fontSize: "inherit", color: C.accent, cursor: "pointer", textAlign: "left" }}>{dv.invoice_number}</button></td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.customer_name}</td>
-                  <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.delivery_man_name || "—"}</td>
+                  <td style={{ padding: "11px 16px", color: C.text2 }}>{shipLabel(dv)}</td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"}</td>
                   <td style={{ padding: "11px 16px", color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</td>
                   <td style={{ padding: "11px 16px" }}>
@@ -3740,7 +3771,7 @@ function Delivery({ user, onOpenOrder }) {
               </>}
               rows={[
                 ["Customer", dv.customer_name || "—"],
-                ["Driver", dv.delivery_man_name || "—"],
+                ["Driver", shipLabel(dv)],
                 ["Due", <span style={{ color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</span>],
               ]}
               actions={<>
@@ -3758,7 +3789,7 @@ function Delivery({ user, onOpenOrder }) {
                 <tr key={dv.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                   <td style={{ padding: "11px 16px", fontFamily: MONO }}><button onClick={() => onOpenOrder && onOpenOrder(dv.order_id)} title="Open order details" style={{ background: "none", border: 0, padding: 0, fontFamily: MONO, fontSize: "inherit", color: C.accent, cursor: "pointer", textAlign: "left" }}>{dv.invoice_number}</button></td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.customer_name}</td>
-                  <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.delivery_man_name || "—"}</td>
+                  <td style={{ padding: "11px 16px", color: C.text2 }}>{shipLabel(dv)}</td>
                   <td style={{ padding: "11px 16px", color: C.text2 }}>{dv.scheduled_date ? fmtDay(dv.scheduled_date) : "—"}</td>
                   <td style={{ padding: "11px 16px", color: countdown(dv.required_delivery_date).tone }}>{fmtDay(dv.required_delivery_date)}</td>
                   <td style={{ padding: "11px 16px" }}>
@@ -3812,7 +3843,7 @@ function Delivery({ user, onOpenOrder }) {
                   <tr key={o.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                     <td style={{ padding: "11px 16px", fontFamily: MONO }}><button onClick={() => onOpenOrder && onOpenOrder(o.id)} title="Open order details" style={{ background: "none", border: 0, padding: 0, fontFamily: MONO, fontSize: "inherit", color: C.accent, cursor: "pointer", textAlign: "left" }}>{o.invoice_number}</button></td>
                     <td style={{ padding: "11px 16px", color: C.text2 }}>{o.customer_name}</td>
-                    <td style={{ padding: "11px 16px", color: C.text2 }}>{dv && dv.delivery_man_name ? dv.delivery_man_name : "—"}</td>
+                    <td style={{ padding: "11px 16px", color: C.text2 }}>{shipLabel(dv)}</td>
                     <td style={{ padding: "11px 16px", color: C.ready }}>
                       <div>{dv && dv.delivered_at ? fmtDateTime(dv.delivered_at) : "Delivered"}</div>
                       <div style={{ marginTop: 3 }}>{proofCell(dv, true)}</div>
@@ -3875,10 +3906,33 @@ function Delivery({ user, onOpenOrder }) {
       <Modal open={show} onClose={() => setShow(false)} title="Schedule delivery">
         <Field label="Order (ready for delivery)" value={form.order_id} onChange={(v) => setForm((f) => ({ ...f, order_id: v }))}
           options={[{ value: "", label: "Select order…" }, ...ready.map((o) => ({ value: o.id, label: `${o.invoice_number} — ${o.customer_name}` }))]} />
-        <Field label="Driver" value={form.deliverer_id} onChange={(v) => setForm((f) => ({ ...f, deliverer_id: v }))}
-          options={[{ value: "", label: deliverers.filter((d) => d.is_active).length ? "Unassigned" : "No drivers yet — add one below" }, ...deliverers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name })), { value: "__other__", label: "+ Add a new driver" }]} />
-        {form.deliverer_id === "__other__" && (
-          <Field label="New driver name" value={otherCourier} onChange={setOtherCourier} placeholder="e.g. Ahmad" required />
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12.5, color: C.text2, marginBottom: 6 }}>How is it shipped?</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[{ k: "in_house", l: "🚚 In-house van", c: C.order }, { k: "shopee", l: "📦 Shopee (SPX)", c: "#ee4d2d" }, { k: "lazada", l: "📦 Lazada (LEX)", c: "#a78bfa" }].map((ch) => {
+              const on = form.channel === ch.k;
+              return <button key={ch.k} type="button" onClick={() => setForm((f) => ({ ...f, channel: ch.k }))}
+                style={{ padding: "8px 13px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer",
+                  border: `1px solid ${on ? ch.c : C.border2}`, background: on ? ch.c + "22" : C.surface, color: on ? ch.c : C.text2 }}>{ch.l}</button>;
+            })}
+          </div>
+        </div>
+        {form.channel === "in_house" ? (
+          <>
+            <Field label="Driver" value={form.deliverer_id} onChange={(v) => setForm((f) => ({ ...f, deliverer_id: v }))}
+              options={[{ value: "", label: deliverers.filter((d) => d.is_active).length ? "Unassigned" : "No drivers yet — add one below" }, ...deliverers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name })), { value: "__other__", label: "+ Add a new driver" }]} />
+            {form.deliverer_id === "__other__" && (
+              <Field label="New driver name" value={otherCourier} onChange={setOtherCourier} placeholder="e.g. Ahmad" required />
+            )}
+          </>
+        ) : (
+          <>
+            <Field label="Tracking / AWB number" value={form.tracking_no} onChange={(v) => setForm((f) => ({ ...f, tracking_no: v }))}
+              placeholder={form.channel === "shopee" ? "e.g. MY123456789" : "e.g. LEX123456789"} required />
+            <div style={{ fontSize: 11.5, color: C.text3, marginBottom: 12, marginTop: -4 }}>
+              Print the {form.channel === "shopee" ? "Shopee" : "Lazada"} label, hand the parcel to their courier. Tracking + proof live in {form.channel === "shopee" ? "Shopee" : "Lazada"} — no in-house photo needed.
+            </div>
+          </>
         )}
         <Field label="Scheduled date" type="date" value={form.scheduled_date} onChange={(v) => setForm((f) => ({ ...f, scheduled_date: v }))} />
         <Field label="Delivery address" value={form.address} onChange={(v) => setForm((f) => ({ ...f, address: v }))} placeholder="Street, city, postcode…" />
@@ -3893,20 +3947,27 @@ function Delivery({ user, onOpenOrder }) {
         {confirmDeliver && (
           <>
             <div style={{ fontSize: 14, marginBottom: 8 }}><span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{confirmDeliver.invoice_number}</span> <span style={{ color: C.text2 }}>· {confirmDeliver.customer_name}</span></div>
+            {(() => { const isCourier = confirmDeliver.channel && confirmDeliver.channel !== "in_house"; const courierName = confirmDeliver.channel === "shopee" ? "Shopee (SPX)" : "Lazada (LEX)"; return (<>
             <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.8, marginBottom: 12 }}>
               {confirmDeliver.address && <div><span style={{ color: C.text3 }}>Address: </span>{confirmDeliver.address}</div>}
-              <div><span style={{ color: C.text3 }}>Driver: </span>{confirmDeliver.delivery_man_name || "Unassigned"}</div>
+              {isCourier ? (<>
+                <div><span style={{ color: C.text3 }}>Courier: </span>{courierName}</div>
+                <div><span style={{ color: C.text3 }}>Tracking: </span>{confirmDeliver.tracking_no || "—"}</div>
+              </>) : (
+                <div><span style={{ color: C.text3 }}>Driver: </span>{confirmDeliver.delivery_man_name || "Unassigned"}</div>
+              )}
               <div><span style={{ color: C.text3 }}>Scheduled: </span>{confirmDeliver.scheduled_date ? fmtDay(confirmDeliver.scheduled_date) : "—"}</div>
-              <div><span style={{ color: C.text3 }}>Proof: </span>{confirmDeliver.has_pod ? <span style={{ color: C.ready }}>✓ Attached</span> : <span style={{ color: C.hold }}>⚠ None yet</span>}</div>
+              {!isCourier && <div><span style={{ color: C.text3 }}>Proof: </span>{confirmDeliver.has_pod ? <span style={{ color: C.ready }}>✓ Attached</span> : <span style={{ color: C.hold }}>⚠ None yet</span>}</div>}
             </div>
-            {!confirmDeliver.has_pod && (
+            {!isCourier && !confirmDeliver.has_pod && (
               <label style={{ ...proofBtn, width: "100%", justifyContent: "center", marginBottom: 12 }}>📎 Attach proof photo<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(confirmDeliver.order_id, f); }} /></label>
             )}
-            <div style={{ fontSize: 12.5, color: C.text3, marginBottom: 16 }}>This marks the order delivered. Without a proof photo you'll be asked to confirm, and Boss &amp; Ops are notified. You can undo it from Completed if you mark it by mistake.</div>
+            <div style={{ fontSize: 12.5, color: C.text3, marginBottom: 16 }}>{isCourier ? `This marks the order handed to ${courierName} — their courier delivers it and owns the tracking. You can undo it from Completed if you mark it by mistake.` : "This marks the order delivered. Without a proof photo you'll be asked to confirm, and Boss & Ops are notified. You can undo it from Completed if you mark it by mistake."}</div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <Btn variant="ghost" onClick={() => setConfirmDeliver(null)}>Cancel</Btn>
-              <Btn variant="success" onClick={() => markDelivered(confirmDeliver.id)}><Icon name="check" size={15} /> Confirm delivered</Btn>
+              <Btn variant="success" onClick={() => markDelivered(confirmDeliver.id)}><Icon name="check" size={15} /> {isCourier ? "Confirm handed over" : "Confirm delivered"}</Btn>
             </div>
+            </>); })()}
           </>
         )}
       </Modal>
