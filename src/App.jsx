@@ -539,14 +539,15 @@ function Modal({ open, onClose, title, children, width = 560 }) {
     </div>
   );
 }
-function Field({ label, value, onChange, type = "text", options, placeholder, required, min, name, autoComplete }) {
-  const st = { width: "100%", padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text, outline: "none" };
+function Field({ label, value, onChange, type = "text", options, placeholder, required, min, name, autoComplete, disabled, hint }) {
+  const st = { width: "100%", padding: "9px 12px", background: disabled ? C.bg2 : C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: disabled ? C.text3 : C.text, outline: "none", cursor: disabled ? "not-allowed" : undefined };
   return (
     <label style={{ display: "block", marginBottom: 13 }}>
-      {label && <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: C.text2, marginBottom: 5 }}>{label}{required && <span style={{ color: C.danger }}> *</span>}</span>}
+      {label && <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: C.text2, marginBottom: 5 }}>{label}{required && <span style={{ color: C.danger }}> *</span>}{disabled && <span style={{ color: C.text3, fontWeight: 400 }}> · 🔒 locked</span>}</span>}
       {options
-        ? <select value={value} onChange={(e) => onChange(e.target.value)} style={st}>{options.map((o) => <option key={o.value ?? o} value={o.value ?? o} style={{ background: C.bg2 }}>{o.label ?? o}</option>)}</select>
-        : <input type={type} name={name} autoComplete={autoComplete} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} min={min} style={st} />}
+        ? <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} style={st}>{options.map((o) => <option key={o.value ?? o} value={o.value ?? o} style={{ background: C.bg2 }}>{o.label ?? o}</option>)}</select>
+        : <input type={type} name={name} autoComplete={autoComplete} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} min={min} style={st} />}
+      {hint && <span style={{ display: "block", fontSize: 11, color: C.text3, marginTop: 4 }}>{hint}</span>}
     </label>
   );
 }
@@ -1588,6 +1589,10 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
     try { await api("PATCH", `/orders/${orderId}`, { required_delivery_date: v }); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); }
   }
+  async function setExpiry(v) {
+    try { await api("PATCH", `/orders/${orderId}`, { expiry_date: v || null }); await load(); onUpdated && onUpdated(); }
+    catch (e) { alert(e.message); }
+  }
   async function setPriority(v) {
     try { await api("PATCH", `/orders/${orderId}`, { priority: v }); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); }
@@ -1732,6 +1737,11 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
                 ? <select value={order.priority || "normal"} onChange={(e) => setPriority(e.target.value)} style={{ padding: "5px 9px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13.5, fontWeight: 700, color: order.priority === "urgent" ? C.danger : C.text2 }}><option value="normal" style={{ background: C.bg2, color: C.text }}>Normal</option><option value="urgent" style={{ background: C.bg2, color: C.text }}>Urgent</option></select>
                 : <Pill color={order.priority === "urgent" ? C.danger : C.text2}>{order.priority === "urgent" ? "Urgent" : "Normal"}</Pill>
             } />
+            <LV label="Expiry date" v={
+              canMove
+                ? <input type="date" value={(order.expiry_date || "").slice(0, 10)} onChange={(e) => setExpiry(e.target.value)} style={{ padding: "5px 9px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 8, fontSize: 13.5, fontWeight: 600, color: C.text, colorScheme: "dark" }} />
+                : <span>{order.expiry_date ? fmtDay(order.expiry_date) : "—"}</span>
+            } />
             {/* importance tier removed — the delivery deadline is editable above */}
             {/* canRoute (Boss/Admin) edit the PIC in Stage actions below — don't show it twice. */}
             {!canRoute && <LV label="Person in charge" v={order.pic_name ? <span style={{ display: "inline-flex", gap: 7, alignItems: "center" }}><Avatar name={order.pic_name} color={order.pic_color} size={22} />{order.pic_name}</span> : "Unassigned"} />}
@@ -1743,7 +1753,6 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
                 {order.customer_name != null && <LV label="Contact" v={order.customer_contact || "—"} />}
                 {order.customer_name != null && <LV label="Address" v={order.delivery_address || "—"} />}
                 <LV label="Order date" v={order.order_date ? fmtDay(order.order_date) : "—"} />
-                <LV label="Expiry" v={order.expiry_date ? fmtDay(order.expiry_date) : "—"} />
                 <LV label="Source" v={order.source === "sql_account" ? "Auto-imported" : "Manual entry"} />
                 {delivery && <LV label="Driver" v={delivery.delivery_man_name || "Not assigned yet"} />}
                 {delivery && delivery.scheduled_date && <LV label="Scheduled" v={fmtDay(delivery.scheduled_date)} />}
@@ -3021,10 +3030,11 @@ function Reports({ user }) {
     const keys = tabsForRole.filter((k) => metricDefs[k]);
     const parts = await Promise.all(keys.map((k) => api("GET", `/reports/${k}?${qArg}`).then((dd) => [k, dd]).catch(() => [k, {}])));
     const data = Object.fromEntries(parts);
-    // Boss always gets individual performance in the export, even though the on-screen
-    // Staff/PIC tabs are parked behind STAFF_RANKING_ENABLED.
-    if (tabsForRole.includes("staff") || user.role === "super_admin") data._staff = await api("GET", `/reports/staff?${qArg}`).then((dd) => dd.staff || []).catch(() => []);
-    if (tabsForRole.includes("pic") || user.role === "super_admin") data._pics = await api("GET", `/reports/pic?${qArg}`).then((dd) => dd.pics || []).catch(() => []);
+    // Boss + Admin always get individual performance and the person-in-charge tables in
+    // the export, even though Staff ranking is parked behind STAFF_RANKING_ENABLED.
+    const exportsPeople = ["super_admin", "admin"].includes(user.role);
+    if (tabsForRole.includes("staff") || exportsPeople) data._staff = await api("GET", `/reports/staff?${qArg}`).then((dd) => dd.staff || []).catch(() => []);
+    if (exportsPeople) data._pics = await api("GET", `/reports/pic?${qArg}`).then((dd) => dd.pics || []).catch(() => []);
     // The non-metric tabs are part of the on-screen report too, so the export must carry them.
     if (tabsForRole.includes("orders")) data._orders = await api("GET", `/reports/orders?${qArg}`).then((dd) => dd.orders || []).catch(() => []);
     if (tabsForRole.includes("efficiency")) data._eff = await api("GET", `/reports/efficiency?${qArg}`).then((dd) => dd).catch(() => null);
@@ -3073,7 +3083,7 @@ function Reports({ user }) {
         rows.push([]);
       }
       if (data._staff) rows.push(["Individual performance"], ["Name", "Role", "Stages completed", "Items done", "Reworks"], ...data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks]), []);
-      if (data._pics) rows.push(["Person in charge"], ["Name", "Role", "Open now", "Overdue", "On hold", "Completed"], ...data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed]), []);
+      if (data._pics) rows.push(["Person in charge"], ["Name", "Role", "Open now", "Production", "Packing", "Overdue", "On hold", "Completed"], ...data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.active_prod, p.active_pack, p.overdue, p.on_hold, p.completed]), []);
       if (data._orders) rows.push(["Orders — per-order progress"], ORDER_HEAD, ...data._orders.map(orderRow), []);
       if (data._eff) {
         const e = data._eff;
@@ -3111,7 +3121,7 @@ function Reports({ user }) {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), META[key]);
       }
       if (data._staff) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Name", "Role", "Stages completed", "Items done", "Reworks"], ...data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks])]), "Individual");
-      if (data._pics) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Name", "Role", "Open now", "Overdue", "On hold", "Completed"], ...data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed])]), "PIC");
+      if (data._pics) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["Name", "Role", "Open now", "Production", "Packing", "Overdue", "On hold", "Completed"], ...data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.active_prod, p.active_pack, p.overdue, p.on_hold, p.completed])]), "PIC");
       if (data._orders) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([ORDER_HEAD, ...data._orders.map(orderRow)]), "Orders");
       if (data._eff) {
         const e = data._eff;
@@ -3239,7 +3249,7 @@ function Reports({ user }) {
         if ((dd.by_delivery_man || []).length) darkTable(["Driver", "Deliveries", "On time"], dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
       }
       if (data._staff && data._staff.length) { heading("Individual performance"); darkTable(["Name", "Role", "Done", "Items", "Reworks"], data._staff.map((s) => [s.name, ROLE_LABELS[s.role] || s.role, s.completions, s.items_done, s.reworks])); }
-      if (data._pics && data._pics.length) { heading("Person in charge"); darkTable(["Name", "Role", "Open", "Overdue", "On hold", "Completed"], data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed])); }
+      if (data._pics && data._pics.length) { heading("Person in charge"); darkTable(["Name", "Role", "Open", "Prod", "Pack", "Overdue", "On hold", "Completed"], data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.active_prod, p.active_pack, p.overdue, p.on_hold, p.completed])); }
       if (data._orders && data._orders.length) {
         heading("Orders - per-order progress");
         darkTable(["Invoice", "Customer", "Stage", "STKs", "%", "Days", "Status", "PIC"], data._orders.map((o) => [o.invoice_number, o.customer_name || "", (STAGE_LABELS[o.stage] || {}).label || o.stage, `${o.done_count}/${o.item_count}`, o.pct, o.days_in_stage, o.delivered ? (o.on_time ? "On-time" : "Late") : (o.late ? "Late" : "In progress"), o.pic_name || ""]));
@@ -3524,7 +3534,10 @@ function Delivery({ user, onOpenOrder }) {
 
   async function assign() {
     if (!form.order_id) { alert("Pick an order to schedule."); return; }
-    if (form.channel !== "in_house" && !form.tracking_no.trim()) {
+    if (!form.scheduled_date) { alert("Pick a scheduled delivery date."); return; }
+    if (form.channel === "in_house") {
+      if (!form.deliverer_id) { alert("Assign a driver for the in-house delivery."); return; }
+    } else if (!form.tracking_no.trim()) {
       alert("Enter the tracking / AWB number for the courier hand-off."); return;
     }
     try {
@@ -4012,7 +4025,8 @@ function Delivery({ user, onOpenOrder }) {
               <Field label="New driver name" value={editOther} onChange={setEditOther} placeholder="e.g. Ahmad" required />
             )}
             <Field label="Scheduled date" type="date" value={editForm.scheduled_date} onChange={(v) => setEditForm((f) => ({ ...f, scheduled_date: v }))} />
-            <Field label="Delivery address" value={editForm.address} onChange={(v) => setEditForm((f) => ({ ...f, address: v }))} placeholder="Street, city, postcode…" />
+            <Field label="Delivery address" value={editForm.address} onChange={(v) => setEditForm((f) => ({ ...f, address: v }))} placeholder="Street, city, postcode…"
+              disabled={!["super_admin", "admin"].includes(user.role)} hint={!["super_admin", "admin"].includes(user.role) ? "Locked once scheduled — ask Boss/Admin to change the address." : undefined} />
             <Field label="Notes" value={editForm.notes} onChange={(v) => setEditForm((f) => ({ ...f, notes: v }))} placeholder="Optional…" />
             <div style={{ display: "flex", gap: 10, justifyContent: "space-between", marginTop: 8, flexWrap: "wrap" }}>
               <Btn variant="danger" onClick={cancelDelivery}>Cancel this delivery</Btn>
@@ -4334,9 +4348,10 @@ function Audit() {
               </tbody>
             </table>
           </Card>
-          {(logs.length > 3 || (d && d.total != null && d.total > allLogsData.length)) && (
+          {(logs.length > 3 || cap > 200 || (d && d.total != null && d.total > allLogsData.length)) && (
             <div style={{ marginTop: 12, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               {logs.length > 3 && <Btn variant="ghost" size="sm" onClick={() => setAllLogs((v) => !v)}>{allLogs ? "Show less ▲" : `Show all ${logs.length}${total > logs.length ? ` of ${total}` : ""} ▼`}</Btn>}
+              {cap > 200 && <Btn variant="ghost" size="sm" onClick={() => setCap((c) => Math.max(200, c - 200))}>▲ Show previous 200</Btn>}
               {d && d.total != null && d.total > allLogsData.length && <Btn variant="soft" size="sm" onClick={() => { setCap((c) => c + 200); setAllLogs(true); }}>Show next {Math.min(200, d.total - allLogsData.length)} of {d.total} ▼</Btn>}
             </div>
           )}
