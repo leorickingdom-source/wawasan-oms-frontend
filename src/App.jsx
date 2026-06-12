@@ -2549,8 +2549,8 @@ function PicReport({ period, from, to, staffId }) {
   useEffect(() => { setRaw(null); api("GET", `/reports/pic?${reportQuery(period, from, to)}`).then((d) => setRaw(d.pics || [])).catch(() => setRaw([])); }, [period, from, to]);
   const data = raw == null ? null : (staffId ? raw.filter((p) => p.id === staffId) : raw);
   function exportCsv() {
-    const rows = [["Person in charge", "Role", "Open now", "Overdue", "On hold", "Completed (period)"]];
-    for (const p of data) rows.push([p.name, ROLE_LABELS[p.role] || p.role, p.active, p.overdue, p.on_hold, p.completed]);
+    const rows = [["Person in charge", "Role", "Open now", "Production", "Packing", "Overdue", "On hold", "Completed (period)"]];
+    for (const p of data) rows.push([p.name, ROLE_LABELS[p.role] || p.role, p.active, p.active_prod, p.active_pack, p.overdue, p.on_hold, p.completed]);
     downloadCsv(`pic-report-${period}.csv`, rows);
   }
   if (!data) return <Loading label="Loading people…" />;
@@ -2558,18 +2558,20 @@ function PicReport({ period, from, to, staffId }) {
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-        <span style={{ fontSize: 13, color: C.text3 }}>Open / Overdue / On-hold are live now · Completed counts this period</span>
+        <span style={{ fontSize: 13, color: C.text3 }}>Open now splits into Production / Packing (per-track PIC) · Overdue / On-hold live · Completed counts this period</span>
         <Btn variant="soft" size="sm" onClick={exportCsv}>Export PIC CSV</Btn>
       </div>
       <Card style={{ padding: 0, overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-          <thead><tr style={{ background: C.bg2 }}>{["Person in charge", "Role", "Open now", "Overdue", "On hold", "Completed"].map((h, i) => <th key={h} style={{ textAlign: i > 1 ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+          <thead><tr style={{ background: C.bg2 }}>{["Person in charge", "Role", "Open now", "Prod", "Pack", "Overdue", "On hold", "Completed"].map((h, i) => <th key={h} style={{ textAlign: i > 1 ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
           <tbody>
             {data.map((p) => (
               <tr key={p.id} style={{ borderBottom: `1px solid ${C.border}` }}>
                 <td style={{ padding: "9px 14px", color: C.text }}><span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}><Avatar name={p.name} color={p.avatar_color} size={24} />{p.name}</span></td>
                 <td style={{ padding: "9px 14px", color: C.text2 }}>{ROLE_LABELS[p.role] || p.role}</td>
                 <td style={{ padding: "9px 14px", textAlign: "right", color: C.text, fontWeight: 700 }}>{p.active}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", color: p.active_prod > 0 ? C.production : C.text3 }}>{p.active_prod}</td>
+                <td style={{ padding: "9px 14px", textAlign: "right", color: p.active_pack > 0 ? C.packing : C.text3 }}>{p.active_pack}</td>
                 <td style={{ padding: "9px 14px", textAlign: "right", color: p.overdue > 0 ? C.danger : C.text3 }}>{p.overdue}</td>
                 <td style={{ padding: "9px 14px", textAlign: "right", color: p.on_hold > 0 ? C.hold : C.text3 }}>{p.on_hold}</td>
                 <td style={{ padding: "9px 14px", textAlign: "right", color: C.ready, fontWeight: 700 }}>{p.completed}</td>
@@ -2956,9 +2958,11 @@ function ReportArchive({ onDownload, busy }) {
 }
 
 function Reports({ user }) {
+  // "pic" = live workload per person in charge (operational, per-track) — always on.
+  // "staff" = per-person productivity ranking — stays behind STAFF_RANKING_ENABLED.
   const tabsForRole = user.role === "production_lead"
-    ? ["production", "packing", "efficiency", ...(STAFF_RANKING_ENABLED ? ["staff", "pic"] : []), ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : [])]
-    : ["production", "packing", "delivery", "efficiency", "mistakes", ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : []), "trend", "orders", ...(STAFF_RANKING_ENABLED ? ["staff", "pic"] : []), "archive"];
+    ? ["production", "packing", "efficiency", "pic", ...(STAFF_RANKING_ENABLED ? ["staff"] : []), ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : [])]
+    : ["production", "packing", "delivery", "efficiency", "mistakes", ...(REWARD_SYSTEM_ENABLED ? ["scorecard"] : []), "trend", "orders", "pic", ...(STAFF_RANKING_ENABLED ? ["staff"] : []), "archive"];
   const CUSTOM = ["orders", "staff", "pic", "efficiency", "mistakes", "scorecard", "trend", "archive"]; // tabs with their own component (no metric cards/trend)
   const TAB_LABEL = { staff: "Staff", pic: "Person in charge", efficiency: "Efficiency", mistakes: "Mistakes", scorecard: "Scoreboard", trend: "Trend", archive: "Archive" };
   const PERIOD_LABEL = { daily: "Today", weekly: "This week", monthly: "This month" };
@@ -3321,6 +3325,26 @@ function Reports({ user }) {
       {!CUSTOM.includes(tab) && trend.length > 0 && (
         <TrendChart data={trend} kind={tab === "delivery" ? "line" : "bar"} color={tab === "delivery" ? C.ready : C.accent} label={tab === "packing" ? "Packed" : tab === "delivery" ? "Delivered" : "Completed"} />
       )}
+      {tab === "delivery" && (d.by_channel || []).length > 0 && (() => {
+        const CH = { in_house: { label: "🚚 In-house van", color: C.order }, shopee: { label: "📦 Shopee (SPX)", color: "#ee4d2d" }, lazada: { label: "📦 Lazada (LEX)", color: "#a78bfa" } };
+        return (
+        <Card style={{ marginTop: 18 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>How it shipped</h3>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr>{["Channel", "Deliveries", "On-time"].map((h) => <th key={h} style={{ textAlign: "left", padding: "7px 8px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {d.by_channel.map((x) => { const c = CH[x.channel] || { label: x.channel, color: C.text2 }; return (
+                <tr key={x.channel} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "7px 8px", color: c.color, fontWeight: 600 }}>{c.label}</td>
+                  <td style={{ padding: "7px 8px", color: C.text2 }}>{x.total}</td>
+                  <td style={{ padding: "7px 8px", color: C.ready }}>{x.on_time}{x.total ? ` (${Math.round((x.on_time / x.total) * 100)}%)` : ""}</td>
+                </tr>
+              ); })}
+            </tbody>
+          </table>
+        </Card>
+        );
+      })()}
       {tab === "delivery" && (d.by_delivery_man || []).length > 0 && (
         <Card style={{ marginTop: 18 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>By driver</h3>
