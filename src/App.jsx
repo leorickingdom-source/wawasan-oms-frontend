@@ -162,7 +162,7 @@ const NAV = [
   { id: "dashboard", label: "Dashboard", icon: "dashboard", roles: ["super_admin", "admin"] },
   { id: "delivery", label: "Delivery", icon: "truck", roles: ["super_admin", "delivery_team", "admin", "production_lead"] },
   { id: "floor", label: "Floor Display", icon: "display" }, // every role; rendered as a distinct launch button, not a workspace tab
-  { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "production_lead"] },
+  { id: "reports", label: "Reports", icon: "chart", roles: ["super_admin", "production_lead", "admin"] },
   { id: "remarks", label: "Production Remarks", icon: "message", roles: ["super_admin", "production_lead", "production_staff", "admin"] },
   { id: "audit", label: "Audit Trail", icon: "audit", roles: ["super_admin", "admin"] },
   { id: "users", label: "User Management", icon: "users", roles: ["super_admin", "admin"] },
@@ -1511,7 +1511,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
   const [moreOpen, setMoreOpen] = useState(false); // Details "More" expander — keep the wall collapsed; Internal Notes live inside
   const canMove = ["super_admin"].includes(user.role);
   // Back-office Admin (deputy) may route an order — set PIC + priority + deadline —
-  // but not move stages, hold/flag, or cancel (those stay canMove = Boss/Ops).
+  // and put it on hold (soft, reversible). Advancing stages and Cancel stay Boss-only.
   const canRoute = ["super_admin", "admin"].includes(user.role);
   const roleCanMark = ["super_admin", "production_lead", "production_staff", "packing_staff"].includes(user.role);
   const isLead = user.role === "production_lead";
@@ -1923,8 +1923,8 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
 
       {canRoute && (
         <div style={{ marginTop: 22, borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, marginBottom: 8 }}>{canMove ? "Stage actions" : "Routing"}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: canMove ? 12 : 0, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: C.text2, marginBottom: 8 }}>{canMove ? "Stage actions" : "Order actions"}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
             <span style={{ fontSize: 12.5, color: C.text2, minWidth: 28 }}>In charge</span>
             <select value={order.pic_id || ""} onChange={(e) => assignPic(e.target.value)} style={{ flex: 1, minWidth: 180, padding: "9px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, fontSize: 14, color: C.text }}>
               <option value="" style={{ background: C.bg2 }}>Unassigned</option>
@@ -1932,15 +1932,11 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
               {picUsers.map((u) => <option key={u.id} value={u.id} style={{ background: C.bg2 }}>{u.name} — {ROLE_LABELS[u.role] || u.role}</option>)}
             </select>
           </div>
-          {canMove && (
-            <>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Btn variant="soft" size="sm" onClick={() => setFlag({ on_hold: !order.on_hold, reason: reason || undefined })} disabled={busy}>{order.on_hold ? "Release hold" : "Put on hold"}</Btn>
-                <Btn variant="soft" size="sm" onClick={() => setFlag({ waiting_stock: !order.waiting_stock })} disabled={busy}>{order.waiting_stock ? "Clear waiting stock" : "Flag waiting stock"}</Btn>
-                <Btn variant="danger" size="sm" onClick={cancelOrder} disabled={busy}>Cancel order</Btn>
-              </div>
-            </>
-          )}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn variant="soft" size="sm" onClick={() => setFlag({ on_hold: !order.on_hold, reason: reason || undefined })} disabled={busy}>{order.on_hold ? "Release hold" : "Put on hold"}</Btn>
+            {canMove && <Btn variant="soft" size="sm" onClick={() => setFlag({ waiting_stock: !order.waiting_stock })} disabled={busy}>{order.waiting_stock ? "Clear waiting stock" : "Flag waiting stock"}</Btn>}
+            {canMove && <Btn variant="danger" size="sm" onClick={cancelOrder} disabled={busy}>Cancel order</Btn>}
+          </div>
         </div>
       )}
     </div>
