@@ -2992,6 +2992,9 @@ function Reports({ user }) {
     if (tabsForRole.includes("orders")) data._orders = await api("GET", `/reports/orders?${qArg}`).then((dd) => dd.orders || []).catch(() => []);
     if (tabsForRole.includes("efficiency")) data._eff = await api("GET", `/reports/efficiency?${qArg}`).then((dd) => dd).catch(() => null);
     if (tabsForRole.includes("mistakes")) data._mistakes = await api("GET", `/reports/mistakes?${qArg}`).then((dd) => dd).catch(() => null);
+    // The lead's weekly production notes + the Boss's monthly summary, for the same window.
+    data._remarks = await api("GET", "/remarks").then((r) => r || []).catch(() => []);
+    data._monthSummary = await api("GET", "/remarks/monthly").then((r) => r || []).catch(() => []);
     return data;
   }
   // Exports accept an optional scope (qArg/tag/label) so the Archive can request weekly
@@ -3000,6 +3003,22 @@ function Reports({ user }) {
   const exQ = (a) => (typeof a === "string" ? a : q);
   const exTag = (a) => (typeof a === "string" ? a : fileTag);
   const exLabel = (a) => (typeof a === "string" ? a : rangeLabel);
+  // Production remarks that fall inside the export window (weekly = this week, monthly =
+  // this month, range = from..to). Remarks are weekly; include any whose week overlaps.
+  const remarksInScope = (remarks, tg) => {
+    if (!remarks || !remarks.length) return [];
+    const now = new Date(); let ws, we = now;
+    if (tg === "monthly") ws = new Date(now.getFullYear(), now.getMonth(), 1);
+    else if (usingRange) { ws = new Date(from); we = new Date(`${to}T23:59:59`); }
+    else { ws = new Date(now); ws.setDate(now.getDate() - ((now.getDay() + 6) % 7)); ws.setHours(0, 0, 0, 0); }
+    return remarks.filter((r) => new Date(r.week_start) <= we && new Date(r.week_end) >= ws);
+  };
+  // The Boss's summary for the current month — only travels with a Monthly export.
+  const monthSummaryInScope = (mlist, tg) => {
+    if (tg !== "monthly" || !mlist || !mlist.length) return null;
+    const now = new Date(); const k = `${now.getFullYear()}-${now.getMonth()}`;
+    return mlist.find((s) => { const d = new Date(s.month_start); return `${d.getFullYear()}-${d.getMonth()}` === k; }) || null;
+  };
   // Per-order row shared by every export format.
   const orderRow = (o) => [o.invoice_number, o.customer_name || "", (STAGE_LABELS[o.stage] || {}).label || o.stage, o.done_count, o.item_count, o.pct, o.days_in_stage, o.cycle_hours, o.required_delivery_date, o.delivered ? (o.on_time ? "Delivered on-time" : "Delivered late") : (o.late ? "Late" : "In progress"), o.pic_name || ""];
   const ORDER_HEAD = ["Invoice", "Customer", "Stage", "STKs done", "STKs total", "% done", "Days in stage", "Cycle (h)", "Due", "Status", "PIC"];
@@ -3031,6 +3050,13 @@ function Reports({ user }) {
         if (m.amendments && m.amendments.list.length) rows.push(["Amendments — orders corrected"], ["Invoice", "By", "Change", "When"], ...m.amendments.list.map((a) => [a.invoice_number || "", a.user_name || "", a.details || "edited", a.created_at]), []);
         if (m.late && m.late.list.length) rows.push(["Late deliveries"], ["Invoice", "Days late", "Driver"], ...m.late.list.map((o) => [o.invoice_number, o.days_late, o.driver || ""]), []);
       }
+      const remC = remarksInScope(data._remarks, tg);
+      const sumC = monthSummaryInScope(data._monthSummary, tg);
+      if (sumC || remC.length) {
+        rows.push(["Production Remarks"]);
+        if (sumC) rows.push(["Monthly summary", sumC.author_name || "", sumC.content], []);
+        if (remC.length) rows.push(["Week", "Author", "Note"], ...remC.map((r) => [isoWeekLabel(r.week_start), r.author_name, r.content]), []);
+      }
       downloadCsv(`reports-${tg}.csv`, rows);
     } finally { setBusy(""); }
   }
@@ -3059,6 +3085,14 @@ function Reports({ user }) {
         const m = data._mistakes;
         const rows = [["Amendments", m.amendments ? m.amendments.count : 0], ["Late deliveries", m.late ? m.late.count : 0], ["Failed", m.failed_count], ["Cancelled", m.cancelled_count], ["On hold now", m.on_hold_count], ["Waiting stock", m.waiting_stock_count], [], ["Amendment invoice", "By", "Change", "When"], ...((m.amendments && m.amendments.list) || []).map((a) => [a.invoice_number || "", a.user_name || "", a.details || "edited", a.created_at]), [], ["Late invoice", "Days late", "Driver"], ...((m.late && m.late.list) || []).map((o) => [o.invoice_number, o.days_late, o.driver || ""])];
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "Mistakes");
+      }
+      const remX = remarksInScope(data._remarks, tg);
+      const sumX = monthSummaryInScope(data._monthSummary, tg);
+      if (sumX || remX.length) {
+        const rrows = [];
+        if (sumX) rrows.push(["Monthly summary", sumX.author_name || "", sumX.content], []);
+        rrows.push(["Week", "Author", "Note"], ...remX.map((r) => [isoWeekLabel(r.week_start), r.author_name, r.content]));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rrows), "Remarks");
       }
       XLSX.writeFile(wb, `reports-${tg}.xlsx`);
     } finally { setBusy(""); }
@@ -3186,6 +3220,13 @@ function Reports({ user }) {
         kpiCards([["Amendments", m.amendments ? m.amendments.count : 0], ["Late deliveries", m.late ? m.late.count : 0], ["Failed", m.failed_count], ["Cancelled", m.cancelled_count], ["On hold now", m.on_hold_count], ["Waiting stock", m.waiting_stock_count]]);
         if (m.amendments && m.amendments.list.length) darkTable(["Invoice", "By", "Change", "When"], m.amendments.list.map((a) => [a.invoice_number || "", a.user_name || "", a.details || "edited", a.created_at ? new Date(a.created_at).toLocaleDateString("en-GB") : ""]));
         if (m.late && m.late.list.length) darkTable(["Invoice", "Days late", "Driver"], m.late.list.map((o) => [o.invoice_number, o.days_late, o.driver || ""]));
+      }
+      const remP = remarksInScope(data._remarks, tg);
+      const sumP = monthSummaryInScope(data._monthSummary, tg);
+      if (sumP || remP.length) {
+        heading("Production Remarks");
+        if (sumP) darkTable(["Monthly summary", "By"], [[sumP.content, sumP.author_name || "Boss"]]);
+        if (remP.length) darkTable(["Week", "Author", "Note"], remP.map((r) => [isoWeekLabel(r.week_start), r.author_name, r.content]));
       }
       doc.save(`reports-${tg}.pdf`);
     } catch (e) {
@@ -3938,7 +3979,15 @@ function Remarks({ user }) {
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [allArchive, setAllArchive] = useState(false);
+  const [archView, setArchView] = useState("weekly"); // weekly | monthly grouping of the archive
+  const [monthly, setMonthly] = useState([]); // Boss-authored month summaries
+  const [monthContent, setMonthContent] = useState("");
+  const [mBusy, setMBusy] = useState(false);
+  const [mSaved, setMSaved] = useState(false);
   const canPost = ["super_admin", "production_lead"].includes(user.role);
+  const canEditMonthly = user.role === "super_admin"; // Boss writes the monthly summary
+  const curMonthKey = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; })();
+  const monthKeyOf = (dateStr) => { const d = new Date(dateStr); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
 
   async function load() {
     const all = await api("GET", "/remarks").catch(() => []);
@@ -3946,6 +3995,10 @@ function Remarks({ user }) {
     const c = await api("GET", "/remarks/current").catch(() => null);
     setCur(c || null);
     setContent(c ? c.content : "");
+    const mr = await api("GET", "/remarks/monthly").catch(() => []);
+    setMonthly(mr || []);
+    const curM = (mr || []).find((m) => monthKeyOf(m.month_start) === curMonthKey);
+    setMonthContent(curM ? curM.content : "");
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
 
@@ -3959,11 +4012,31 @@ function Remarks({ user }) {
       await load();
     } catch (e) { alert(e.message); } finally { setBusy(false); }
   }
+  async function saveMonth() {
+    if (!monthContent.trim()) return;
+    setMBusy(true); setMSaved(false);
+    try { await api("POST", "/remarks/monthly", { content: monthContent }); setMSaved(true); await load(); }
+    catch (e) { alert(e.message); } finally { setMBusy(false); }
+  }
 
   if (list === null || cur === undefined) return <Loading />;
   const archive = list.filter((r) => !cur || r.id !== cur.id);
   const shownArchive = allArchive ? archive : archive.slice(0, 3);
   const weekLabel = isoWeekLabel(cur ? cur.week_start : new Date().toISOString().slice(0, 10));
+  // Monthly view: roll all weekly remarks up under their month, newest first.
+  const monthGroups = (() => {
+    const m = {};
+    const ensure = (dateStr) => {
+      const d = new Date(dateStr);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      if (!m[key]) m[key] = { key, label: d.toLocaleDateString("en-GB", { month: "long", year: "numeric" }), weeks: [], summary: null };
+      return key;
+    };
+    for (const r of list) m[ensure(r.week_start)].weeks.push(r);
+    for (const mr of monthly) m[ensure(mr.month_start)].summary = mr;
+    if (canEditMonthly && !m[curMonthKey]) ensure(`${curMonthKey}-01`);
+    return Object.keys(m).sort().reverse().map((k) => m[k]);
+  })();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 920 }}>
@@ -3991,18 +4064,59 @@ function Remarks({ user }) {
       </Card>
 
       <Card style={{ padding: "20px 22px" }}>
-        <h3 style={{ fontSize: 16, fontWeight: 800, color: C.text, marginBottom: 16 }}>Archive</h3>
-        {archive.length === 0 && <Empty label="No archived remarks yet." />}
-        {shownArchive.map((r) => (
-          <div key={r.id} style={{ paddingBottom: 16, marginBottom: 16, borderBottom: `1px solid ${C.border}` }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
-              <Pill color={C.accent} style={{ fontSize: 12, padding: "3px 11px" }}>{isoWeekLabel(r.week_start)}</Pill>
-              <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.text3 }}>{fmtDateTime(r.created_at)} · {r.author_name}</span>
-            </div>
-            <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{r.content}</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+          <h3 style={{ fontSize: 16, fontWeight: 800, color: C.text, margin: 0 }}>Archive</h3>
+          <div style={{ display: "flex", gap: 3, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 9, padding: 3 }}>
+            {[["weekly", "Weekly"], ["monthly", "Monthly"]].map(([k, lbl]) => (
+              <button key={k} onClick={() => setArchView(k)} style={{ background: archView === k ? C.surface2 : "transparent", border: "none", borderRadius: 7, padding: "6px 12px", cursor: "pointer", fontSize: 12.5, fontWeight: archView === k ? 700 : 500, color: archView === k ? C.text : C.text2 }}>{lbl}</button>
+            ))}
           </div>
-        ))}
-        {archive.length > 3 && <Btn variant="ghost" size="sm" onClick={() => setAllArchive((v) => !v)}>{allArchive ? "Show less ▲" : `Show all ${archive.length} ▼`}</Btn>}
+        </div>
+        {archView === "monthly" ? (
+          monthGroups.length === 0 ? <Empty label="No remarks yet." /> : monthGroups.map((g) => (
+            <div key={g.key} style={{ marginBottom: 22 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: C.accent, textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 10 }}>{g.label}{g.weeks.length ? ` · ${g.weeks.length} week${g.weeks.length === 1 ? "" : "s"}` : ""}</div>
+              {canEditMonthly && g.key === curMonthKey ? (
+                <div style={{ background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.text3, marginBottom: 8 }}>Monthly summary (Boss)</div>
+                  <textarea value={monthContent} onChange={(e) => { setMonthContent(e.target.value); setMSaved(false); }} rows={3} placeholder="Boss summary for this month…" style={{ width: "100%", padding: "10px 12px", background: C.bg2, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 14, resize: "vertical", lineHeight: 1.5 }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10 }}>
+                    <Btn size="sm" onClick={saveMonth} disabled={mBusy || !monthContent.trim()}><Icon name="check" size={14} /> {mBusy ? "Saving…" : "Save summary"}</Btn>
+                    {mSaved && <span style={{ color: C.ready, fontSize: 13 }}>Saved ✓</span>}
+                  </div>
+                </div>
+              ) : g.summary ? (
+                <div style={{ background: C.accent + "12", border: `1px solid ${C.accent}33`, borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: C.accent, marginBottom: 6 }}>Monthly summary · {g.summary.author_name || "Boss"}</div>
+                  <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{g.summary.content}</div>
+                </div>
+              ) : null}
+              {g.weeks.map((r) => (
+                <div key={r.id} style={{ paddingBottom: 12, marginBottom: 12, borderBottom: `1px solid ${C.border}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+                    <Pill color={C.accent} style={{ fontSize: 12, padding: "3px 11px" }}>{isoWeekLabel(r.week_start)}</Pill>
+                    <span style={{ fontFamily: MONO, fontSize: 12, color: C.text3 }}>{r.author_name}</span>
+                  </div>
+                  <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{r.content}</div>
+                </div>
+              ))}
+            </div>
+          ))
+        ) : (
+          <>
+            {archive.length === 0 && <Empty label="No archived remarks yet." />}
+            {shownArchive.map((r) => (
+              <div key={r.id} style={{ paddingBottom: 16, marginBottom: 16, borderBottom: `1px solid ${C.border}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
+                  <Pill color={C.accent} style={{ fontSize: 12, padding: "3px 11px" }}>{isoWeekLabel(r.week_start)}</Pill>
+                  <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.text3 }}>{fmtDateTime(r.created_at)} · {r.author_name}</span>
+                </div>
+                <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{r.content}</div>
+              </div>
+            ))}
+            {archive.length > 3 && <Btn variant="ghost" size="sm" onClick={() => setAllArchive((v) => !v)}>{allArchive ? "Show less ▲" : `Show all ${archive.length} ▼`}</Btn>}
+          </>
+        )}
       </Card>
     </div>
   );
