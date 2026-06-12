@@ -2715,6 +2715,47 @@ function EfficiencyReport({ period, from, to }) {
 
 // Mistakes lens: amendments, late / failed deliveries, cancellations, holds and
 // waiting-stock — the errors nothing aggregated before. Backed by /reports/mistakes.
+// Delivery By-carrier drill-down: one driver's or courier's deliveries this period.
+function DeliveryCarrierDetail({ carrier, period, from, to, onClose }) {
+  const [d, setD] = useState(null);
+  useEffect(() => {
+    setD(null);
+    const qp = new URLSearchParams({ kind: carrier.kind, key: carrier.key, ...(from && to ? { from, to } : { period }) });
+    api("GET", `/reports/delivery/carrier?${qp.toString()}`).then(setD).catch(() => setD(false));
+  }, [carrier, period, from, to]);
+  const turn = d && d.avg_turnaround_hours != null ? (Number(d.avg_turnaround_hours) >= 48 ? Math.round(Number(d.avg_turnaround_hours) / 24) + "d" : d.avg_turnaround_hours + "h") : "—";
+  return (
+    <Modal open onClose={onClose} title={`${carrier.kind === "courier" ? "📦" : "🚚"} ${carrier.name}`} width={640}>
+      {!d ? <Loading /> : d === false ? <div style={{ color: C.danger }}>Could not load.</div> : (
+        <div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 14 }}>
+            <MetricCard label="Deliveries" value={d.total} tone={C.accent} />
+            <MetricCard label="On-time" value={d.total ? `${d.on_time_rate}%` : "—"} tone={C.ready} />
+            <MetricCard label="Avg turnaround" value={turn} tone={C.order} />
+          </div>
+          <Card style={{ padding: 0, overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Delivered", "On-time", "Tracking"].map((h) => <th key={h} style={{ textAlign: "left", padding: "9px 12px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+              <tbody>
+                {(d.orders || []).length === 0 && <tr><td colSpan={5}><Empty label="No deliveries in this period." /></td></tr>}
+                {(d.orders || []).map((o, i) => (
+                  <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <td style={{ padding: "8px 12px", fontFamily: MONO, color: C.text }}>{o.invoice_number}</td>
+                    <td style={{ padding: "8px 12px", color: C.text2 }}>{o.customer_name || "—"}</td>
+                    <td style={{ padding: "8px 12px", color: C.text2 }}>{fmtDay(o.delivered_at)}</td>
+                    <td style={{ padding: "8px 12px", color: o.on_time ? C.ready : C.danger }}>{o.on_time ? "On-time" : "Late"}</td>
+                    <td style={{ padding: "8px 12px", fontFamily: MONO, color: C.text3 }}>{o.tracking_no || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function MistakesReport({ period, from, to }) {
   const [d, setD] = useState(null);
   useEffect(() => { setD(null); api("GET", `/reports/mistakes?${reportQuery(period, from, to)}`).then(setD).catch(() => setD(false)); }, [period, from, to]);
@@ -2724,6 +2765,7 @@ function MistakesReport({ period, from, to }) {
   const fmtWhen = (s) => s ? new Date(s).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
   const cards = [
     ["Amendments", d.amendments.count, C.danger], ["Late deliveries", d.late.count, C.danger], ["Failed deliveries", d.failed_count, C.danger],
+    ["Send-backs", (d.sendbacks && d.sendbacks.count) || 0, C.hold],
     ["Cancelled", d.cancelled_count, C.hold], ["On hold now", d.on_hold_count, C.hold], ["Waiting stock", d.waiting_stock_count, C.hold],
   ];
   return (
@@ -2762,6 +2804,44 @@ function MistakesReport({ period, from, to }) {
                   <td style={{ padding: "9px 14px", fontFamily: MONO, color: C.accent2 }}>{o.invoice_number}</td>
                   <td style={{ padding: "9px 14px", textAlign: "right" }}><Pill color={C.danger}>+{o.days_late}</Pill></td>
                   <td style={{ padding: "9px 14px", color: C.text2 }}>{o.driver || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      </>)}
+
+      {d.sendbacks && d.sendbacks.list.length > 0 && (<>
+        <div style={secT}>Send-backs — orders moved back a stage</div>
+        <Card style={{ padding: 0, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Moved", "By", "Reason", "When"].map((h) => <th key={h} style={{ textAlign: "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {d.sendbacks.list.map((s, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "9px 14px", fontFamily: MONO, color: C.accent2 }}>{s.invoice_number || "—"}</td>
+                  <td style={{ padding: "9px 14px", color: C.text2 }}>{(STAGE_LABELS[s.from_stage] || {}).label || s.from_stage} → {(STAGE_LABELS[s.to_stage] || {}).label || s.to_stage}</td>
+                  <td style={{ padding: "9px 14px", color: C.text2 }}>{s.user_name || "—"}</td>
+                  <td style={{ padding: "9px 14px", color: C.text }}>{s.reason || "—"}</td>
+                  <td style={{ padding: "9px 14px", color: C.text3, whiteSpace: "nowrap" }}>{fmtWhen(s.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      </>)}
+
+      {d.sendbacks && (d.sendbacks.items || []).length > 0 && (<>
+        <div style={secT}>Most sent-back STKs — which items cause the most rework</div>
+        <Card style={{ padding: 0, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr style={{ background: C.bg2 }}>{["STK", "Product", "Send-backs"].map((h, i) => <th key={h} style={{ textAlign: i === 2 ? "right" : "left", padding: "10px 14px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {d.sendbacks.items.map((it, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <td style={{ padding: "9px 14px", fontFamily: MONO, color: C.text }}>{it.sku || "—"}</td>
+                  <td style={{ padding: "9px 14px", color: C.text2 }}>{it.name || "—"}</td>
+                  <td style={{ padding: "9px 14px", textAlign: "right" }}><Pill color={C.hold}>{it.sendbacks}</Pill></td>
                 </tr>
               ))}
             </tbody>
@@ -3005,6 +3085,7 @@ function Reports({ user }) {
   const [staffOpts, setStaffOpts] = useState([]);
   const [d, setD] = useState({});
   const [busy, setBusy] = useState("");
+  const [carrier, setCarrier] = useState(null); // delivery By-carrier drill-down target
   const usingRange = !!(from && to);
   const q = reportQuery(period, from, to);
   const rangeLabel = usingRange ? `${from} → ${to}` : (PERIOD_LABEL[period] || period);
@@ -3088,7 +3169,7 @@ function Reports({ user }) {
       for (const key of tabsForRole.filter((k) => metricDefs[k])) {
         const dd = data[key] || {};
         rows.push([META[key]], ["Metric", "Value"], ...kpiRows(key, dd));
-        if ((dd.by_delivery_man || []).length) rows.push([], ["Driver", "Deliveries", "On time"], ...dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
+        if ((dd.by_carrier || []).length) rows.push([], ["Carrier", "Deliveries", "On time"], ...dd.by_carrier.map((x) => [x.name, x.total, x.on_time]));
         if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
         rows.push([]);
       }
@@ -3103,9 +3184,11 @@ function Reports({ user }) {
       }
       if (data._mistakes) {
         const m = data._mistakes;
-        rows.push(["Mistakes"], ["Amendments", m.amendments ? m.amendments.count : 0], ["Late deliveries", m.late ? m.late.count : 0], ["Failed deliveries", m.failed_count], ["Cancelled", m.cancelled_count], ["On hold now", m.on_hold_count], ["Waiting stock", m.waiting_stock_count], []);
+        rows.push(["Mistakes"], ["Amendments", m.amendments ? m.amendments.count : 0], ["Late deliveries", m.late ? m.late.count : 0], ["Send-backs", m.sendbacks ? m.sendbacks.count : 0], ["Failed deliveries", m.failed_count], ["Cancelled", m.cancelled_count], ["On hold now", m.on_hold_count], ["Waiting stock", m.waiting_stock_count], []);
         if (m.amendments && m.amendments.list.length) rows.push(["Amendments — orders corrected"], ["Invoice", "By", "Change", "When"], ...m.amendments.list.map((a) => [a.invoice_number || "", a.user_name || "", a.details || "edited", a.created_at]), []);
         if (m.late && m.late.list.length) rows.push(["Late deliveries"], ["Invoice", "Days late", "Driver"], ...m.late.list.map((o) => [o.invoice_number, o.days_late, o.driver || ""]), []);
+        if (m.sendbacks && m.sendbacks.list.length) rows.push(["Send-backs — moved back a stage"], ["Invoice", "From", "To", "By", "Reason", "When"], ...m.sendbacks.list.map((s) => [s.invoice_number || "", (STAGE_LABELS[s.from_stage] || {}).label || s.from_stage, (STAGE_LABELS[s.to_stage] || {}).label || s.to_stage, s.user_name || "", s.reason || "", s.created_at]), []);
+        if (m.sendbacks && (m.sendbacks.items || []).length) rows.push(["Most sent-back STKs"], ["STK", "Product", "Send-backs"], ...m.sendbacks.items.map((it) => [it.sku || "", it.name || "", it.sendbacks]), []);
       }
       const remC = remarksInScope(data._remarks, tg);
       const sumC = monthSummaryInScope(data._monthSummary, tg);
@@ -3126,7 +3209,7 @@ function Reports({ user }) {
       for (const key of tabsForRole.filter((k) => metricDefs[k])) {
         const dd = data[key] || {};
         const rows = [[`${META[key]} — ${lb}`], [], ["Metric", "Value"], ...kpiRows(key, dd)];
-        if ((dd.by_delivery_man || []).length) rows.push([], ["Driver", "Deliveries", "On time"], ...dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
+        if ((dd.by_carrier || []).length) rows.push([], ["Carrier", "Deliveries", "On time"], ...dd.by_carrier.map((x) => [x.name, x.total, x.on_time]));
         if ((dd.daily_trend || []).length) rows.push([], ["Date", "Count"], ...dd.daily_trend.map((t) => [t.date, t.count]));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), META[key]);
       }
@@ -3140,7 +3223,7 @@ function Reports({ user }) {
       }
       if (data._mistakes) {
         const m = data._mistakes;
-        const rows = [["Amendments", m.amendments ? m.amendments.count : 0], ["Late deliveries", m.late ? m.late.count : 0], ["Failed", m.failed_count], ["Cancelled", m.cancelled_count], ["On hold now", m.on_hold_count], ["Waiting stock", m.waiting_stock_count], [], ["Amendment invoice", "By", "Change", "When"], ...((m.amendments && m.amendments.list) || []).map((a) => [a.invoice_number || "", a.user_name || "", a.details || "edited", a.created_at]), [], ["Late invoice", "Days late", "Driver"], ...((m.late && m.late.list) || []).map((o) => [o.invoice_number, o.days_late, o.driver || ""])];
+        const rows = [["Amendments", m.amendments ? m.amendments.count : 0], ["Late deliveries", m.late ? m.late.count : 0], ["Send-backs", m.sendbacks ? m.sendbacks.count : 0], ["Failed", m.failed_count], ["Cancelled", m.cancelled_count], ["On hold now", m.on_hold_count], ["Waiting stock", m.waiting_stock_count], [], ["Amendment invoice", "By", "Change", "When"], ...((m.amendments && m.amendments.list) || []).map((a) => [a.invoice_number || "", a.user_name || "", a.details || "edited", a.created_at]), [], ["Late invoice", "Days late", "Driver"], ...((m.late && m.late.list) || []).map((o) => [o.invoice_number, o.days_late, o.driver || ""]), [], ["Send-back invoice", "From", "To", "By", "Reason", "When"], ...((m.sendbacks && m.sendbacks.list) || []).map((s) => [s.invoice_number || "", (STAGE_LABELS[s.from_stage] || {}).label || s.from_stage, (STAGE_LABELS[s.to_stage] || {}).label || s.to_stage, s.user_name || "", s.reason || "", s.created_at]), [], ["Most sent-back STK", "Product", "Send-backs"], ...((m.sendbacks && m.sendbacks.items) || []).map((it) => [it.sku || "", it.name || "", it.sendbacks])];
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "Mistakes");
       }
       const remX = remarksInScope(data._remarks, tg);
@@ -3256,7 +3339,7 @@ function Reports({ user }) {
         heading(META[key]);
         kpiCards(metricDefs[key](dd));
         trendChart(dd.daily_trend, key === "delivery" ? "line" : "bar", key === "delivery" ? G.green : G.accent);
-        if ((dd.by_delivery_man || []).length) darkTable(["Driver", "Deliveries", "On time"], dd.by_delivery_man.map((x) => [x.name, x.total, x.on_time]));
+        if ((dd.by_carrier || []).length) darkTable(["Carrier", "Deliveries", "On time"], dd.by_carrier.map((x) => [x.name, x.total, x.on_time]));
       }
       if (data._staffDetail && data._staffDetail.length) { heading("Individual performance"); darkTable(STAFF_DETAIL_HEAD, data._staffDetail.map(staffDetailRow)); }
       if (data._pics && data._pics.length) { heading("Person in charge"); darkTable(["Name", "Role", "Open", "Prod", "Pack", "Overdue", "On hold", "Completed"], data._pics.map((p) => [p.name, ROLE_LABELS[p.role] || p.role, p.active, p.active_prod, p.active_pack, p.overdue, p.on_hold, p.completed])); }
@@ -3274,9 +3357,11 @@ function Reports({ user }) {
       if (data._mistakes) {
         const m = data._mistakes;
         heading("Mistakes");
-        kpiCards([["Amendments", m.amendments ? m.amendments.count : 0], ["Late deliveries", m.late ? m.late.count : 0], ["Failed", m.failed_count], ["Cancelled", m.cancelled_count], ["On hold now", m.on_hold_count], ["Waiting stock", m.waiting_stock_count]]);
+        kpiCards([["Amendments", m.amendments ? m.amendments.count : 0], ["Late deliveries", m.late ? m.late.count : 0], ["Send-backs", m.sendbacks ? m.sendbacks.count : 0], ["Failed", m.failed_count], ["Cancelled", m.cancelled_count], ["On hold now", m.on_hold_count], ["Waiting stock", m.waiting_stock_count]]);
         if (m.amendments && m.amendments.list.length) darkTable(["Invoice", "By", "Change", "When"], m.amendments.list.map((a) => [a.invoice_number || "", a.user_name || "", a.details || "edited", a.created_at ? new Date(a.created_at).toLocaleDateString("en-GB") : ""]));
         if (m.late && m.late.list.length) darkTable(["Invoice", "Days late", "Driver"], m.late.list.map((o) => [o.invoice_number, o.days_late, o.driver || ""]));
+        if (m.sendbacks && m.sendbacks.list.length) darkTable(["Invoice", "From", "To", "By", "Reason"], m.sendbacks.list.map((s) => [s.invoice_number || "", (STAGE_LABELS[s.from_stage] || {}).label || s.from_stage, (STAGE_LABELS[s.to_stage] || {}).label || s.to_stage, s.user_name || "", s.reason || ""]));
+        if (m.sendbacks && (m.sendbacks.items || []).length) darkTable(["STK", "Product", "Send-backs"], m.sendbacks.items.map((it) => [it.sku || "", it.name || "", it.sendbacks]));
       }
       const remP = remarksInScope(data._remarks, tg);
       const sumP = monthSummaryInScope(data._monthSummary, tg);
@@ -3371,23 +3456,27 @@ function Reports({ user }) {
         </Card>
         );
       })()}
-      {tab === "delivery" && (d.by_delivery_man || []).length > 0 && (
+      {tab === "delivery" && (d.by_carrier || []).length > 0 && (
         <Card style={{ marginTop: 18 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>By driver</h3>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>By carrier <span style={{ fontSize: 12, color: C.text3, fontWeight: 400 }}>· tap for detail</span></h3>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead><tr>{["Driver", "Deliveries", "On-time"].map((h) => <th key={h} style={{ textAlign: "left", padding: "7px 8px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
+            <thead><tr>{["Carrier", "Deliveries", "On-time", ""].map((h) => <th key={h} style={{ textAlign: "left", padding: "7px 8px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
             <tbody>
-              {d.by_delivery_man.map((x) => (
-                <tr key={x.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-                  <td style={{ padding: "7px 8px", color: C.text }}>{x.name}</td>
+              {d.by_carrier.map((x) => (
+                <tr key={`${x.kind}:${x.key}`} onClick={() => setCarrier({ kind: x.kind, key: x.key, name: x.name })} title="View deliveries"
+                  style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = C.surface2)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                  <td style={{ padding: "7px 8px", color: C.text }}>{x.kind === "courier" ? "📦 " : "🚚 "}{x.name}</td>
                   <td style={{ padding: "7px 8px", color: C.text2 }}>{x.total}</td>
                   <td style={{ padding: "7px 8px", color: C.ready }}>{x.on_time}{x.total ? ` (${Math.round((x.on_time / x.total) * 100)}%)` : ""}</td>
+                  <td style={{ padding: "7px 8px", textAlign: "right", color: C.accent2, fontFamily: MONO }}>›</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </Card>
       )}
+      {carrier && <DeliveryCarrierDetail carrier={carrier} period={period} from={from} to={to} onClose={() => setCarrier(null)} />}
     </div>
   );
 }
