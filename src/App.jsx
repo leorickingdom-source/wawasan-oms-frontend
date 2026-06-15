@@ -160,13 +160,8 @@ function deliveryTag(o) {
   return { label: "Ready for Delivery", color: C.ready };
 }
 
-// "Who carries it" label for the delivery lists: a marketplace hand-off shows its
-// courier + tracking (📦 SPX / LEX); an in-house delivery shows the driver.
+// "Who carries it" label for the delivery lists: the in-house driver.
 function shipLabel(dv) {
-  if (dv && dv.channel && dv.channel !== "in_house") {
-    const c = dv.channel === "shopee" ? "SPX" : "LEX";
-    return `📦 ${c}${dv.tracking_no ? " · " + dv.tracking_no : ""}`;
-  }
   return (dv && dv.delivery_man_name) || "—";
 }
 
@@ -2746,7 +2741,7 @@ function DeliveryCarrierDetail({ carrier, period, from, to, onClose }) {
   }, [carrier, period, from, to]);
   const turn = d && d.avg_turnaround_hours != null ? (Number(d.avg_turnaround_hours) >= 48 ? Math.round(Number(d.avg_turnaround_hours) / 24) + "d" : d.avg_turnaround_hours + "h") : "—";
   return (
-    <Modal open onClose={onClose} title={`${carrier.kind === "courier" ? "📦" : "🚚"} ${carrier.name}`} width={640}>
+    <Modal open onClose={onClose} title={`🚚 ${carrier.name}`} width={640}>
       {!d ? <Loading /> : d === false ? <div style={{ color: C.danger }}>Could not load.</div> : (
         <div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 14 }}>
@@ -2756,16 +2751,15 @@ function DeliveryCarrierDetail({ carrier, period, from, to, onClose }) {
           </div>
           <Card style={{ padding: 0, overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Delivered", "On-time", "Tracking"].map((h) => <th key={h} style={{ textAlign: "left", padding: "9px 12px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
+              <thead><tr style={{ background: C.bg2 }}>{["Invoice", "Customer", "Delivered", "On-time"].map((h) => <th key={h} style={{ textAlign: "left", padding: "9px 12px", color: C.text3, fontWeight: 600, borderBottom: `1px solid ${C.border}` }}>{h}</th>)}</tr></thead>
               <tbody>
-                {(d.orders || []).length === 0 && <tr><td colSpan={5}><Empty label="No deliveries in this period." /></td></tr>}
+                {(d.orders || []).length === 0 && <tr><td colSpan={4}><Empty label="No deliveries in this period." /></td></tr>}
                 {(d.orders || []).map((o, i) => (
                   <tr key={i} style={{ borderBottom: `1px solid ${C.border}` }}>
                     <td style={{ padding: "8px 12px", fontFamily: MONO, color: C.text }}>{o.invoice_number}</td>
                     <td style={{ padding: "8px 12px", color: C.text2 }}>{o.customer_name || "—"}</td>
                     <td style={{ padding: "8px 12px", color: C.text2 }}>{fmtDay(o.delivered_at)}</td>
                     <td style={{ padding: "8px 12px", color: o.on_time ? C.ready : C.danger }}>{o.on_time ? "On-time" : "Late"}</td>
-                    <td style={{ padding: "8px 12px", fontFamily: MONO, color: C.text3 }}>{o.tracking_no || "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -3469,26 +3463,6 @@ function Reports({ user }) {
       )}
       {tab === "production" && <PicTrackTable track="prod" period={period} from={from} to={to} />}
       {tab === "packing" && <PicTrackTable track="pack" period={period} from={from} to={to} />}
-      {tab === "delivery" && (d.by_channel || []).length > 0 && (() => {
-        const CH = { in_house: { label: "🚚 In-house van", color: C.order }, shopee: { label: "📦 Shopee (SPX)", color: "#ee4d2d" }, lazada: { label: "📦 Lazada (LEX)", color: "#a78bfa" } };
-        return (
-        <Card style={{ marginTop: 18 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>How it shipped</h3>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead><tr>{["Channel", "Deliveries", "On-time"].map((h) => <th key={h} style={{ textAlign: "left", padding: "7px 8px", color: C.text3, borderBottom: `1px solid ${C.border}`, fontWeight: 600 }}>{h}</th>)}</tr></thead>
-            <tbody>
-              {d.by_channel.map((x) => { const c = CH[x.channel] || { label: x.channel, color: C.text2 }; return (
-                <tr key={x.channel} style={{ borderBottom: `1px solid ${C.border}` }}>
-                  <td style={{ padding: "7px 8px", color: c.color, fontWeight: 600 }}>{c.label}</td>
-                  <td style={{ padding: "7px 8px", color: C.text2 }}>{x.total}</td>
-                  <td style={{ padding: "7px 8px", color: C.ready }}>{x.on_time}{x.total ? ` (${Math.round((x.on_time / x.total) * 100)}%)` : ""}</td>
-                </tr>
-              ); })}
-            </tbody>
-          </table>
-        </Card>
-        );
-      })()}
       {tab === "delivery" && (d.by_carrier || []).length > 0 && (
         <Card style={{ marginTop: 18 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 12 }}>By carrier <span style={{ fontSize: 12, color: C.text3, fontWeight: 400 }}>· tap for detail</span></h3>
@@ -3499,7 +3473,7 @@ function Reports({ user }) {
                 <tr key={`${x.kind}:${x.key}`} onClick={() => setCarrier({ kind: x.kind, key: x.key, name: x.name })} title="View deliveries"
                   style={{ borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = C.surface2)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                  <td style={{ padding: "7px 8px", color: C.text }}>{x.kind === "courier" ? "📦 " : "🚚 "}{x.name}</td>
+                  <td style={{ padding: "7px 8px", color: C.text }}>🚚 {x.name}</td>
                   <td style={{ padding: "7px 8px", color: C.text2 }}>{x.total}</td>
                   <td style={{ padding: "7px 8px", color: C.ready }}>{x.on_time}{x.total ? ` (${Math.round((x.on_time / x.total) * 100)}%)` : ""}</td>
                   <td style={{ padding: "7px 8px", textAlign: "right", color: C.accent2, fontFamily: MONO }}>›</td>
@@ -3635,7 +3609,7 @@ function Delivery({ user, onOpenOrder }) {
   const [allCompleted, setAllCompleted] = useState(false);
   const [confirmDeliver, setConfirmDeliver] = useState(null);
   const [proofView, setProofView] = useState(null); // { url, inv } — proof-photo lightbox
-  const [form, setForm] = useState({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "", channel: "in_house", tracking_no: "" });
+  const [form, setForm] = useState({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "" });
   const [newDeliverer, setNewDeliverer] = useState({ name: "", phone: "" });
   const [otherCourier, setOtherCourier] = useState("");
   const [editDelivery, setEditDelivery] = useState(null);
@@ -3672,11 +3646,7 @@ function Delivery({ user, onOpenOrder }) {
     if (!(form.address && form.address.trim()) && !(selOrder && selOrder.delivery_address)) {
       alert("Enter a delivery address."); return;
     }
-    if (form.channel === "in_house") {
-      if (!form.deliverer_id) { alert("Assign a driver for the in-house delivery."); return; }
-    } else if (!form.tracking_no.trim()) {
-      alert("Enter the tracking / AWB number for the courier hand-off."); return;
-    }
+    if (!form.deliverer_id) { alert("Assign a driver for the delivery."); return; }
     try {
       let payload = form;
       if (form.deliverer_id === "__other__") {
@@ -3685,7 +3655,7 @@ function Delivery({ user, onOpenOrder }) {
         payload = { ...form, deliverer_id: dl.id };
       }
       await api("POST", "/delivery", payload);
-      setShow(false); setForm({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "", channel: "in_house", tracking_no: "" }); setOtherCourier("");
+      setShow(false); setForm({ order_id: "", deliverer_id: "", scheduled_date: "", address: "", notes: "" }); setOtherCourier("");
       load();
     } catch (e) { alert(e.message); }
   }
@@ -4086,33 +4056,10 @@ function Delivery({ user, onOpenOrder }) {
       <Modal open={show} onClose={() => setShow(false)} title="Schedule delivery">
         <Field label="Order (ready for delivery)" value={form.order_id} onChange={(v) => setForm((f) => ({ ...f, order_id: v }))}
           options={[{ value: "", label: "Select order…" }, ...ready.map((o) => ({ value: o.id, label: `${o.invoice_number} — ${o.customer_name}` }))]} />
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12.5, color: C.text2, marginBottom: 6 }}>How is it shipped?</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {[{ k: "in_house", l: "🚚 In-house van", c: C.order }, { k: "shopee", l: "📦 Shopee (SPX)", c: "#ee4d2d" }, { k: "lazada", l: "📦 Lazada (LEX)", c: "#a78bfa" }].map((ch) => {
-              const on = form.channel === ch.k;
-              return <button key={ch.k} type="button" onClick={() => setForm((f) => ({ ...f, channel: ch.k }))}
-                style={{ padding: "8px 13px", borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: "pointer",
-                  border: `1px solid ${on ? ch.c : C.border2}`, background: on ? ch.c + "22" : C.surface, color: on ? ch.c : C.text2 }}>{ch.l}</button>;
-            })}
-          </div>
-        </div>
-        {form.channel === "in_house" ? (
-          <>
-            <Field label="Driver" value={form.deliverer_id} onChange={(v) => setForm((f) => ({ ...f, deliverer_id: v }))}
-              options={[{ value: "", label: deliverers.filter((d) => d.is_active).length ? "Unassigned" : "No drivers yet — add one below" }, ...deliverers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name })), { value: "__other__", label: "+ Add a new driver" }]} />
-            {form.deliverer_id === "__other__" && (
-              <Field label="New driver name" value={otherCourier} onChange={setOtherCourier} placeholder="e.g. Ahmad" required />
-            )}
-          </>
-        ) : (
-          <>
-            <Field label="Tracking / AWB number" value={form.tracking_no} onChange={(v) => setForm((f) => ({ ...f, tracking_no: v }))}
-              placeholder={form.channel === "shopee" ? "e.g. MY123456789" : "e.g. LEX123456789"} required />
-            <div style={{ fontSize: 11.5, color: C.text3, marginBottom: 12, marginTop: -4 }}>
-              Print the {form.channel === "shopee" ? "Shopee" : "Lazada"} label, hand the parcel to their courier. Tracking + proof live in {form.channel === "shopee" ? "Shopee" : "Lazada"} — no in-house photo needed.
-            </div>
-          </>
+        <Field label="Driver" value={form.deliverer_id} onChange={(v) => setForm((f) => ({ ...f, deliverer_id: v }))}
+          options={[{ value: "", label: deliverers.filter((d) => d.is_active).length ? "Unassigned" : "No drivers yet — add one below" }, ...deliverers.filter((d) => d.is_active).map((d) => ({ value: d.id, label: d.name })), { value: "__other__", label: "+ Add a new driver" }]} />
+        {form.deliverer_id === "__other__" && (
+          <Field label="New driver name" value={otherCourier} onChange={setOtherCourier} placeholder="e.g. Ahmad" required />
         )}
         <Field label="Scheduled date" type="date" value={form.scheduled_date} onChange={(v) => setForm((f) => ({ ...f, scheduled_date: v }))} />
         <Field label="Delivery address" value={form.address} onChange={(v) => setForm((f) => ({ ...f, address: v }))} placeholder="Street, city, postcode…" />
@@ -4127,27 +4074,20 @@ function Delivery({ user, onOpenOrder }) {
         {confirmDeliver && (
           <>
             <div style={{ fontSize: 14, marginBottom: 8 }}><span style={{ fontFamily: MONO, fontWeight: 700, color: C.text }}>{confirmDeliver.invoice_number}</span> <span style={{ color: C.text2 }}>· {confirmDeliver.customer_name}</span></div>
-            {(() => { const isCourier = confirmDeliver.channel && confirmDeliver.channel !== "in_house"; const courierName = confirmDeliver.channel === "shopee" ? "Shopee (SPX)" : "Lazada (LEX)"; return (<>
             <div style={{ fontSize: 13, color: C.text2, lineHeight: 1.8, marginBottom: 12 }}>
               {confirmDeliver.address && <div><span style={{ color: C.text3 }}>Address: </span>{confirmDeliver.address}</div>}
-              {isCourier ? (<>
-                <div><span style={{ color: C.text3 }}>Courier: </span>{courierName}</div>
-                <div><span style={{ color: C.text3 }}>Tracking: </span>{confirmDeliver.tracking_no || "—"}</div>
-              </>) : (
-                <div><span style={{ color: C.text3 }}>Driver: </span>{confirmDeliver.delivery_man_name || "Unassigned"}</div>
-              )}
+              <div><span style={{ color: C.text3 }}>Driver: </span>{confirmDeliver.delivery_man_name || "Unassigned"}</div>
               <div><span style={{ color: C.text3 }}>Scheduled: </span>{confirmDeliver.scheduled_date ? fmtDay(confirmDeliver.scheduled_date) : "—"}</div>
-              {!isCourier && <div><span style={{ color: C.text3 }}>Proof: </span>{confirmDeliver.has_pod ? <span style={{ color: C.ready }}>✓ Attached</span> : <span style={{ color: C.hold }}>⚠ None yet</span>}</div>}
+              <div><span style={{ color: C.text3 }}>Proof: </span>{confirmDeliver.has_pod ? <span style={{ color: C.ready }}>✓ Attached</span> : <span style={{ color: C.hold }}>⚠ None yet</span>}</div>
             </div>
-            {!isCourier && !confirmDeliver.has_pod && (
+            {!confirmDeliver.has_pod && (
               <label style={{ ...proofBtn, width: "100%", justifyContent: "center", marginBottom: 12 }}>📎 Attach proof photo<input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) uploadProof(confirmDeliver.order_id, f); }} /></label>
             )}
-            <div style={{ fontSize: 12.5, color: C.text3, marginBottom: 16 }}>{isCourier ? `This marks the order handed to ${courierName} — their courier delivers it and owns the tracking. You can undo it from Completed if you mark it by mistake.` : "This marks the order delivered. Without a proof photo you'll be asked to confirm, and Boss & Ops are notified. You can undo it from Completed if you mark it by mistake."}</div>
+            <div style={{ fontSize: 12.5, color: C.text3, marginBottom: 16 }}>This marks the order delivered. Without a proof photo you'll be asked to confirm, and Boss & Ops are notified. You can undo it from Completed if you mark it by mistake.</div>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <Btn variant="ghost" onClick={() => setConfirmDeliver(null)}>Cancel</Btn>
-              <Btn variant="success" onClick={() => markDelivered(confirmDeliver.id)}><Icon name="check" size={15} /> {isCourier ? "Confirm handed over" : "Confirm delivered"}</Btn>
+              <Btn variant="success" onClick={() => markDelivered(confirmDeliver.id)}><Icon name="check" size={15} /> Confirm delivered</Btn>
             </div>
-            </>); })()}
           </>
         )}
       </Modal>
