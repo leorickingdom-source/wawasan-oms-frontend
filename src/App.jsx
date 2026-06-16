@@ -4544,7 +4544,6 @@ function Settings({ user }) {
   const [wBusy, setWBusy] = useState(false);
   const [wSaved, setWSaved] = useState(false);
   const [intakeBusy, setIntakeBusy] = useState(false);
-  const [clearBusy, setClearBusy] = useState(false);
 
   useEffect(() => { api("GET", "/settings").then(setS).catch(() => setS({})); }, []);
   // Reward-scoreboard weights live in system_settings as a JSON string.
@@ -4574,13 +4573,6 @@ function Settings({ user }) {
     setIntakeBusy(true);
     try { await api("PUT", "/settings", { settings: { order_intake_enabled: next } }); setS((p) => ({ ...p, order_intake_enabled: next })); }
     catch (e) { alert(e.message); } finally { setIntakeBusy(false); }
-  }
-  async function clearData() {
-    const typed = prompt("Reset the order board for a fresh start?\nA recovery copy is saved first, and your users, settings and SQL Account invoices are kept.\n\nType CLEAR to confirm:");
-    if (typed !== "CLEAR") return;
-    setClearBusy(true);
-    try { const r = await api("POST", "/settings/clear-data", { confirm: "CLEAR" }); alert(`Done. Order board reset — ${r.counts.orders} orders saved to a recovery copy.`); }
-    catch (e) { alert(e.message); } finally { setClearBusy(false); }
   }
   async function addHoliday() {
     if (!newHol.date || !newHol.name.trim()) return;
@@ -4728,14 +4720,6 @@ function Settings({ user }) {
             </span>
             <Btn size="sm" variant={intakeOn ? "danger" : "success"} onClick={toggleIntake} disabled={intakeBusy}>{intakeBusy ? "…" : intakeOn ? "Turn OFF" : "Turn ON"}</Btn>
           </div>
-        </Card>
-      )}
-
-      {user && user.role === "super_admin" && (
-        <Card>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 6 }}>Reset order board</h3>
-          <p style={{ fontSize: 12.5, color: C.text3, marginBottom: 14 }}>Clears the order board and its activity history for a fresh start — handy at a new period or after testing. A recovery copy is saved first, so it can be restored if needed. <strong style={{ color: C.text2 }}>Your staff logins, settings, holidays and drivers are kept — and every invoice and financial record stays safe in SQL Account.</strong></p>
-          <Btn size="sm" variant="soft" onClick={clearData} disabled={clearBusy}>{clearBusy ? "Resetting…" : "Reset order board"}</Btn>
         </Card>
       )}
     </div>
