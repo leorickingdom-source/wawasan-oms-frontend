@@ -4543,6 +4543,8 @@ function Settings({ user }) {
   const [weights, setWeights] = useState(null);
   const [wBusy, setWBusy] = useState(false);
   const [wSaved, setWSaved] = useState(false);
+  const [intakeBusy, setIntakeBusy] = useState(false);
+  const [clearBusy, setClearBusy] = useState(false);
 
   useEffect(() => { api("GET", "/settings").then(setS).catch(() => setS({})); }, []);
   // Reward-scoreboard weights live in system_settings as a JSON string.
@@ -4564,6 +4566,21 @@ function Settings({ user }) {
     setBusy(true);
     try { await api("PUT", "/settings", { settings: { session_timeout_hours: s.session_timeout_hours } }); setSaved(true); }
     catch (e) { alert(e.message); } finally { setBusy(false); }
+  }
+  async function toggleIntake() {
+    const cur = String(s?.order_intake_enabled ?? "true").toLowerCase() !== "false";
+    const next = cur ? "false" : "true";
+    if (next === "false" && !confirm("Pause automatic order intake?\n\nNew SQL Account invoices will NOT be recorded until you turn this back on. Existing orders are untouched.")) return;
+    setIntakeBusy(true);
+    try { await api("PUT", "/settings", { settings: { order_intake_enabled: next } }); setS((p) => ({ ...p, order_intake_enabled: next })); }
+    catch (e) { alert(e.message); } finally { setIntakeBusy(false); }
+  }
+  async function clearData() {
+    const typed = prompt("This permanently deletes EVERY order and the full history.\n(Users, settings, holidays and drivers are kept.)\nThis cannot be undone.\n\nType CLEAR to confirm:");
+    if (typed !== "CLEAR") return;
+    setClearBusy(true);
+    try { const r = await api("POST", "/settings/clear-data", { confirm: "CLEAR" }); alert(`Done. Cleared ${r.counts.orders} orders and all history.`); }
+    catch (e) { alert(e.message); } finally { setClearBusy(false); }
   }
   async function addHoliday() {
     if (!newHol.date || !newHol.name.trim()) return;
@@ -4610,6 +4627,7 @@ function Settings({ user }) {
   }
   if (!s) return <Loading />;
   const inp = { padding: "8px 12px", background: C.surface, border: `1px solid ${C.border2}`, borderRadius: 9, color: C.text, fontSize: 13.5, colorScheme: "dark" };
+  const intakeOn = String(s.order_intake_enabled ?? "true").toLowerCase() !== "false";
   const today0 = new Date(); today0.setHours(0, 0, 0, 0);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 560 }}>
@@ -4696,6 +4714,28 @@ function Settings({ user }) {
             <span style={{ ...inp, minWidth: 150, fontFamily: MONO, letterSpacing: showPw ? 0.5 : 3, color: C.text, userSelect: "all" }}>{showPw ? (s.login_password || "wawasan123") : "••••••••"}</span>
             <Btn size="sm" variant="ghost" onClick={() => setShowPw((v) => !v)}>{showPw ? "Hide" : "Show"}</Btn>
           </div>
+        </Card>
+      )}
+
+      {user && user.role === "super_admin" && (
+        <Card>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 6 }}>Order tracking</h3>
+          <p style={{ fontSize: 12.5, color: C.text3, marginBottom: 14 }}>Automatic order intake from SQL Account. Turn OFF to stop new invoices being recorded (for security or maintenance). Existing orders and the board are untouched; turn back ON to resume.</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 700, color: intakeOn ? C.ready : "#fca5a5" }}>
+              <span style={{ width: 9, height: 9, borderRadius: "50%", background: intakeOn ? C.ready : "#fca5a5" }} />
+              {intakeOn ? "Tracking ON — recording new invoices" : "Tracking OFF — new invoices ignored"}
+            </span>
+            <Btn size="sm" variant={intakeOn ? "danger" : "success"} onClick={toggleIntake} disabled={intakeBusy}>{intakeBusy ? "…" : intakeOn ? "Turn OFF" : "Turn ON"}</Btn>
+          </div>
+        </Card>
+      )}
+
+      {user && user.role === "super_admin" && (
+        <Card>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: "#fca5a5", marginBottom: 6 }}>Clear all orders &amp; history</h3>
+          <p style={{ fontSize: 12.5, color: C.text3, marginBottom: 14 }}>Permanently removes every order, item, delivery, notification and the full activity history. <strong style={{ color: C.text2 }}>Keeps users, settings, holidays and drivers.</strong> Cannot be undone — export any reports you need first.</p>
+          <Btn size="sm" variant="danger" onClick={clearData} disabled={clearBusy}>{clearBusy ? "Clearing…" : "Clear all orders & history"}</Btn>
         </Card>
       )}
     </div>
