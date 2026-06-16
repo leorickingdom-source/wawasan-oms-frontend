@@ -4576,10 +4576,10 @@ function Settings({ user }) {
     catch (e) { alert(e.message); } finally { setIntakeBusy(false); }
   }
   async function clearData() {
-    const typed = prompt("This permanently deletes EVERY order and the full history.\n(Users, settings, holidays and drivers are kept.)\nThis cannot be undone.\n\nType CLEAR to confirm:");
+    const typed = prompt("Reset the order board for a fresh start?\nA recovery copy is saved first, and your users, settings and SQL Account invoices are kept.\n\nType CLEAR to confirm:");
     if (typed !== "CLEAR") return;
     setClearBusy(true);
-    try { const r = await api("POST", "/settings/clear-data", { confirm: "CLEAR" }); alert(`Done. Cleared ${r.counts.orders} orders and all history.`); }
+    try { const r = await api("POST", "/settings/clear-data", { confirm: "CLEAR" }); alert(`Done. Order board reset — ${r.counts.orders} orders saved to a recovery copy.`); }
     catch (e) { alert(e.message); } finally { setClearBusy(false); }
   }
   async function addHoliday() {
@@ -4733,9 +4733,9 @@ function Settings({ user }) {
 
       {user && user.role === "super_admin" && (
         <Card>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: "#fca5a5", marginBottom: 6 }}>Clear all orders &amp; history</h3>
-          <p style={{ fontSize: 12.5, color: C.text3, marginBottom: 14 }}>Permanently removes every order, item, delivery, notification and the full activity history. <strong style={{ color: C.text2 }}>Keeps users, settings, holidays and drivers.</strong> Cannot be undone — export any reports you need first.</p>
-          <Btn size="sm" variant="danger" onClick={clearData} disabled={clearBusy}>{clearBusy ? "Clearing…" : "Clear all orders & history"}</Btn>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 6 }}>Reset order board</h3>
+          <p style={{ fontSize: 12.5, color: C.text3, marginBottom: 14 }}>Clears the order board and its activity history for a fresh start — handy at a new period or after testing. A recovery copy is saved first, so it can be restored if needed. <strong style={{ color: C.text2 }}>Your staff logins, settings, holidays and drivers are kept — and every invoice and financial record stays safe in SQL Account.</strong></p>
+          <Btn size="sm" variant="soft" onClick={clearData} disabled={clearBusy}>{clearBusy ? "Resetting…" : "Reset order board"}</Btn>
         </Card>
       )}
     </div>
