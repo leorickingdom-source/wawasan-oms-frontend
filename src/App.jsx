@@ -4171,6 +4171,10 @@ function Remarks({ user }) {
   const canEditMonthly = user.role === "super_admin"; // Boss writes the monthly summary
   const curMonthKey = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; })();
   const monthKeyOf = (dateStr) => { const d = new Date(dateStr); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+  // Show who last touched the note: the editor (if edited) else the original author.
+  const remarkStamp = (r) => r.editor_name && r.edited_at
+    ? `Edited by ${r.editor_name} · ${fmtDateTime(r.edited_at)}`
+    : `Last updated ${fmtDateTime(r.updated_at || r.created_at)} · ${r.author_name}`;
 
   async function load() {
     const all = await api("GET", "/remarks").catch(() => []);
@@ -4245,11 +4249,14 @@ function Remarks({ user }) {
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: "wrap" }}>
                 <Btn onClick={save} disabled={busy || !content.trim()}><Icon name="check" size={15} /> {busy ? "Saving…" : "Save remark"}</Btn>
                 {saved && <span style={{ color: C.ready, fontSize: 13 }}>Saved ✓</span>}
-                {cur && <span style={{ color: C.text3, fontSize: 12.5 }}>Last updated {fmtDateTime(cur.updated_at || cur.created_at)} · {cur.author_name}</span>}
+                {cur && <span style={{ color: C.text3, fontSize: 12.5 }}>{remarkStamp(cur)}</span>}
               </div>
             </>
           ) : (
-            <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{cur ? cur.content : <span style={{ color: C.text3 }}>No remark yet this week.</span>}</div>
+            cur ? (<>
+              <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{cur.content}</div>
+              <div style={{ marginTop: 10, color: C.text3, fontSize: 12.5 }}>{remarkStamp(cur)}</div>
+            </>) : <span style={{ color: C.text3 }}>No remark yet this week.</span>
           )}
         </Card>
         <Card style={{ padding: "20px 22px" }}>
@@ -4264,7 +4271,7 @@ function Remarks({ user }) {
                 <div key={r.id} style={{ paddingBottom: 16, marginBottom: 16, borderBottom: `1px solid ${C.border}` }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
                     <Pill color={C.accent} style={{ fontSize: 12, padding: "3px 11px" }}>{isoWeekLabel(r.week_start)}</Pill>
-                    <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.text3 }}>{fmtDateTime(r.created_at)} · {r.author_name}</span>
+                    <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.text3 }}>{fmtDateTime(r.created_at)} · {r.author_name}{r.editor_name ? ` · edited by ${r.editor_name}` : ""}</span>
                   </div>
                   <div style={{ fontSize: 14, color: C.text2, whiteSpace: "pre-wrap" }}>{r.content}</div>
                 </div>
