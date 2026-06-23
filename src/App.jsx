@@ -4167,7 +4167,7 @@ function Remarks({ user }) {
   const [monthContent, setMonthContent] = useState("");
   const [mBusy, setMBusy] = useState(false);
   const [mSaved, setMSaved] = useState(false);
-  const canPost = ["production_lead"].includes(user.role); // only the Production Head types the weekly remark
+  const canPost = ["production_lead", "admin"].includes(user.role); // Reenee (lead) + Misha (admin) co-edit the weekly remark
   const canEditMonthly = user.role === "super_admin"; // Boss writes the monthly summary
   const curMonthKey = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; })();
   const monthKeyOf = (dateStr) => { const d = new Date(dateStr); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
@@ -4524,7 +4524,6 @@ function Users({ user }) {
         <Field label="Email" type="email" value={f.email} onChange={(v) => setF((p) => ({ ...p, email: v }))} required />
         <Field label="Role" value={f.role} onChange={(v) => setF((p) => ({ ...p, role: v }))} options={roleOptions} />
         <Field label="Temporary password" type="password" name="new-password" autoComplete="new-password" value={f.password} onChange={(v) => setF((p) => ({ ...p, password: v }))} required />
-        <p style={{ fontSize: 12, color: C.text3, margin: "-4px 0 10px" }}>The new staff member can change this after their first login.</p>
         <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}><Btn variant="ghost" onClick={() => setShow(false)}>Cancel</Btn><Btn onClick={create}>Create</Btn></div>
       </Modal>
     </div>
