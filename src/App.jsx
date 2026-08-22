@@ -31,7 +31,13 @@ const C = {
   border: "#2c2620", border2: "#3a3329",
   text: "#f5efe6", text2: "#b4aa9c", text3: "#7e7568",
   accent: "#f97316", accent2: "#fb923c",
-  order: "#60a5fa", production: "#f97316", packing: "#f5b13a", ready: "#34d399",
+  order: "#60a5fa", production: "#f97316", ready: "#34d399",
+  // `packing` amber served two jobs: the Packing stage's identity and the
+  // in-progress / caution colour ("Making", "Pending", warnings, near-due dates).
+  // That made Production and Packing 15° apart in hue — indistinguishable on a wall
+  // TV from across the floor, and identical under red-green colour blindness. The
+  // stage now owns a violet of its own; the amber keeps every non-stage use.
+  packing: "#f5b13a", packStage: "#a78bfa",
   danger: "#ef4444", hold: "#eab308", green: "#34d399",
 };
 const MONO = "ui-monospace, 'SF Mono', 'JetBrains Mono', 'Roboto Mono', Consolas, Menlo, monospace";
@@ -39,7 +45,7 @@ const MONO = "ui-monospace, 'SF Mono', 'JetBrains Mono', 'Roboto Mono', Consolas
 const STAGES = {
   order: { label: "Order", color: C.order },
   production: { label: "Production", color: C.production },
-  packing: { label: "Packing", color: C.packing },
+  packing: { label: "Packing", color: C.packStage },
   ready_for_delivery: { label: "Ready for Delivery", color: C.ready },
 };
 const BOARD_STAGES = ["order", "production", "packing", "ready_for_delivery"];
@@ -145,6 +151,36 @@ function splitByCol(orders, stageKey) {
     if (its.length) out.push({ ...o, _items: its });
   }
   return out;
+}
+
+// ─── Floor Display layouts ─────────────────────────────────────────────────────
+// The wall runs one of two layouts. `all` is the original four-stage board with a
+// single rotating spotlight — unchanged, and still the default. `twin` splits the
+// screen down the middle and gives Production and Packing a half each: own queue,
+// own spotlight, own colour. Both areas read their own work off one wall and neither
+// sees the other's line items.
+//
+// `cap` is how many cards a column shows. The four-stage view keeps its original 5;
+// a twin half is measured to fit 3 once the department header and border are in.
+const FLOOR_LAYOUTS = {
+  all:  { label: "All Stages", title: "PRODUCTION FLOOR", stages: BOARD_STAGES, cap: 5 },
+  twin: { label: "Production + Packing", title: "PRODUCTION + PACKING", stages: ["production", "packing"], cap: 3 },
+};
+const FLOOR_LAYOUT_KEYS = ["all", "twin"];
+const FLOOR_LAYOUT_STORAGE = "oms_floor_layout";
+// A wall TV is switched on once and left for months, so the layout has to survive a
+// power cut without anyone hunting for a remote. The address the screen is bookmarked
+// to wins (?display=twin), then whatever that device last picked, then the original view.
+function initialFloorLayout() {
+  try {
+    const q = new URLSearchParams(window.location.search).get("display");
+    if (q && FLOOR_LAYOUTS[q]) return q;
+  } catch { /* no URL to read */ }
+  try {
+    const saved = localStorage.getItem(FLOOR_LAYOUT_STORAGE);
+    if (saved && FLOOR_LAYOUTS[saved]) return saved;
+  } catch { /* storage blocked */ }
+  return "all";
 }
 
 // Customer "importance" tiers removed 2026-06-11 — the board sorts by delivery date
@@ -1201,6 +1237,192 @@ function FloorScoreboard() {
   );
 }
 
+// One rotating spotlight: cycles a pool of orders every 10s and lazily loads the
+// picked order's line items. The twin layout runs two of these side by side, one per
+// department, so each half only ever details an order from its own stage.
+function useSpotlight(pool, resetKey) {
+  const [idx, setIdx] = useState(0);
+  const [detail, setDetail] = useState(null);
+  const cache = useRef({});
+  const len = pool.length;
+  useEffect(() => { setIdx(0); }, [resetKey]);
+  // Every board poll rebuilds the pool, which drops the cached line items with it, so
+  // the wall picks up ticks made on the Order Board instead of showing a stale list.
+  useEffect(() => { cache.current = {}; }, [pool]);
+  useEffect(() => {
+    if (len === 0) return;
+    const t = setInterval(() => setIdx((i) => (i + 1) % len), 10000);
+    return () => clearInterval(t);
+  }, [len]);
+  const spot = len ? pool[idx % len] : null;
+  const spotId = spot ? spot.id : null;
+  useEffect(() => {
+    let cancel = false;
+    async function go() {
+      if (!spotId) { setDetail(null); return; }
+      if (cache.current[spotId]) { setDetail(cache.current[spotId]); return; }
+      try { const d = await api("GET", `/orders/${spotId}`); if (!cancel) { cache.current[spotId] = d; setDetail(d); } }
+      catch { if (!cancel) setDetail(null); }
+    }
+    go(); return () => { cancel = true; };
+  }, [spotId]);
+  return { spot, detail, idx: len ? idx % len : 0, total: len };
+}
+
+// A stage column on the wall. `owned` marks a column a single department is
+// responsible for: it gets a solid bar of its own colour carrying the name and count,
+// so the block reads as that department's from across the floor rather than needing
+// to be walked up to and read.
+function FloorColumn({ s, cfg, total, shown, more, owned, grow }) {
+  // Empty stage collapses to a thin vertical rail, so the columns that actually
+  // have work (usually Packing / Ready) get the room.
+  if (total === 0) {
+    return (
+      <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderTop: `4px solid ${cfg.color}`, borderRadius: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, ...(grow ? { flex: 1, minWidth: 0 } : null) }}>
+        <div style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", fontSize: 18, fontWeight: 800, letterSpacing: 2, textTransform: "uppercase", color: C.text3 }}>{cfg.label}</div>
+        <div style={{ fontSize: 44, fontWeight: 800, color: C.text3, lineHeight: 1 }}>0</div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderTop: `4px solid ${cfg.color}`, borderRadius: 14, padding: "16px 14px", display: "flex", flexDirection: "column", minHeight: 0, ...(grow ? { flex: 1, minWidth: 0 } : null) }}>
+      {owned ? (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, background: cfg.color, color: "#17110a", borderRadius: 10, padding: "10px 18px", marginBottom: 13 }}>
+          <span style={{ fontSize: 34, fontWeight: 800, letterSpacing: 2.5, textTransform: "uppercase", lineHeight: 1.1 }}>{cfg.label}</span>
+          <b style={{ fontSize: 42, fontWeight: 800, lineHeight: 1 }}>{total}</b>
+        </div>
+      ) : (<>
+        <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: 1, color: C.text3, textTransform: "uppercase" }}>{cfg.label}</div>
+        <div style={{ fontSize: 66, fontWeight: 800, color: cfg.color, lineHeight: 1, margin: "2px 0 14px" }}>{total}</div>
+      </>)}
+      <div style={{ display: "flex", flexDirection: "column", gap: 9, overflowY: "hidden" }}>
+        {shown.map((o) => {
+          const cd = countdown(o.required_delivery_date);
+          const late = (cd.n ?? 0) < 0, urgent = o.priority === "urgent";
+          const dtag = deliveryTag(o);
+          const sub = o._items || null;
+          const subDone = sub ? sub.filter(s === "packing" ? itemPackDone : itemProdDone).length : (o.made_count || 0);
+          const subTotal = sub ? sub.length : (o.item_count || 0);
+          const allDone = sub
+            ? ((o.items || []).length > 0 && (o.items || []).every(itemPackDone))
+            : ((o.stage === "production" || o.stage === "packing") && (o.item_count || 0) > 0 && (o.made_count || 0) >= o.item_count);
+          return (
+            <div key={o.id} style={{ background: allDone ? C.green + "33" : (urgent && late) ? C.danger + "3A" : (urgent || late) ? C.danger + "1A" : C.surface, border: `${allDone || (urgent && late) ? 2 : 1}px solid ${allDone ? C.green : (urgent && late) ? C.danger : (urgent || late) ? C.danger + "88" : C.border}`, borderLeft: `${owned ? 8 : 5}px solid ${cfg.color}`, borderRadius: 10, padding: "13px 16px" }}>
+              <div style={{ fontFamily: MONO, fontSize: 28, fontWeight: 800, color: allDone ? C.text : late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 7 }}>
+                {urgent && <Pill color="#fff" bg={C.danger} border={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>Urgent</Pill>}
+                {dtag && <Pill color={dtag.color} style={{ fontSize: 14, padding: "3px 10px" }}>{dtag.label}</Pill>}
+                {o.waiting_stock && <Pill color={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>⚠ Stock</Pill>}
+                {o.on_hold && <Pill color={C.hold} style={{ fontSize: 14, padding: "3px 10px" }}>Hold</Pill>}
+              </div>
+              <div style={{ fontSize: 27, color: cd.tone, marginTop: 8, fontWeight: 700 }}>
+                <span style={{ color: C.text2 }}>{fmtDay(o.required_delivery_date)}</span> · {cd.text}
+              </div>
+              {(s === "production" || s === "packing") && subTotal > 0 && (() => {
+                const done = subDone, total = subTotal, full = total > 0 && done >= total;
+                const p = total > 0 ? Math.round((done / total) * 100) : 0;
+                return (
+                  <div style={{ marginTop: 8 }}>
+                    {!full && <div style={{ fontSize: 17, fontWeight: 800, color: C.accent2, marginBottom: 5 }}>{done}/{total} {s === "packing" ? "packed" : "made"}</div>}
+                    <div style={{ height: 8, background: C.surface2, borderRadius: 4, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: full ? C.green : C.accent }} /></div>
+                  </div>
+                );
+              })()}
+            </div>
+          );
+        })}
+        {more > 0 && (
+          <div style={{ textAlign: "center", fontSize: 21, fontWeight: 800, color: C.text3, background: "rgba(255,255,255,0.03)", border: `1px dashed ${C.border2}`, borderRadius: 10, padding: "13px 10px" }}>＋{more} more · on the board</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// The rotating detail panel. The product name is the headline: it is what a worker
+// matches against the part in their hand, so it takes the full row width and the
+// largest type, with the STK code demoted to a quiet second line beside the quantity.
+// `narrow` is the twin layout, where two of these share the wall.
+function FloorSpotlight({ spot, detail, idx, total, narrow }) {
+  const z = narrow
+    ? { w: 470, pad: "18px 18px", inv: 64, invGap: "8px 0 10px", chip: 24, row: "12px 10px", gap: 10, dotTop: 9, name: 26, sku: 17, qty: 23, unit: 14, st: 17, stMin: 88 }
+    : { w: 500, pad: "20px 22px", inv: 78, invGap: "10px 0 12px", chip: 28, row: "14px 14px", gap: 13, dotTop: 12, name: 30, sku: 19, qty: 27, unit: 15, st: 20, stMin: 104 };
+  const stage = spot ? (STAGE_LABELS[spot.stage] || { label: spot.stage, color: C.accent }) : null;
+  const cd = spot ? countdown(spot.required_delivery_date) : null;
+  const dtag = spot ? deliveryTag(spot) : null;
+  // Whole spotlight greens when every STK is done (mirrors the red urgent spotlight);
+  // if it's also urgent, double border (green inner + red outer ring).
+  const allDone = spot && (spot.stage === "production" || spot.stage === "packing") && (spot.item_count || 0) > 0 && (spot.made_count || 0) >= spot.item_count;
+  const urgentDone = allDone && spot.priority === "urgent";
+  const urgent = spot && spot.priority === "urgent";
+  return (
+    <div style={{ width: z.w, flex: `0 0 ${z.w}px`, background: allDone ? C.green + "14" : urgent ? C.danger + "14" : C.bg2, border: `1px solid ${urgentDone ? C.green : allDone ? C.green + "88" : urgent ? C.danger + "88" : C.border}`, borderRadius: 16, padding: z.pad, display: "flex", flexDirection: "column", minHeight: 0, boxShadow: urgentDone ? `0 0 0 2px ${C.bg}, 0 0 0 4px ${C.danger}` : "none" }}>
+      {!spot ? <div style={{ margin: "auto", color: C.text3 }}>No active orders</div> : (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <Pill color={stage.color} style={{ fontSize: 18, padding: "7px 16px" }}>● {stage.label}</Pill>
+              {urgent && <Pill color="#fff" bg={C.danger} border={C.danger} style={{ fontSize: 18, padding: "7px 16px" }}>Urgent</Pill>}
+              {dtag && <Pill color={dtag.color} style={{ fontSize: 18, padding: "7px 16px" }}>{dtag.label}</Pill>}
+            </div>
+            <span style={{ fontSize: 18, fontWeight: 700, color: C.text3 }}>{idx + 1} / {total}</span>
+          </div>
+          <div style={{ fontFamily: MONO, fontSize: z.inv, fontWeight: 800, color: C.accent2, margin: z.invGap, lineHeight: 1, letterSpacing: -2 }}>{spot.invoice_number}</div>
+          {detail && detail.id === spot.id && (detail.items || []).length > 0 && (() => {
+            const its = detail.items || [];
+            const n = its.length;
+            const done = its.filter((it) => itemStatusKey(it) === "done").length;
+            const making = its.filter((it) => itemStatusKey(it) === "in_progress").length;
+            const todo = n - done - making;
+            const p = n > 0 ? Math.round((done / n) * 100) : 0;
+            const chip = (label, v, color) => (
+              <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, background: color + "1f", border: `1px solid ${color}55`, color, borderRadius: 9, padding: "8px 14px", fontSize: z.chip, fontWeight: 800 }}>{v}<span style={{ fontSize: 14, fontWeight: 700, opacity: 0.85, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span></span>
+            );
+            return (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                  {chip("To do", todo, C.accent)}
+                  {chip("Making", making, C.packing)}
+                  {chip("Done", done, C.green)}
+                </div>
+                <div style={{ height: 7, background: C.surface2, borderRadius: 5, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: p >= 100 ? C.green : C.accent, transition: "width .3s" }} /></div>
+              </div>
+            );
+          })()}
+          <div style={{ flex: 1, overflowY: "auto" }}>
+            {detail && detail.id === spot.id
+              ? (detail.items || []).map((it) => {
+                const st = itemStat(it);
+                const dot = st.k === "done" ? C.green : st.k === "in_progress" ? C.packing : C.accent;
+                const isDone = st.k === "done";
+                return (
+                  <div key={it.id} style={{ display: "flex", alignItems: "flex-start", gap: z.gap, padding: z.row, borderBottom: `1px solid ${C.border}`, background: isDone ? C.green + "1f" : "transparent", borderLeft: `5px solid ${isDone ? C.green : "transparent"}` }}>
+                    <span style={{ width: 13, height: 13, borderRadius: "50%", background: dot, boxShadow: `0 0 8px ${dot}`, flexShrink: 0, marginTop: z.dotTop }} />
+                    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
+                      <div style={{ fontSize: z.name, fontWeight: 700, lineHeight: 1.15, color: isDone ? C.green : C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
+                        <span style={{ flex: 1, minWidth: 0, fontFamily: MONO, fontSize: z.sku, fontWeight: 700, letterSpacing: 0.5, color: C.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.sku}</span>
+                        <span style={{ flexShrink: 0, fontSize: z.qty, fontWeight: 800, color: C.text }}>{Math.round(it.quantity)}<span style={{ fontSize: z.unit, fontWeight: 600, color: C.text3 }}> {it.unit || "pcs"}</span></span>
+                        <span style={{ flexShrink: 0, fontSize: z.st, fontWeight: 800, color: dot, textTransform: "uppercase", letterSpacing: 0.5, minWidth: z.stMin, textAlign: "right" }}>{isDone ? "✓ " + st.label : st.label}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+              : <div style={{ color: C.text3, padding: "12px 0" }}>Loading line items…</div>}
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <Pill color={cd.tone} style={{ fontSize: 22, padding: "9px 16px" }}><Icon name="clock" size={20} color={cd.tone} /> {fmtDay(spot.required_delivery_date)} · {cd.text} left</Pill>
+            <div style={{ height: 5, background: C.surface2, borderRadius: 4, overflow: "hidden", marginTop: 12 }}>
+              <div style={{ height: "100%", width: `${total ? (idx + 1) / total * 100 : 0}%`, background: C.accent, transition: "width .4s" }} />
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function FloorDisplay({ onExit }) {
   const [board, setBoard] = useState(null);
   const [view, setView] = useState("board"); // board | scoreboard
@@ -1208,10 +1430,10 @@ function FloorDisplay({ onExit }) {
   const [filter, setFilter] = useState("all");
   const [weekOnly, setWeekOnly] = useState(false);
   const [now, setNow] = useState(new Date());
-  const [spotIdx, setSpotIdx] = useState(0);
-  const [detail, setDetail] = useState(null);
+  const [layout, setLayoutRaw] = useState(initialFloorLayout);
   const [vp, setVp] = useState(() => ({ w: typeof window !== "undefined" ? window.innerWidth : 1920, h: typeof window !== "undefined" ? window.innerHeight : 1080 }));
-  const cache = useRef({});
+  // Remember the pick on this device, so a screen comes back the way it was left.
+  const setLayout = (k) => { setLayoutRaw(k); try { localStorage.setItem(FLOOR_LAYOUT_STORAGE, k); } catch { /* storage blocked */ } };
 
   // Kiosk session: the wall TV is logged in once and must never time out. Swap to a
   // long-lived token on mount so the 8h window can't log the floor out overnight.
@@ -1226,7 +1448,7 @@ function FloorDisplay({ onExit }) {
   async function load() {
     try {
       const [b, s] = await Promise.all([api("GET", `/orders/kanban${weekOnly ? "?week=current" : ""}`), api("GET", "/orders/stats")]);
-      setBoard(b); setStats(s); cache.current = {};
+      setBoard(b); setStats(s);
     } catch (e) { /* keep last */ }
   }
   useEffect(() => { load(); const t = setInterval(load, 3000); return () => clearInterval(t); /* eslint-disable-next-line */ }, [weekOnly]);
@@ -1247,39 +1469,29 @@ function FloorDisplay({ onExit }) {
     return () => { clearTimeout(t); evs.forEach((e) => window.removeEventListener(e, ping)); };
   }, []);
 
-  const pool = useMemo(() => {
+  const lay = FLOOR_LAYOUTS[layout] || FLOOR_LAYOUTS.all;
+  // Twin gives each department its own spotlight; the four-stage view runs one over
+  // whatever the stage filter picked. Both hooks are always called — the second just
+  // has nothing to cycle unless the layout is twin.
+  const poolA = useMemo(() => {
     if (!board) return [];
-    const stages = filter === "all" ? BOARD_STAGES : [filter];
+    const stages = layout === "twin" ? ["production"] : (filter === "all" ? BOARD_STAGES : [filter]);
     return stages.flatMap((s) => board[s] || []);
-  }, [board, filter]);
-  useEffect(() => { setSpotIdx(0); }, [filter]);
-  useEffect(() => {
-    if (pool.length === 0) return;
-    const t = setInterval(() => setSpotIdx((i) => (i + 1) % pool.length), 10000);
-    return () => clearInterval(t);
-  }, [pool.length]);
-
-  const spot = pool.length ? pool[spotIdx % pool.length] : null;
-  useEffect(() => {
-    let cancel = false;
-    async function go() {
-      if (!spot) { setDetail(null); return; }
-      if (cache.current[spot.id]) { setDetail(cache.current[spot.id]); return; }
-      try { const d = await api("GET", `/orders/${spot.id}`); if (!cancel) { cache.current[spot.id] = d; setDetail(d); } }
-      catch (e) { if (!cancel) setDetail(null); }
-    }
-    go(); return () => { cancel = true; };
-  }, [spot && spot.id]);
+  }, [board, filter, layout]);
+  const poolB = useMemo(() => (board && layout === "twin" ? (board.packing || []) : []), [board, layout]);
+  const spotA = useSpotlight(poolA, layout + "|" + filter);
+  const spotB = useSpotlight(poolB, layout);
 
   const clock = now.toLocaleTimeString("en-GB", { hour12: false });
-  // Left wall always shows every stage column; the stage filter only drives which
-  // stage the right-hand spotlight cycles (pool), so a picked stage "stays" on the right.
-  const cols = BOARD_STAGES;
+  // Which columns the wall shows is the layout's call. In the four-stage view the
+  // stage filter only drives which stage the right-hand spotlight cycles, so a picked
+  // stage "stays" on the right rather than hiding the other columns.
+  const cols = lay.stages;
   // Glance ordering for the wall: within each column put late → urgent → soonest-due
   // first, then cap to what fits and roll the rest into "＋N more". Auto-scroll and
   // shrink-to-fit both read badly from a distance; the cropped ones are always the
   // least urgent, and the spotlight still cycles every order in full.
-  const FLOOR_CAP = 5;
+  const FLOOR_CAP = lay.cap;
   const floorRank = (o) => { const n = countdown(o.required_delivery_date).n; const nn = (n == null ? 9999 : n); return [nn < 0 ? 0 : 1, o.priority === "urgent" ? 0 : 1, nn]; };
   const cmpRank = (a, b) => { const x = floorRank(a), y = floorRank(b); return (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]); };
   const floorCols = cols.map((s) => {
@@ -1293,7 +1505,9 @@ function FloorDisplay({ onExit }) {
   const floorAlerts = (() => {
     if (!board) return { late: 0, urgent: 0, stock: 0 };
     const seen = new Map();
-    BOARD_STAGES.forEach((s) => (board[s] || []).forEach((o) => seen.set(o.id, o)));
+    // Scoped to the layout: a twin wall counts Production and Packing only, so every
+    // number on it is one the people standing in front of it can act on.
+    lay.stages.forEach((s) => (board[s] || []).forEach((o) => seen.set(o.id, o)));
     const a = [...seen.values()];
     return {
       late: a.filter((o) => (countdown(o.required_delivery_date).n ?? 0) < 0).length,
@@ -1301,13 +1515,6 @@ function FloorDisplay({ onExit }) {
       stock: a.filter((o) => o.waiting_stock).length,
     };
   })();
-  const spotStage = spot ? (STAGE_LABELS[spot.stage] || { label: spot.stage, color: C.accent }) : null;
-  const spotCd = spot ? countdown(spot.required_delivery_date) : null;
-  const spotDtag = spot ? deliveryTag(spot) : null;
-  // Whole spotlight greens when every STK is done (mirrors the red urgent spotlight);
-  // if it's also urgent, double border (green inner + red outer ring).
-  const spotAllDone = spot && (spot.stage === "production" || spot.stage === "packing") && (spot.item_count || 0) > 0 && (spot.made_count || 0) >= spot.item_count;
-  const spotUrgentDone = spotAllDone && spot.priority === "urgent";
   const wallScale = Math.min(vp.w / 1920, vp.h / 1080);
   // Idle chrome: the interactive controls (Exit, view toggle, stage filters, This
   // week) UNMOUNT after 5s of no activity — not just fade — so the header collapses
@@ -1328,7 +1535,7 @@ function FloorDisplay({ onExit }) {
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <Logo size={46} />
           <div style={{ fontSize: 36, fontWeight: 800, letterSpacing: 0.5 }}>
-            <span style={{ color: C.text }}>WAWASAN LTS </span><span style={{ color: C.accent }}>{view === "scoreboard" ? "SCOREBOARD" : "PRODUCTION FLOOR"}</span>
+            <span style={{ color: C.text }}>WAWASAN LTS </span><span style={{ color: layout === "twin" ? C.production : C.accent }}>{view === "scoreboard" ? "SCOREBOARD" : lay.title}</span>
           </div>
         </div>
         {REWARD_SYSTEM_ENABLED && chrome && (
@@ -1342,7 +1549,18 @@ function FloorDisplay({ onExit }) {
         <StatCard label="Completed today" value={stats.completed_today} color={C.green} />
         <StatCard label="Active orders" value={stats.active} color={C.accent} />
         {chrome && (<>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginLeft: 6 }}>
+        <div style={{ display: "flex", gap: 4, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, marginLeft: 6 }}>
+          {FLOOR_LAYOUT_KEYS.map((k) => {
+            const on = layout === k;
+            return (
+              <button key={k} onClick={() => setLayout(k)} title={`Show the ${FLOOR_LAYOUTS[k].label} layout on this screen`}
+                style={{ background: on ? C.surface2 : "transparent", border: "none", borderRadius: 7, padding: "9px 16px", cursor: "pointer", fontSize: 14, fontWeight: on ? 800 : 600, color: on ? C.accent : C.text2 }}>{FLOOR_LAYOUTS[k].label}</button>
+            );
+          })}
+        </div>
+        {/* The stage filter only steers the single spotlight, so it means nothing on a
+            twin wall where each department already spotlights its own orders. */}
+        {layout !== "twin" && <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginLeft: 6 }}>
           {["all", ...BOARD_STAGES].map((s) => {
             const active = filter === s;
             const color = s === "all" ? C.accent : STAGES[s].color;
@@ -1351,7 +1569,7 @@ function FloorDisplay({ onExit }) {
               <button key={s} onClick={() => setFilter(s)} style={{ padding: "9px 16px", borderRadius: 9, border: `1px solid ${active ? color + "66" : C.border}`, background: active ? color + "22" : "transparent", color: active ? color : C.text2, fontSize: 14, fontWeight: 600, cursor: "pointer" }}>{label}</button>
             );
           })}
-        </div>
+        </div>}
         <button onClick={() => setWeekOnly((w) => !w)} style={{ padding: "9px 16px", borderRadius: 9, border: `1px solid ${weekOnly ? C.accent + "66" : C.border}`, background: weekOnly ? C.accent + "22" : "transparent", color: weekOnly ? C.accent : C.text2, fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8 }}>
           <Icon name="calendar" size={15} color={weekOnly ? C.accent : C.text3} /> This week
         </button>
@@ -1373,136 +1591,27 @@ function FloorDisplay({ onExit }) {
       {/* Body */}
       <div style={{ flex: 1, display: "flex", gap: 16, minHeight: 0 }}>
         {REWARD_SYSTEM_ENABLED && view === "scoreboard" && <FloorScoreboard />}
-        {view === "board" && (<>
-        <div style={{ flex: 1, display: "grid", gridTemplateColumns: floorCols.map((c) => (c.total === 0 ? "112px" : "minmax(0, 1fr)")).join(" "), gap: 14, minHeight: 0 }}>
-          {floorCols.map(({ s, cfg, total, shown, more }) => {
-            // Empty stage collapses to a thin vertical rail, so the columns that actually
-            // have work (usually Packing / Ready) get the room.
-            if (total === 0) {
-              return (
-                <div key={s} style={{ background: C.bg2, border: `1px solid ${C.border}`, borderTop: `4px solid ${cfg.color}`, borderRadius: 14, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12 }}>
-                  <div style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", fontSize: 18, fontWeight: 800, letterSpacing: 2, textTransform: "uppercase", color: C.text3 }}>{cfg.label}</div>
-                  <div style={{ fontSize: 44, fontWeight: 800, color: C.text3, lineHeight: 1 }}>0</div>
-                </div>
-              );
-            }
-            return (
-              <div key={s} style={{ background: C.bg2, border: `1px solid ${C.border}`, borderTop: `4px solid ${cfg.color}`, borderRadius: 14, padding: "16px 14px", display: "flex", flexDirection: "column", minHeight: 0 }}>
-                <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: 1, color: C.text3, textTransform: "uppercase" }}>{cfg.label}</div>
-                <div style={{ fontSize: 66, fontWeight: 800, color: cfg.color, lineHeight: 1, margin: "2px 0 14px" }}>{total}</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 9, overflowY: "hidden" }}>
-                  {shown.map((o) => {
-                    const cd = countdown(o.required_delivery_date);
-                    const late = (cd.n ?? 0) < 0, urgent = o.priority === "urgent";
-                    const dtag = deliveryTag(o);
-                    const sub = o._items || null;
-                    const subDone = sub ? sub.filter(s === "packing" ? itemPackDone : itemProdDone).length : (o.made_count || 0);
-                    const subTotal = sub ? sub.length : (o.item_count || 0);
-                    const allDone = sub
-                      ? ((o.items || []).length > 0 && (o.items || []).every(itemPackDone))
-                      : ((o.stage === "production" || o.stage === "packing") && (o.item_count || 0) > 0 && (o.made_count || 0) >= o.item_count);
-                    return (
-                      <div key={o.id} style={{ background: allDone ? C.green + "33" : (urgent && late) ? C.danger + "3A" : (urgent || late) ? C.danger + "1A" : C.surface, border: `${allDone || (urgent && late) ? 2 : 1}px solid ${allDone ? C.green : (urgent && late) ? C.danger : (urgent || late) ? C.danger + "88" : C.border}`, borderLeft: `5px solid ${cfg.color}`, borderRadius: 10, padding: "13px 16px" }}>
-                        <div style={{ fontFamily: MONO, fontSize: 28, fontWeight: 800, color: allDone ? C.text : late ? C.danger : urgent ? C.accent2 : C.text }}>{o.invoice_number}</div>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 7 }}>
-                          {urgent && <Pill color="#fff" bg={C.danger} border={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>Urgent</Pill>}
-                          {dtag && <Pill color={dtag.color} style={{ fontSize: 14, padding: "3px 10px" }}>{dtag.label}</Pill>}
-                          {o.waiting_stock && <Pill color={C.danger} style={{ fontSize: 14, padding: "3px 10px" }}>⚠ Stock</Pill>}
-                          {o.on_hold && <Pill color={C.hold} style={{ fontSize: 14, padding: "3px 10px" }}>Hold</Pill>}
-                        </div>
-                        <div style={{ fontSize: 27, color: cd.tone, marginTop: 8, fontWeight: 700 }}>
-                          <span style={{ color: C.text2 }}>{fmtDay(o.required_delivery_date)}</span> · {cd.text}
-                        </div>
-                        {(s === "production" || s === "packing") && subTotal > 0 && (() => {
-                          const done = subDone, total = subTotal, full = total > 0 && done >= total;
-                          const p = total > 0 ? Math.round((done / total) * 100) : 0;
-                          return (
-                            <div style={{ marginTop: 8 }}>
-                              {!full && <div style={{ fontSize: 17, fontWeight: 800, color: C.accent2, marginBottom: 5 }}>{done}/{total} {s === "packing" ? "packed" : "made"}</div>}
-                              <div style={{ height: 8, background: C.surface2, borderRadius: 4, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: full ? C.green : C.accent }} /></div>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    );
-                  })}
-                  {more > 0 && (
-                    <div style={{ textAlign: "center", fontSize: 21, fontWeight: 800, color: C.text3, background: "rgba(255,255,255,0.03)", border: `1px dashed ${C.border2}`, borderRadius: 10, padding: "13px 10px" }}>＋{more} more · on the board</div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
 
-        {/* Spotlight */}
-        <div style={{ width: 500, background: spotAllDone ? C.green + "14" : spot && spot.priority === "urgent" ? C.danger + "14" : C.bg2, border: `1px solid ${spotUrgentDone ? C.green : spotAllDone ? C.green + "88" : spot && spot.priority === "urgent" ? C.danger + "88" : C.border}`, borderRadius: 16, padding: "20px 22px", display: "flex", flexDirection: "column", minHeight: 0, boxShadow: spotUrgentDone ? `0 0 0 2px ${C.bg}, 0 0 0 4px ${C.danger}` : "none" }}>
-          {!spot ? <div style={{ margin: "auto", color: C.text3 }}>No active orders</div> : (
-            <>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <Pill color={spotStage.color} style={{ fontSize: 18, padding: "7px 16px" }}>● {spotStage.label}</Pill>
-                  {spot.priority === "urgent" && <Pill color="#fff" bg={C.danger} border={C.danger} style={{ fontSize: 18, padding: "7px 16px" }}>Urgent</Pill>}
-                  {spotDtag && <Pill color={spotDtag.color} style={{ fontSize: 18, padding: "7px 16px" }}>{spotDtag.label}</Pill>}
-                </div>
-                <span style={{ fontSize: 18, fontWeight: 700, color: C.text3 }}>{(spotIdx % pool.length) + 1} / {pool.length}</span>
-              </div>
-              <div style={{ fontFamily: MONO, fontSize: 78, fontWeight: 800, color: C.accent2, margin: "10px 0 12px", lineHeight: 1, letterSpacing: -2 }}>{spot.invoice_number}</div>
-              {detail && detail.id === spot.id && (detail.items || []).length > 0 && (() => {
-                const its = detail.items || [];
-                const total = its.length;
-                const done = its.filter((it) => itemStatusKey(it) === "done").length;
-                const making = its.filter((it) => itemStatusKey(it) === "in_progress").length;
-                const todo = total - done - making;
-                const p = total > 0 ? Math.round((done / total) * 100) : 0;
-                const chip = (label, n, color) => (
-                  <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, background: color + "1f", border: `1px solid ${color}55`, color, borderRadius: 9, padding: "8px 14px", fontSize: 28, fontWeight: 800 }}>{n}<span style={{ fontSize: 14, fontWeight: 700, opacity: 0.85, textTransform: "uppercase", letterSpacing: 0.5 }}>{label}</span></span>
-                );
-                return (
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-                      {chip("To do", todo, C.accent)}
-                      {chip("Making", making, C.packing)}
-                      {chip("Done", done, C.green)}
-                    </div>
-                    <div style={{ height: 7, background: C.surface2, borderRadius: 5, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: p >= 100 ? C.green : C.accent, transition: "width .3s" }} /></div>
-                  </div>
-                );
-              })()}
-              <div style={{ flex: 1, overflowY: "auto" }}>
-                {detail && detail.id === spot.id
-                  ? (detail.items || []).map((it) => {
-                    const st = itemStat(it);
-                    const dot = st.k === "done" ? C.green : st.k === "in_progress" ? C.packing : C.accent;
-                    const isDone = st.k === "done";
-                    return (
-                    <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 14px", borderBottom: `1px solid ${C.border}`, background: isDone ? C.green + "1f" : "transparent", borderLeft: `5px solid ${isDone ? C.green : "transparent"}` }}>
-                      <span style={{ width: 13, height: 13, borderRadius: "50%", background: dot, boxShadow: `0 0 8px ${dot}`, flexShrink: 0 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontFamily: MONO, fontSize: 30, fontWeight: 800, color: isDone ? C.green : C.text, letterSpacing: 0.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.sku}</div>
-                        <div style={{ fontSize: 18, fontWeight: 500, color: C.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
-                      </div>
-                      <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 18 }}>
-                        <div style={{ textAlign: "right", minWidth: 80 }}>
-                          <span style={{ fontSize: 32, fontWeight: 800, color: C.text, lineHeight: 1 }}>{Math.round(it.quantity)}</span>
-                          <span style={{ fontSize: 16, fontWeight: 600, color: C.text3 }}> {it.unit || "pcs"}</span>
-                        </div>
-                        <span style={{ fontSize: 21, fontWeight: 800, color: dot, textTransform: "uppercase", letterSpacing: 0.5, minWidth: 108, textAlign: "right" }}>{isDone ? "✓ " + st.label : st.label}</span>
-                      </div>
-                    </div>
-                    );
-                  })
-                  : <div style={{ color: C.text3, padding: "12px 0" }}>Loading line items…</div>}
-              </div>
-              <div style={{ marginTop: 12 }}>
-                <Pill color={spotCd.tone} style={{ fontSize: 22, padding: "9px 16px" }}><Icon name="clock" size={20} color={spotCd.tone} /> {fmtDay(spot.required_delivery_date)} · {spotCd.text} left</Pill>
-                <div style={{ height: 5, background: C.surface2, borderRadius: 4, overflow: "hidden", marginTop: 12 }}>
-                  <div style={{ height: "100%", width: `${((spotIdx % pool.length) + 1) / pool.length * 100}%`, background: C.accent, transition: "width .4s" }} />
-                </div>
-              </div>
-            </>
-          )}
+        {/* Twin: the screen splits down the middle and each department owns a half —
+            its own queue, its own detail panel, its own colour wrapping both. */}
+        {view === "board" && layout === "twin" && floorCols.map((c, i) => {
+          const half = i === 0 ? spotA : spotB;
+          return (
+            <div key={c.s} style={{ flex: 1, minWidth: 0, display: "flex", gap: 12, padding: 12, borderRadius: 18, background: c.cfg.color + "29", border: `5px solid ${c.cfg.color}BF` }}>
+              <FloorColumn s={c.s} cfg={c.cfg} total={c.total} shown={c.shown} more={c.more} owned grow />
+              <FloorSpotlight spot={half.spot} detail={half.detail} idx={half.idx} total={half.total} narrow />
+            </div>
+          );
+        })}
+
+        {/* Four-stage view: every stage column, one spotlight on the right. */}
+        {view === "board" && layout !== "twin" && (<>
+        <div style={{ flex: 1, display: "grid", gridTemplateColumns: floorCols.map((c) => (c.total === 0 ? "112px" : "minmax(0, 1fr)")).join(" "), gap: 14, minHeight: 0 }}>
+          {floorCols.map(({ s, cfg, total, shown, more }) => (
+            <FloorColumn key={s} s={s} cfg={cfg} total={total} shown={shown} more={more} />
+          ))}
         </div>
+        <FloorSpotlight spot={spotA.spot} detail={spotA.detail} idx={spotA.idx} total={spotA.total} />
         </>)}
       </div>
       </div>
@@ -1665,7 +1774,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
         </select>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12.5, color: C.packing, minWidth: 84, fontWeight: 600 }}>Packing PIC</span>
+        <span style={{ fontSize: 12.5, color: C.packStage, minWidth: 84, fontWeight: 600 }}>Packing PIC</span>
         <select value={order.packing_pic_id || ""} onChange={(e) => assignPic(e.target.value, "packing")} style={picSelStyle}>
           <option value="" style={{ background: C.bg2 }}>Unassigned</option>
           {order.packing_pic_id && !packPicUsers.some((u) => u.id === order.packing_pic_id) && <option value={order.packing_pic_id} style={{ background: C.bg2 }}>{order.pack_pic_name || "Current PIC"}</option>}
@@ -2351,8 +2460,8 @@ function OrdersReport({ period, from, to }) {
                       <div style={{ flex: 1, height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}><div style={{ height: "100%", width: `${o.pct}%`, background: o.pct >= 100 ? C.ready : C.production }} /></div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: C.text2 }}>
-                      <span style={{ width: 28, color: C.packing, fontWeight: 600 }}>Pack</span>{o.packed_count}/{o.item_count}
-                      <div style={{ flex: 1, height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}><div style={{ height: "100%", width: `${o.pack_pct}%`, background: o.pack_pct >= 100 ? C.ready : C.packing }} /></div>
+                      <span style={{ width: 28, color: C.packStage, fontWeight: 600 }}>Pack</span>{o.packed_count}/{o.item_count}
+                      <div style={{ flex: 1, height: 4, background: C.surface2, borderRadius: 3, overflow: "hidden" }}><div style={{ height: "100%", width: `${o.pack_pct}%`, background: o.pack_pct >= 100 ? C.ready : C.packStage }} /></div>
                     </div>
                   </td>
                   <td style={{ padding: "9px 14px", color: C.text2 }}>{o.days_in_stage}d</td>
@@ -2381,16 +2490,16 @@ function OrdersReport({ period, from, to }) {
                           <Pill color={C.text3}>To do: {o.not_started_count}</Pill>
                         </div>
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                          <span style={{ fontSize: 11, color: C.packing, minWidth: 62, fontWeight: 600 }}>Packing</span>
+                          <span style={{ fontSize: 11, color: C.packStage, minWidth: 62, fontWeight: 600 }}>Packing</span>
                           <Pill color={C.ready}>Packed: {o.packed_count}</Pill>
-                          <Pill color={C.packing}>Packing: {o.pack_in_progress_count}</Pill>
+                          <Pill color={C.packStage}>Packing: {o.pack_in_progress_count}</Pill>
                           <Pill color={C.text3}>To do: {o.pack_not_started_count}</Pill>
                         </div>
                       </div>
                       <div>
                         <div style={{ fontSize: 11, fontWeight: 700, color: C.text3, marginBottom: 6, letterSpacing: 0.4 }}>PIC & DELIVERY</div>
                         <div style={{ fontSize: 12.5, color: C.text2 }}><span style={{ color: C.production, fontWeight: 600 }}>Prod:</span> {o.pic_name || "Unassigned"}</div>
-                        <div style={{ fontSize: 12.5, color: C.text2, marginTop: 3 }}><span style={{ color: C.packing, fontWeight: 600 }}>Pack:</span> {o.pack_pic_name || "Unassigned"}</div>
+                        <div style={{ fontSize: 12.5, color: C.text2, marginTop: 3 }}><span style={{ color: C.packStage, fontWeight: 600 }}>Pack:</span> {o.pack_pic_name || "Unassigned"}</div>
                         <div style={{ fontSize: 12.5, color: C.text2, marginTop: 3 }}><span style={{ color: C.ready, fontWeight: 600 }}>Driver:</span> {o.carrier_name || "—"}</div>
                       </div>
                     </div>
@@ -2578,7 +2687,7 @@ function PicTrackTable({ track, period, from, to }) {
   const openOf = (p) => (isProd ? p.active_prod : p.active_pack) || 0;
   const list = raw.filter((p) => roles.includes(p.role) || openOf(p) > 0);
   if (list.length === 0) return null;
-  const color = isProd ? C.production : C.packing;
+  const color = isProd ? C.production : C.packStage;
   const title = isProd ? "Production" : "Packing";
   const LIM = 8;
   const shown = showAll ? list : list.slice(0, LIM);
@@ -2674,7 +2783,7 @@ function EfficiencyReport({ period, from, to }) {
   if (d === false) return <Empty label="Could not load efficiency." />;
   const secT = { fontSize: 11.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".5px", color: C.text3, margin: "18px 2px 9px" };
   const STG = { order: "Order → Prod", production: "Production", packing: "Packing", ready_for_delivery: "Ready → Out" };
-  const STG_COLOR = { order: C.order, production: C.production, packing: C.packing, ready_for_delivery: C.ready };
+  const STG_COLOR = { order: C.order, production: C.production, packing: C.packStage, ready_for_delivery: C.ready };
   const hrs = (h) => h == null ? "—" : (Number(h) >= 48 ? Math.round(Number(h) / 24) + "d" : Number(h).toFixed(1) + "h");
   const order = ["order", "production", "packing", "ready_for_delivery"];
   const dwell = (d.stage_dwell || []).slice().sort((a, b) => order.indexOf(a.stage) - order.indexOf(b.stage));
