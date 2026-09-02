@@ -1401,7 +1401,12 @@ function FloorColumn({ s, cfg, total, shown, more, owned, grow }) {
                   const p = Math.round((ctn.done / ctn.total) * 100);
                   return (
                     <div style={{ marginTop: 8 }}>
-                      <div style={{ fontSize: full ? 25 : 34, fontWeight: 800, color: full ? C.green : C.accent2, lineHeight: 1.05, letterSpacing: -0.5 }}>{full ? "ALL CTN DONE" : `${left} CTN LEFT`}</div>
+                      {/* A produced line leaves the Production column, so a Production card
+                          always has cartons outstanding and only ever reads "N CTN LEFT".
+                          Packing keeps its finished lines until the whole order is advanced,
+                          so the all-done state belongs to it — and reads "ALL CTN PACKED",
+                          which is the cue to move the order to Ready for Delivery. */}
+                      <div style={{ fontSize: full ? 25 : 34, fontWeight: 800, color: full ? C.green : C.accent2, lineHeight: 1.05, letterSpacing: -0.5 }}>{full ? (s === "packing" ? "ALL CTN PACKED" : "ALL CTN MADE") : `${left} CTN LEFT`}</div>
                       <div style={{ fontSize: 17, fontWeight: 700, color: C.text3, letterSpacing: 0.5, margin: "2px 0 7px" }}>{ctn.done} / {ctn.total} CTN {s === "packing" ? "PACKED" : "MADE"}</div>
                       <div style={{ height: 8, background: C.surface2, borderRadius: 4, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: full ? C.green : C.accent }} /></div>
                     </div>
