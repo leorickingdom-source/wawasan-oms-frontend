@@ -130,7 +130,7 @@ function itemPackDone(it) { return !!(it && (it.pack_made || it.pack_status === 
 // per-track counters; a line finished with the three buttons reports its full quantity,
 // so orders worked the previous way still read as complete.
 function isCartonLine(it) {
-  if (!it || String(it.unit || "").toUpperCase() !== "CTN" || !(Number(it.quantity) > 0)) return false;
+  if (!it || String(it.unit || "").trim().toUpperCase() !== "CTN" || !(Number(it.quantity) > 0)) return false;
   // Only once the API actually sends the counters. Without this the wall would deploy
   // ahead of the backend and report "0 / 45 CTN MADE" against a line that is part-built,
   // which reads as no progress rather than as unknown progress.
@@ -145,6 +145,12 @@ function cartonDone(it, track) {
   return Math.min(total, Math.max(0, Math.round(Number(done) || 0)));
 }
 
+function cartonProgress(it, track) {
+  const total = Math.round(Number(it && it.quantity) || 0);
+  const done = cartonDone(it, track);
+  return { total, done, left: Math.max(0, total - done) };
+}
+
 function orderCartons(o, stageKey) {
   const track = stageKey === "packing" ? "packing" : "production";
   const lines = (o && o._items) || (o && o.items) || null;
@@ -155,9 +161,9 @@ function orderCartons(o, stageKey) {
     const done = ctn.reduce((a, it) => a + cartonDone(it, track), 0);
     return total > 0 ? { done: Math.min(done, total), total } : null;
   }
-  const total = Math.round(Number(o && o.ctn_total) || 0);
+  const total = Math.max(0, Math.round(Number(o && o.ctn_total) || 0));
   if (!total) return null;
-  return { done: Math.min(Math.round(Number(o && o.ctn_done) || 0), total), total };
+  return { done: Math.min(Math.max(0, Math.round(Number(o && o.ctn_done) || 0)), total), total };
 }
 
 function itemPlace(it) {
@@ -327,9 +333,7 @@ function StatusPicker({ value, onChange, disabled, big, labels }) {
 // track side by side, so you can see which stage each line is in and set either. Packing
 // unlocks once the line is produced. (Single-track StatusPicker stays for the flag-off UI.)
 function CartonStepper({ it, track, disabled, onSetQty, big }) {
-  const total = Math.round(Number(it.quantity) || 0);
-  const done = cartonDone(it, track);
-  const left = Math.max(0, total - done);
+  const { total, done, left } = cartonProgress(it, track);
   const step = (d) => { const v = Math.min(total, Math.max(0, done + d)); if (v !== done) onSetQty(v, track); };
   const btn = (label, d, on) => (
     <button type="button" disabled={disabled || !on} onClick={() => step(d)}
@@ -355,7 +359,7 @@ function CartonStepper({ it, track, disabled, onSetQty, big }) {
   );
 }
 
-function ItemTrackPicker({ it, canProd, canPack, onSet, onSetQty, big }) {
+function ItemTrackPicker({ it, canProd, canPack, onSet, onSetQty, qtyBusy, big }) {
   const prodVal = it.prod_status || (it.prod_made ? "done" : "not_started");
   const packVal = it.pack_status || (it.pack_made ? "done" : "not_started");
   const produced = it.prod_made || it.prod_status === "done";
@@ -364,12 +368,12 @@ function ItemTrackPicker({ it, canProd, canPack, onSet, onSetQty, big }) {
       <div>
         <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5, color: STAGES.production.color, marginBottom: 4 }}>PRODUCTION</div>
         <StatusPicker value={prodVal} disabled={!canProd} onChange={(s) => onSet(s, "production")} big={big} />
-        {onSetQty && isCartonLine(it) && <CartonStepper it={it} track="production" disabled={!canProd} onSetQty={onSetQty} big={big} />}
+        {onSetQty && isCartonLine(it) && <CartonStepper it={it} track="production" disabled={!canProd || !!(qtyBusy && qtyBusy[it.id + "|production"])} onSetQty={onSetQty} big={big} />}
       </div>
       <div style={{ opacity: produced ? 1 : 0.5 }}>
         <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5, color: STAGES.packing.color, marginBottom: 4 }}>PACKING{!produced && <span style={{ color: C.text3, fontWeight: 600, letterSpacing: 0 }}> · after production</span>}</div>
         <StatusPicker value={packVal} disabled={!canPack || !produced} onChange={(s) => onSet(s, "packing")} big={big} />
-        {onSetQty && isCartonLine(it) && <CartonStepper it={it} track="packing" disabled={!canPack || !produced} onSetQty={onSetQty} big={big} />}
+        {onSetQty && isCartonLine(it) && <CartonStepper it={it} track="packing" disabled={!canPack || !produced || !!(qtyBusy && qtyBusy[it.id + "|packing"])} onSetQty={onSetQty} big={big} />}
       </div>
     </div>
   );
@@ -1490,9 +1494,8 @@ function FloorSpotlight({ spot, detail, idx, total, narrow }) {
                 const spec = dash > 0 ? it.name.slice(dash + 3) : "";
                 const ref = it.sku + (spec ? " \u00b7 " + spec : "");
                 const carton = isCartonLine(it);
-                const cTotal = Math.round(Number(it.quantity) || 0);
-                const cDone = carton ? cartonDone(it, track) : 0;
-                const cLeft = cTotal - cDone;
+                const prog = cartonProgress(it, track);
+                const cTotal = prog.total, cDone = carton ? prog.done : 0, cLeft = carton ? prog.left : 0;
                 const finished = carton ? cLeft <= 0 : isDone;
                 const tone = finished ? C.green : dot;
                 return (
@@ -1602,7 +1605,8 @@ function FloorDisplay({ onExit }) {
   // least urgent, and the spotlight still cycles every order in full.
   // Carton cards are two lines taller than the plain tally, so a column showing them
   // holds one card fewer. Measured against the 1080-high wall.
-  const anyCartons = !!(board && (lay.stages || []).some((st) => (board[st] || []).some((o) => !!orderCartons(o, st))));
+  const anyCartons = !!(board && (lay.stages || []).some((st) => (st === "production" || st === "packing")
+    && (board[st] || []).some((o) => !!orderCartons(o, st))));
   const FLOOR_CAP = Math.max(1, lay.cap - (anyCartons ? 1 : 0));
   const floorRank = (o) => { const n = countdown(o.required_delivery_date).n; const nn = (n == null ? 9999 : n); return [nn < 0 ? 0 : 1, o.priority === "urgent" ? 0 : 1, nn]; };
   const cmpRank = (a, b) => { const x = floorRank(a), y = floorRank(b); return (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]); };
@@ -1744,6 +1748,11 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
   const [newItem, setNewItem] = useState({ sku: "", name: "", quantity: 1, unit: "pcs" });
   const [notes, setNotes] = useState("");
   const [notesBusy, setNotesBusy] = useState(false);
+  // One carton write per line and track at a time. The ref is what actually guards the
+  // send, because React state has not flushed yet within a burst of taps in the same
+  // tick; the state copy only drives the button's disabled look.
+  const [qtyBusy, setQtyBusy] = useState({});
+  const qtyBusyRef = useRef({});
   const [notesSaved, setNotesSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
@@ -1790,6 +1799,9 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
       ...(track === "packing" ? { pack_status: status, pack_made: status === "done" }
         : track === "production" ? { prod_status: status, prod_made: status === "done", status, made: status === "done" }
         : { status, made: status === "done" }),
+      ...(isCartonLine(x) && status !== "in_progress"
+        ? { [track === "packing" ? "pack_qty" : "made_qty"]: status === "done" ? Math.round(Number(x.quantity) || 0) : 0 }
+        : null),
     } : x) } : o);
     try { await api("PATCH", `/orders/${orderId}/items/${it.id}`, track ? { status, track } : { status }); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); setOrder(prev); }
@@ -1797,11 +1809,18 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
   // Record cartons finished on one track. The server derives the line's status from the
   // count, so the optimistic copy sets both and cannot drift from what comes back.
   async function setItemQty(it, qty, track) {
+    const key = it.id + "|" + track;
+    if (qtyBusyRef.current[key]) return;
+    qtyBusyRef.current[key] = true;
     const total = Math.round(Number(it.quantity) || 0);
     const doneQty = Math.min(total, Math.max(0, Math.round(Number(qty) || 0)));
     if (doneQty === cartonDone(it, track)) return;
     const status = doneQty <= 0 ? "not_started" : (doneQty >= total && total > 0 ? "done" : "in_progress");
-    const prev = order;
+    // Restore just this line if the write fails — an order-wide snapshot would undo any
+    // other line the user changed while this request was in flight.
+    const before = { made_qty: it.made_qty, pack_qty: it.pack_qty, status: it.status, made: it.made,
+      prod_status: it.prod_status, prod_made: it.prod_made, pack_status: it.pack_status, pack_made: it.pack_made };
+    setQtyBusy((b) => ({ ...b, [key]: true }));
     setOrder((o) => (o && o.items) ? { ...o, items: o.items.map((x) => x.id === it.id ? {
       ...x,
       ...(track === "packing"
@@ -1809,7 +1828,13 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
         : { made_qty: doneQty, prod_status: status, prod_made: status === "done", status, made: status === "done" }),
     } : x) } : o);
     try { await api("PATCH", `/orders/${orderId}/items/${it.id}`, { qty_done: doneQty, track: track || "production" }); onUpdated && onUpdated(); }
-    catch (e) { alert(e.message); setOrder(prev); }
+    catch (e) {
+      alert(e.message);
+      setOrder((o) => (o && o.items) ? { ...o, items: o.items.map((x) => x.id === it.id ? { ...x, ...before } : x) } : o);
+    } finally {
+      delete qtyBusyRef.current[key];
+      setQtyBusy((b) => { const n = { ...b }; delete n[key]; return n; });
+    }
   }
 
   async function setFlag(body) {
@@ -2115,7 +2140,10 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
                       {!canMark && !splitItems && <span style={{ flexShrink: 0, alignSelf: "flex-start", display: "inline-block", padding: "3px 9px", borderRadius: 20, fontSize: 11.5, fontWeight: 700, color: st.color, background: st.color + "1f", border: `1px solid ${st.color}44` }}>{st.label}</span>}
                     </div>
                     {splitItems
-                      ? <ItemTrackPicker it={it} canProd={canTrackProd} canPack={canTrackPack} onSet={(s, tr) => setItemStatus(it, s, tr)} onSetQty={(q, tr) => setItemQty(it, q, tr)} big />
+                      // setItemQty reads the in-flight ref, but only ever from this
+                      // onClick — never during render. The rule cannot see that.
+                      // eslint-disable-next-line react-hooks/refs
+                      ? <ItemTrackPicker it={it} canProd={canTrackProd} canPack={canTrackPack} onSet={(s, tr) => setItemStatus(it, s, tr)} onSetQty={(q, tr) => setItemQty(it, q, tr)} qtyBusy={qtyBusy} big />
                       : canMark && <StatusPicker value={st.k} onChange={(s) => setItemStatus(it, s)} big />}
                     {canAmend && <div style={{ marginTop: canMark ? 10 : 8 }}><Btn size="sm" variant="ghost" onClick={() => startAmend(it)}>Edit line</Btn></div>}
                   </div>
@@ -2149,7 +2177,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
                   <td style={{ padding: "8px 10px", color: C.text }}>{it.name}</td>
                   <td style={{ padding: "8px 10px", fontWeight: 700, color: C.text }}>{Math.round(it.quantity)}</td>
                   <td style={{ padding: "8px 10px", color: C.text3 }}>{it.unit}</td>
-                  <td style={{ padding: "8px 10px" }}>{splitItems ? <ItemTrackPicker it={it} canProd={canTrackProd} canPack={canTrackPack} onSet={(s, tr) => setItemStatus(it, s, tr)} onSetQty={(q, tr) => setItemQty(it, q, tr)} /> : canMark ? prog : pill}</td>
+                  <td style={{ padding: "8px 10px" }}>{splitItems ? <ItemTrackPicker it={it} canProd={canTrackProd} canPack={canTrackPack} onSet={(s, tr) => setItemStatus(it, s, tr)} onSetQty={(q, tr) => setItemQty(it, q, tr)} qtyBusy={qtyBusy} /> : canMark ? prog : pill}</td>
                   {canAmend && <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}><Btn size="sm" variant="ghost" onClick={() => startAmend(it)}>Edit</Btn></td>}
                 </tr>
               );})}
