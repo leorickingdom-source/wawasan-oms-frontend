@@ -141,7 +141,12 @@ function cartonDone(it, track) {
   const done = track === "packing" ? it.pack_qty : it.made_qty;
   const finished = track === "packing" ? itemPackDone(it) : itemProdDone(it);
   const total = Math.round(Number(it.quantity) || 0);
-  if (done == null) return finished ? total : 0;
+  // A line whose track is marked done has all of its cartons done, by definition — the
+  // server sets the counter to the full quantity when it writes that status. Trust the
+  // flag over the number so a line completed before this feature existed (counter still
+  // 0, migration backfill not yet run) reads as finished rather than untouched.
+  if (finished) return total;
+  if (done == null) return 0;
   return Math.min(total, Math.max(0, Math.round(Number(done) || 0)));
 }
 
