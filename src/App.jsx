@@ -124,6 +124,42 @@ const SPLIT_BOARD_ENABLED = true;
 // (it waits in Packing until the whole order is advanced to Ready for Delivery).
 function itemProdDone(it) { return !!(it && (it.made || it.status === "done")); }
 function itemPackDone(it) { return !!(it && (it.pack_made || it.pack_status === "done")); }
+// Cartons. A line carries a carton figure only when it is actually sold in cartons —
+// the stocklist runs 59 CTN against 57 UNIT and 18 PACK, so anything else has no honest
+// carton number and keeps the plain status display. made_qty / pack_qty are the
+// per-track counters; a line finished with the three buttons reports its full quantity,
+// so orders worked the previous way still read as complete.
+function isCartonLine(it) {
+  if (!it || String(it.unit || "").toUpperCase() !== "CTN" || !(Number(it.quantity) > 0)) return false;
+  // Only once the API actually sends the counters. Without this the wall would deploy
+  // ahead of the backend and report "0 / 45 CTN MADE" against a line that is part-built,
+  // which reads as no progress rather than as unknown progress.
+  return it.made_qty != null || it.pack_qty != null;
+}
+function cartonDone(it, track) {
+  if (!it) return 0;
+  const done = track === "packing" ? it.pack_qty : it.made_qty;
+  const finished = track === "packing" ? itemPackDone(it) : itemProdDone(it);
+  const total = Math.round(Number(it.quantity) || 0);
+  if (done == null) return finished ? total : 0;
+  return Math.min(total, Math.max(0, Math.round(Number(done) || 0)));
+}
+
+function orderCartons(o, stageKey) {
+  const track = stageKey === "packing" ? "packing" : "production";
+  const lines = (o && o._items) || (o && o.items) || null;
+  if (lines) {
+    const ctn = lines.filter(isCartonLine);
+    if (!ctn.length) return null;
+    const total = ctn.reduce((a, it) => a + Math.round(Number(it.quantity) || 0), 0);
+    const done = ctn.reduce((a, it) => a + cartonDone(it, track), 0);
+    return total > 0 ? { done: Math.min(done, total), total } : null;
+  }
+  const total = Math.round(Number(o && o.ctn_total) || 0);
+  if (!total) return null;
+  return { done: Math.min(Math.round(Number(o && o.ctn_done) || 0), total), total };
+}
+
 function itemPlace(it) {
   if (!itemProdDone(it)) return "production";
   if (!itemPackDone(it)) return "packing";
@@ -258,6 +294,11 @@ const ITEM_STATUS = {
 const ITEM_STATUS_ORDER = ["not_started", "in_progress", "done"];
 function itemStatusKey(it) { return it.status || (it.made ? "done" : "not_started"); }
 function itemStat(it) { return ITEM_STATUS[itemStatusKey(it)] || ITEM_STATUS.not_started; }
+function itemStatusKeyFor(it, track) {
+  if (track === "packing") return (it && it.pack_status) || (it && it.pack_made ? "done" : "not_started");
+  return (it && it.status) || (it && it.made ? "done" : "not_started");
+}
+function itemStatFor(it, track) { return ITEM_STATUS[itemStatusKeyFor(it, track)] || ITEM_STATUS.not_started; }
 function StatusPicker({ value, onChange, disabled, big, labels }) {
   return (
     <div style={{ display: big ? "flex" : "inline-flex", gap: big ? 8 : 4, flexWrap: "wrap", width: big ? "100%" : undefined }}>
@@ -285,7 +326,36 @@ function StatusPicker({ value, onChange, disabled, big, labels }) {
 // Split board — detail-modal picker that shows a line's Production track and its Packing
 // track side by side, so you can see which stage each line is in and set either. Packing
 // unlocks once the line is produced. (Single-track StatusPicker stays for the flag-off UI.)
-function ItemTrackPicker({ it, canProd, canPack, onSet, big }) {
+function CartonStepper({ it, track, disabled, onSetQty, big }) {
+  const total = Math.round(Number(it.quantity) || 0);
+  const done = cartonDone(it, track);
+  const left = Math.max(0, total - done);
+  const step = (d) => { const v = Math.min(total, Math.max(0, done + d)); if (v !== done) onSetQty(v, track); };
+  const btn = (label, d, on) => (
+    <button type="button" disabled={disabled || !on} onClick={() => step(d)}
+      title={d > 0 ? "One more carton done" : "One fewer carton done"}
+      style={{ width: big ? 44 : 30, height: big ? 40 : 28, flexShrink: 0, borderRadius: 8,
+        border: `1.5px solid ${disabled || !on ? C.border : C.border2}`, background: C.surface2,
+        color: disabled || !on ? C.text3 : C.text, fontSize: big ? 20 : 16, fontWeight: 800,
+        cursor: disabled || !on ? "default" : "pointer", lineHeight: 1 }}>{label}</button>
+  );
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: big ? 8 : 6, marginTop: 6 }}>
+      {btn("\u2212", -1, done > 0)}
+      <div style={{ flex: 1, minWidth: 0, textAlign: "center" }}>
+        <div style={{ fontFamily: MONO, fontSize: big ? 18 : 14, fontWeight: 800, color: C.text, lineHeight: 1.1 }}>
+          {done} / {total} <span style={{ fontSize: big ? 12 : 10, fontWeight: 700, color: C.text3 }}>CTN</span>
+        </div>
+        <div style={{ fontSize: big ? 11.5 : 10, fontWeight: 700, color: left > 0 ? C.accent2 : C.green, letterSpacing: 0.4 }}>
+          {left > 0 ? left + " LEFT" : "\u2713 DONE"}
+        </div>
+      </div>
+      {btn("+", 1, done < total)}
+    </div>
+  );
+}
+
+function ItemTrackPicker({ it, canProd, canPack, onSet, onSetQty, big }) {
   const prodVal = it.prod_status || (it.prod_made ? "done" : "not_started");
   const packVal = it.pack_status || (it.pack_made ? "done" : "not_started");
   const produced = it.prod_made || it.prod_status === "done";
@@ -294,10 +364,12 @@ function ItemTrackPicker({ it, canProd, canPack, onSet, big }) {
       <div>
         <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5, color: STAGES.production.color, marginBottom: 4 }}>PRODUCTION</div>
         <StatusPicker value={prodVal} disabled={!canProd} onChange={(s) => onSet(s, "production")} big={big} />
+        {onSetQty && isCartonLine(it) && <CartonStepper it={it} track="production" disabled={!canProd} onSetQty={onSetQty} big={big} />}
       </div>
       <div style={{ opacity: produced ? 1 : 0.5 }}>
         <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.5, color: STAGES.packing.color, marginBottom: 4 }}>PACKING{!produced && <span style={{ color: C.text3, fontWeight: 600, letterSpacing: 0 }}> · after production</span>}</div>
         <StatusPicker value={packVal} disabled={!canPack || !produced} onChange={(s) => onSet(s, "packing")} big={big} />
+        {onSetQty && isCartonLine(it) && <CartonStepper it={it} track="packing" disabled={!canPack || !produced} onSetQty={onSetQty} big={big} />}
       </div>
     </div>
   );
@@ -1319,6 +1391,18 @@ function FloorColumn({ s, cfg, total, shown, more, owned, grow }) {
                 <span style={{ color: C.text2 }}>{fmtDay(o.required_delivery_date)}</span> · {cd.text}
               </div>
               {(s === "production" || s === "packing") && subTotal > 0 && (() => {
+                const ctn = orderCartons(o, s);
+                if (ctn) {
+                  const left = ctn.total - ctn.done, full = left <= 0;
+                  const p = Math.round((ctn.done / ctn.total) * 100);
+                  return (
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ fontSize: full ? 25 : 34, fontWeight: 800, color: full ? C.green : C.accent2, lineHeight: 1.05, letterSpacing: -0.5 }}>{full ? "ALL CTN DONE" : `${left} CTN LEFT`}</div>
+                      <div style={{ fontSize: 17, fontWeight: 700, color: C.text3, letterSpacing: 0.5, margin: "2px 0 7px" }}>{ctn.done} / {ctn.total} CTN {s === "packing" ? "PACKED" : "MADE"}</div>
+                      <div style={{ height: 8, background: C.surface2, borderRadius: 4, overflow: "hidden" }}><div style={{ height: "100%", width: `${p}%`, background: full ? C.green : C.accent }} /></div>
+                    </div>
+                  );
+                }
                 const done = subDone, total = subTotal, full = total > 0 && done >= total;
                 const p = total > 0 ? Math.round((done / total) * 100) : 0;
                 return (
@@ -1345,8 +1429,11 @@ function FloorColumn({ s, cfg, total, shown, more, owned, grow }) {
 // `narrow` is the twin layout, where two of these share the wall.
 function FloorSpotlight({ spot, detail, idx, total, narrow }) {
   const z = narrow
-    ? { w: 470, pad: "18px 18px", inv: 64, invGap: "8px 0 10px", chip: 24, row: "12px 10px", gap: 10, dotTop: 9, name: 26, sku: 17, qty: 23, unit: 14, st: 17, stMin: 88 }
-    : { w: 500, pad: "20px 22px", inv: 78, invGap: "10px 0 12px", chip: 28, row: "14px 14px", gap: 13, dotTop: 12, name: 30, sku: 19, qty: 27, unit: 15, st: 20, stMin: 104 };
+    ? { w: 470, pad: "18px 18px", inv: 64, invGap: "8px 0 10px", chip: 24, row: "12px 10px", gap: 10, dotTop: 9, name: 26, sku: 15, qty: 23, unit: 14, st: 17, stMin: 88, left: 24, ctnq: 21 }
+    : { w: 500, pad: "20px 22px", inv: 78, invGap: "10px 0 12px", chip: 28, row: "14px 14px", gap: 13, dotTop: 12, name: 30, sku: 17, qty: 27, unit: 15, st: 20, stMin: 104, left: 28, ctnq: 24 };
+  // Which track's cartons this panel reports: a Packing screen counts packed, anything
+  // else counts produced.
+  const track = spot && spot.stage === "packing" ? "packing" : "production";
   const stage = spot ? (STAGE_LABELS[spot.stage] || { label: spot.stage, color: C.accent }) : null;
   const cd = spot ? countdown(spot.required_delivery_date) : null;
   const dtag = spot ? deliveryTag(spot) : null;
@@ -1371,8 +1458,8 @@ function FloorSpotlight({ spot, detail, idx, total, narrow }) {
           {detail && detail.id === spot.id && (detail.items || []).length > 0 && (() => {
             const its = detail.items || [];
             const n = its.length;
-            const done = its.filter((it) => itemStatusKey(it) === "done").length;
-            const making = its.filter((it) => itemStatusKey(it) === "in_progress").length;
+            const done = its.filter((it) => itemStatusKeyFor(it, track) === "done").length;
+            const making = its.filter((it) => itemStatusKeyFor(it, track) === "in_progress").length;
             const todo = n - done - making;
             const p = n > 0 ? Math.round((done / n) * 100) : 0;
             const chip = (label, v, color) => (
@@ -1392,19 +1479,41 @@ function FloorSpotlight({ spot, detail, idx, total, narrow }) {
           <div style={{ flex: 1, overflowY: "auto" }}>
             {detail && detail.id === spot.id
               ? (detail.items || []).map((it) => {
-                const st = itemStat(it);
+                const st = itemStatFor(it, track);
                 const dot = st.k === "done" ? C.green : st.k === "in_progress" ? C.packing : C.accent;
                 const isDone = st.k === "done";
+                // Product names run 40-60 characters and share one shape:
+                // "PRODUCT (VARIANT) - PACK SPEC". The product takes the large type and may
+                // wrap to two lines; the pack spec drops onto the STK reference line.
+                const dash = (it.name || "").indexOf(" - ");
+                const head = dash > 0 ? it.name.slice(0, dash) : (it.name || "");
+                const spec = dash > 0 ? it.name.slice(dash + 3) : "";
+                const ref = it.sku + (spec ? " \u00b7 " + spec : "");
+                const carton = isCartonLine(it);
+                const cTotal = Math.round(Number(it.quantity) || 0);
+                const cDone = carton ? cartonDone(it, track) : 0;
+                const cLeft = cTotal - cDone;
+                const finished = carton ? cLeft <= 0 : isDone;
+                const tone = finished ? C.green : dot;
                 return (
-                  <div key={it.id} style={{ display: "flex", alignItems: "flex-start", gap: z.gap, padding: z.row, borderBottom: `1px solid ${C.border}`, background: isDone ? C.green + "1f" : "transparent", borderLeft: `5px solid ${isDone ? C.green : "transparent"}` }}>
-                    <span style={{ width: 13, height: 13, borderRadius: "50%", background: dot, boxShadow: `0 0 8px ${dot}`, flexShrink: 0, marginTop: z.dotTop }} />
+                  <div key={it.id} style={{ display: "flex", alignItems: "flex-start", gap: z.gap, padding: z.row, borderBottom: `1px solid ${C.border}`, background: finished ? C.green + "1f" : "transparent", borderLeft: `5px solid ${finished ? C.green : "transparent"}` }}>
+                    <span style={{ width: 13, height: 13, borderRadius: "50%", background: tone, boxShadow: `0 0 8px ${tone}`, flexShrink: 0, marginTop: z.dotTop }} />
                     <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
-                      <div style={{ fontSize: z.name, fontWeight: 700, lineHeight: 1.15, color: isDone ? C.green : C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
-                      <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
-                        <span style={{ flex: 1, minWidth: 0, fontFamily: MONO, fontSize: z.sku, fontWeight: 700, letterSpacing: 0.5, color: C.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.sku}</span>
-                        <span style={{ flexShrink: 0, fontSize: z.qty, fontWeight: 800, color: C.text }}>{Math.round(it.quantity)}<span style={{ fontSize: z.unit, fontWeight: 600, color: C.text3 }}> {it.unit || "pcs"}</span></span>
-                        <span style={{ flexShrink: 0, fontSize: z.st, fontWeight: 800, color: dot, textTransform: "uppercase", letterSpacing: 0.5, minWidth: z.stMin, textAlign: "right" }}>{isDone ? "✓ " + st.label : st.label}</span>
-                      </div>
+                      <div style={{ fontSize: z.name, fontWeight: 700, lineHeight: 1.12, color: finished ? C.green : C.text, overflow: "hidden", display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 }}>{head}</div>
+                      {carton ? (<>
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
+                          <span style={{ flexShrink: 0, fontSize: z.left, fontWeight: 800, color: finished ? C.green : C.accent2, whiteSpace: "nowrap" }}>{finished ? "✓ DONE" : cLeft + " CTN LEFT"}</span>
+                          <span style={{ flexShrink: 0, fontSize: z.ctnq, fontWeight: 700, color: C.text, whiteSpace: "nowrap" }}>{cDone} / {cTotal}<span style={{ fontSize: z.unit, fontWeight: 600, color: C.text3 }}> CTN</span></span>
+                          {!finished && <span style={{ marginLeft: "auto", flexShrink: 0, fontSize: z.st, fontWeight: 800, color: dot, textTransform: "uppercase", letterSpacing: 0.5, textAlign: "right" }}>{st.short}</span>}
+                        </div>
+                        <div style={{ fontFamily: MONO, fontSize: z.sku, fontWeight: 600, color: C.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ref}</div>
+                      </>) : (
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 14 }}>
+                          <span style={{ flex: 1, minWidth: 0, fontFamily: MONO, fontSize: z.sku, fontWeight: 700, letterSpacing: 0.5, color: C.text3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ref}</span>
+                          <span style={{ flexShrink: 0, fontSize: z.qty, fontWeight: 800, color: C.text }}>{cTotal}<span style={{ fontSize: z.unit, fontWeight: 600, color: C.text3 }}> {it.unit || "pcs"}</span></span>
+                          <span style={{ flexShrink: 0, fontSize: z.st, fontWeight: 800, color: dot, textTransform: "uppercase", letterSpacing: 0.5, minWidth: z.stMin, textAlign: "right" }}>{isDone ? "✓ " + st.short : st.short}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -1491,7 +1600,10 @@ function FloorDisplay({ onExit }) {
   // first, then cap to what fits and roll the rest into "＋N more". Auto-scroll and
   // shrink-to-fit both read badly from a distance; the cropped ones are always the
   // least urgent, and the spotlight still cycles every order in full.
-  const FLOOR_CAP = lay.cap;
+  // Carton cards are two lines taller than the plain tally, so a column showing them
+  // holds one card fewer. Measured against the 1080-high wall.
+  const anyCartons = !!(board && (lay.stages || []).some((st) => (board[st] || []).some((o) => !!orderCartons(o, st))));
+  const FLOOR_CAP = Math.max(1, lay.cap - (anyCartons ? 1 : 0));
   const floorRank = (o) => { const n = countdown(o.required_delivery_date).n; const nn = (n == null ? 9999 : n); return [nn < 0 ? 0 : 1, o.priority === "urgent" ? 0 : 1, nn]; };
   const cmpRank = (a, b) => { const x = floorRank(a), y = floorRank(b); return (x[0] - y[0]) || (x[1] - y[1]) || (x[2] - y[2]); };
   const floorCols = cols.map((s) => {
@@ -1682,6 +1794,24 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
     try { await api("PATCH", `/orders/${orderId}/items/${it.id}`, track ? { status, track } : { status }); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); setOrder(prev); }
   }
+  // Record cartons finished on one track. The server derives the line's status from the
+  // count, so the optimistic copy sets both and cannot drift from what comes back.
+  async function setItemQty(it, qty, track) {
+    const total = Math.round(Number(it.quantity) || 0);
+    const doneQty = Math.min(total, Math.max(0, Math.round(Number(qty) || 0)));
+    if (doneQty === cartonDone(it, track)) return;
+    const status = doneQty <= 0 ? "not_started" : (doneQty >= total && total > 0 ? "done" : "in_progress");
+    const prev = order;
+    setOrder((o) => (o && o.items) ? { ...o, items: o.items.map((x) => x.id === it.id ? {
+      ...x,
+      ...(track === "packing"
+        ? { pack_qty: doneQty, pack_status: status, pack_made: status === "done" }
+        : { made_qty: doneQty, prod_status: status, prod_made: status === "done", status, made: status === "done" }),
+    } : x) } : o);
+    try { await api("PATCH", `/orders/${orderId}/items/${it.id}`, { qty_done: doneQty, track: track || "production" }); onUpdated && onUpdated(); }
+    catch (e) { alert(e.message); setOrder(prev); }
+  }
+
   async function setFlag(body) {
     try { await api("PATCH", `/orders/${orderId}/flags`, body); await load(); onUpdated && onUpdated(); }
     catch (e) { alert(e.message); }
@@ -1985,7 +2115,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
                       {!canMark && !splitItems && <span style={{ flexShrink: 0, alignSelf: "flex-start", display: "inline-block", padding: "3px 9px", borderRadius: 20, fontSize: 11.5, fontWeight: 700, color: st.color, background: st.color + "1f", border: `1px solid ${st.color}44` }}>{st.label}</span>}
                     </div>
                     {splitItems
-                      ? <ItemTrackPicker it={it} canProd={canTrackProd} canPack={canTrackPack} onSet={(s, tr) => setItemStatus(it, s, tr)} big />
+                      ? <ItemTrackPicker it={it} canProd={canTrackProd} canPack={canTrackPack} onSet={(s, tr) => setItemStatus(it, s, tr)} onSetQty={(q, tr) => setItemQty(it, q, tr)} big />
                       : canMark && <StatusPicker value={st.k} onChange={(s) => setItemStatus(it, s)} big />}
                     {canAmend && <div style={{ marginTop: canMark ? 10 : 8 }}><Btn size="sm" variant="ghost" onClick={() => startAmend(it)}>Edit line</Btn></div>}
                   </div>
@@ -2019,7 +2149,7 @@ function OrderDetail({ orderId, user, onUpdated, onClose, changes }) {
                   <td style={{ padding: "8px 10px", color: C.text }}>{it.name}</td>
                   <td style={{ padding: "8px 10px", fontWeight: 700, color: C.text }}>{Math.round(it.quantity)}</td>
                   <td style={{ padding: "8px 10px", color: C.text3 }}>{it.unit}</td>
-                  <td style={{ padding: "8px 10px" }}>{splitItems ? <ItemTrackPicker it={it} canProd={canTrackProd} canPack={canTrackPack} onSet={(s, tr) => setItemStatus(it, s, tr)} /> : canMark ? prog : pill}</td>
+                  <td style={{ padding: "8px 10px" }}>{splitItems ? <ItemTrackPicker it={it} canProd={canTrackProd} canPack={canTrackPack} onSet={(s, tr) => setItemStatus(it, s, tr)} onSetQty={(q, tr) => setItemQty(it, q, tr)} /> : canMark ? prog : pill}</td>
                   {canAmend && <td style={{ padding: "8px 10px", whiteSpace: "nowrap" }}><Btn size="sm" variant="ghost" onClick={() => startAmend(it)}>Edit</Btn></td>}
                 </tr>
               );})}
